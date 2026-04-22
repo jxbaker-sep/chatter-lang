@@ -1,0 +1,6 @@
+function sum3 takes number a with number b with number c is
+    return a + b + c
+end function
+
+sum3 1 with 2 with 3
+say it

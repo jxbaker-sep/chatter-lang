@@ -1,8 +1,8 @@
-function double(number a) is
+function double takes number a is
     return a * 2
 end
 
-function raise(number a, number to) is
+function raise takes number a to number to is
     return a ** to
 end
 

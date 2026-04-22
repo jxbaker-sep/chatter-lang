@@ -1,0 +1,16 @@
+function factorial takes number n is
+    var result is 1
+    repeat with i from 2 to n 
+        multiply result by i
+    end repeat
+    return result
+end function
+
+factorial 5
+say it
+factorial 4
+say it
+factorial 3
+say it
+factorial 2
+say it

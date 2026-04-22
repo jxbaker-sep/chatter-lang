@@ -30,7 +30,7 @@ describe('Compiler', () => {
   });
 
   test('compiles function declaration with correct params and instructions', () => {
-    const bc = compileSource('function double(number a) is\n    return a * 2\nend');
+    const bc = compileSource('function double takes number a is\n    return a * 2\nend');
     expect(bc.functions.has('double')).toBe(true);
     const fn = bc.functions.get('double')!;
     expect(fn.params).toEqual(['a']);
@@ -41,7 +41,7 @@ describe('Compiler', () => {
   });
 
   test('compiles call with positional arg', () => {
-    const src = 'function double(number a) is\n    return a * 2\nend\ndouble 5';
+    const src = 'function double takes number a is\n    return a * 2\nend\ndouble 5';
     const bc = compileSource(src);
     const pushIdx = bc.main.findIndex(i => i.op === 'PUSH_INT' && (i as any).value === 5);
     expect(pushIdx).toBeGreaterThanOrEqual(0);
@@ -49,7 +49,7 @@ describe('Compiler', () => {
   });
 
   test('emits STORE_IT after a call statement', () => {
-    const src = 'function double(number a) is\n    return a * 2\nend\ndouble 5';
+    const src = 'function double takes number a is\n    return a * 2\nend\ndouble 5';
     const bc = compileSource(src);
     const callIdx = bc.main.findIndex(i => i.op === 'CALL');
     expect(bc.main[callIdx + 1]).toMatchObject({ op: 'STORE_IT' });
@@ -57,7 +57,7 @@ describe('Compiler', () => {
 
   test('reorders named args to match parameter declaration order', () => {
     const src = [
-      'function raise(number a, number to) is',
+      'function raise takes number a to number to is',
       '    return a ** to',
       'end',
       'raise 5 to 3',
@@ -71,15 +71,62 @@ describe('Compiler', () => {
     expect(bc.main[callIdx]).toMatchObject({ op: 'CALL', name: 'raise', argCount: 2 });
   });
 
+  test('duplicate-labeled params consume call args in declaration order', () => {
+    const src = [
+      'function sum3 takes number a with number b with number c is',
+      '    return a + b + c',
+      'end',
+      'sum3 1 with 2 with 3',
+    ].join('\n');
+    const bc = compileSource(src);
+    const callIdx = bc.main.findIndex(i => i.op === 'CALL' && (i as any).name === 'sum3');
+    // args pushed in param order: a=1, b=2, c=3
+    expect(bc.main[callIdx - 3]).toMatchObject({ op: 'PUSH_INT', value: 1 });
+    expect(bc.main[callIdx - 2]).toMatchObject({ op: 'PUSH_INT', value: 2 });
+    expect(bc.main[callIdx - 1]).toMatchObject({ op: 'PUSH_INT', value: 3 });
+    expect(bc.main[callIdx]).toMatchObject({ op: 'CALL', name: 'sum3', argCount: 3 });
+  });
+
+  test('too many args with the same label is a CompileError', () => {
+    const src = [
+      'function pair takes number a with number b is',
+      '    return a + b',
+      'end',
+      'pair 1 with 2 with 3',
+    ].join('\n');
+    expect(() => compileSource(src)).toThrow(/label 'with'/);
+  });
+
+  test('unknown label is a CompileError', () => {
+    const src = [
+      'function raise takes number a to number to is',
+      '    return a ** to',
+      'end',
+      'raise 2 by 3',
+    ].join('\n');
+    // `by` is a reserved stop keyword, so this actually fails at parse time.
+    expect(() => compileSource(src)).toThrow();
+  });
+
+  test('missing required arg is a CompileError', () => {
+    const src = [
+      'function raise takes number a to number to is',
+      '    return a ** to',
+      'end',
+      'raise 2',
+    ].join('\n');
+    expect(() => compileSource(src)).toThrow(/Missing argument/);
+  });
+
   test('compiles exponentiation to POW', () => {
-    const src = 'function pow(number a, number b) is\n    return a ** b\nend';
+    const src = 'function pow takes number a b number b is\n    return a ** b\nend';
     const bc = compileSource(src);
     expect(bc.functions.get('pow')!.instructions).toContainEqual({ op: 'POW' });
   });
 
   test('function body uses LOAD_IT for `it`', () => {
     const src = [
-      'function quadruple(number a) is',
+      'function quadruple takes number a is',
       '    double a',
       '    double it',
       '    return it',
@@ -96,7 +143,7 @@ describe('Compiler', () => {
   });
 
   test('throws CompileError when param shadows outer binding', () => {
-    const src = 'set foo to 5\nfunction f(number foo) is\n    return foo\nend';
+    const src = 'set foo to 5\nfunction f takes number foo is\n    return foo\nend';
     expect(() => compileSource(src)).toThrow(CompileError);
   });
 
@@ -144,6 +191,9 @@ describe('Compiler', () => {
       { op: 'LOAD', name: 'a' },
       { op: 'PUSH_INT', value: 2 },
       { op: 'MUL' },
+      { op: 'RETURN' },
+      // Implicit fallthrough-return so void-style calls don't underflow STORE_IT
+      { op: 'PUSH_INT', value: 0 },
       { op: 'RETURN' },
     ]);
   });
@@ -198,7 +248,7 @@ describe('Compiler', () => {
 
     test('loop variable shadowing a param raises CompileError', () => {
       const src = [
-        'function f(number i) is',
+        'function f takes number i is',
         '    repeat with i from 1 to 3',
         '        say i',
         '    end repeat',
@@ -314,11 +364,11 @@ describe('Compiler', () => {
 
     test('var inside a function does not leak to siblings; sibling function can reuse the name', () => {
       const src = [
-        'function f() is',
+        'function f is',
         '    var x is 1',
         '    return x',
         'end',
-        'function g() is',
+        'function g is',
         '    var x is 2',
         '    return x',
         'end',
@@ -329,7 +379,7 @@ describe('Compiler', () => {
     test('var shadowing an outer (top-level) set is a compile error inside a function', () => {
       const src = [
         'set x to 1',
-        'function f() is',
+        'function f is',
         '    var x is 2',
         '    return x',
         'end',
@@ -348,7 +398,7 @@ describe('Compiler', () => {
 
     test('change on a function parameter is a compile error', () => {
       const src = [
-        'function f(number a) is',
+        'function f takes number a is',
         '    change a to 99',
         '    return a',
         'end',
@@ -359,11 +409,11 @@ describe('Compiler', () => {
     test('var declared in outer function is not visible to inner change (function-local)', () => {
       // f has var x; g is a sibling that tries to change x — should fail.
       const src = [
-        'function f() is',
+        'function f is',
         '    var x is 1',
         '    return x',
         'end',
-        'function g() is',
+        'function g is',
         '    change x to 5',
         '    return x',
         'end',

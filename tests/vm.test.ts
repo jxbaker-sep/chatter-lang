@@ -134,7 +134,7 @@ describe('VM', () => {
   describe('it scoping', () => {
     test('it is updated after a call statement', () => {
       const src = [
-        'function double(number a) is',
+        'function double takes number a is',
         '    return a * 2',
         'end',
         'double 5',
@@ -145,12 +145,12 @@ describe('VM', () => {
 
     test('outer it is unchanged after function call', () => {
       const src = [
-        'function double(number a) is',
+        'function double takes number a is',
         '    return a * 2',
         'end',
         'double 5',
         // it = 10 in outer scope',
-        'function quadruple(number a) is',
+        'function quadruple takes number a is',
         '    double a',
         '    double it',
         '    return it',
@@ -175,10 +175,10 @@ describe('VM', () => {
       // After double foo (=10), call quadruple which modifies its own it
       // outer it should still be 10 before set baz to it
       const src = [
-        'function double(number a) is',
+        'function double takes number a is',
         '    return a * 2',
         'end',
-        'function quadruple(number a) is',
+        'function quadruple takes number a is',
         '    double a',
         '    double it',
         '    return it',
@@ -200,7 +200,7 @@ describe('VM', () => {
   describe('Function calls', () => {
     test('positional arg', () => {
       const src = [
-        'function double(number a) is',
+        'function double takes number a is',
         '    return a * 2',
         'end',
         'double 7',
@@ -211,7 +211,7 @@ describe('VM', () => {
 
     test('named arg (second param)', () => {
       const src = [
-        'function raise(number a, number to) is',
+        'function raise takes number a to number to is',
         '    return a ** to',
         'end',
         'raise 2 to 8',
@@ -220,12 +220,35 @@ describe('VM', () => {
       expect(runSource(src)).toEqual(['256']);
     });
 
+    test('duplicate labels bind by declaration order at the VM level', () => {
+      const src = [
+        'function sub3 takes number a with number b with number c is',
+        '    return a - b - c',
+        'end',
+        'sub3 100 with 10 with 1',
+        'say it',
+      ].join('\n');
+      // (100 - 10) - 1 = 89 if bound in order; any other order would differ.
+      expect(runSource(src)).toEqual(['89']);
+    });
+
+    test('zero-arg function is callable', () => {
+      const src = [
+        'function greet is',
+        '    return 7',
+        'end',
+        'greet',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['7']);
+    });
+
     test('nested calls: quadruple via double', () => {
       const src = [
-        'function double(number a) is',
+        'function double takes number a is',
         '    return a * 2',
         'end',
-        'function quadruple(number a) is',
+        'function quadruple takes number a is',
         '    double a',
         '    double it',
         '    return it',
@@ -338,7 +361,7 @@ describe('VM', () => {
 
     test('say does NOT update it', () => {
       const src = [
-        'function double(number a) is',
+        'function double takes number a is',
         '    return a * 2',
         'end',
         'double 5',
@@ -493,7 +516,7 @@ describe('VM', () => {
 
     test('var is function-local (each call reinitialises)', () => {
       const src = [
-        'function f() is',
+        'function f is',
         '    var x is 1',
         '    add 1 to x',
         '    return x',
@@ -508,7 +531,7 @@ describe('VM', () => {
 
     test('var/change/sugar do NOT update `it`', () => {
       const src = [
-        'function f() is',
+        'function f is',
         '    return 7',
         'end',
         'f',
@@ -523,7 +546,7 @@ describe('VM', () => {
 
     test('factorial using var + repeat range', () => {
       const src = [
-        'function fact(number n) is',
+        'function fact takes number n is',
         '    var result is 1',
         '    repeat with i from 2 to n',
         '        multiply result by i',

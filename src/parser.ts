@@ -1,7 +1,7 @@
 import { Token, TokenType } from './lexer';
 import {
   Program, Statement, Expression,
-  SayStatement, SetStatement, FunctionDeclaration,
+  SayStatement, SetStatement, FunctionDeclaration, FunctionParam,
   CallStatement, ReturnStatement,
   BinaryExpression, UnaryExpression, IdentifierExpression,
   NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
@@ -16,12 +16,13 @@ export class ParseError extends Error {
   }
 }
 
-// Keywords that may NOT be used as a named-argument label in a call statement.
+// Keywords that may NOT be used as a named-argument label in a call statement
+// OR as a parameter separator label / body name in a function declaration.
 // These start new statements or form expression operators.
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
-  'true', 'false', 'is', 'say', 'set', 'function', 'return',
-  'repeat', 'times', 'with', 'from', 'while',
+  'true', 'false', 'is', 'say', 'set', 'function', 'takes', 'return',
+  'repeat', 'times', 'while',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by',
 ]);
@@ -169,25 +170,88 @@ export function parse(tokens: Token[]): Program {
   function parseFunctionDeclaration(): FunctionDeclaration {
     consume('KEYWORD', 'function');
     const nameTok = consume('IDENT');
-    consume('LPAREN');
 
-    const params: Array<{ paramType: string; name: string }> = [];
-    while (peek().type !== 'RPAREN') {
-      const typeTok = consume('TYPE');
-      // Param names may coincide with keywords (e.g. `to`); accept both IDENT and KEYWORD
-      const paramNameTok = peek();
-      if (paramNameTok.type !== 'IDENT' && paramNameTok.type !== 'KEYWORD') {
-        throw new ParseError(
-          `Expected parameter name at line ${paramNameTok.line}, got ${paramNameTok.type} '${paramNameTok.value}'`,
-          paramNameTok,
-        );
+    // A valid label / body-name token is IDENT or a non-stop KEYWORD.
+    const isValidParamWord = (tok: Token): boolean => {
+      if (tok.type === 'IDENT') return true;
+      if (tok.type === 'KEYWORD' && !NAMED_ARG_STOP_KEYWORDS.has(tok.value)) return true;
+      return false;
+    };
+
+    const consumeParamBodyName = (): Token => {
+      const tok = peek();
+      if (tok.type === 'IDENT') { advance(); return tok; }
+      if (tok.type === 'KEYWORD') {
+        if (NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
+          throw new ParseError(
+            `Cannot use reserved keyword '${tok.value}' as parameter name at line ${tok.line}`,
+            tok,
+          );
+        }
+        advance();
+        return tok;
       }
-      advance();
-      params.push({ paramType: typeTok.value, name: paramNameTok.value });
-      if (peek().type === 'COMMA') advance();
+      throw new ParseError(
+        `Expected parameter name at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+        tok,
+      );
+    };
+
+    const params: FunctionParam[] = [];
+
+    // Reject the legacy paren form with an explicit error mentioning `takes`.
+    if (peek().type === 'LPAREN') {
+      throw new ParseError(
+        `Function parameters use the 'takes' form now; parentheses are no longer allowed (line ${peek().line})`,
+        peek(),
+      );
     }
 
-    consume('RPAREN');
+    if (peek().type === 'KEYWORD' && peek().value === 'takes') {
+      advance(); // consume `takes`
+
+      // First param: TYPE IDENT, no label.
+      const t0 = consume('TYPE');
+      const n0 = consumeParamBodyName();
+      params.push({ paramType: t0.value, name: n0.value, label: null });
+
+      // Subsequent params: LABEL TYPE IDENT
+      while (true) {
+        const next = peek();
+        // Stop at `is` (start of body).
+        if (next.type === 'KEYWORD' && next.value === 'is') break;
+        if (!isValidParamWord(next)) {
+          // Produce a targeted error for stop keywords used where a label is expected.
+          if (next.type === 'KEYWORD' && NAMED_ARG_STOP_KEYWORDS.has(next.value)) {
+            throw new ParseError(
+              `Cannot use reserved keyword '${next.value}' as a parameter label at line ${next.line}`,
+              next,
+            );
+          }
+          throw new ParseError(
+            `Expected parameter label or 'is' at line ${next.line}, got ${next.type} '${next.value}'`,
+            next,
+          );
+        }
+        const labelTok = advance();
+        const tN = consume('TYPE');
+        const nN = consumeParamBodyName();
+        params.push({ paramType: tN.value, name: nN.value, label: labelTok.value });
+      }
+    }
+
+    // Enforce body-name uniqueness.
+    const seen = new Set<string>();
+    for (const p of params) {
+      if (seen.has(p.name)) {
+        throw new ParseError(
+          `Duplicate parameter name '${p.name}' in function '${nameTok.value}' at line ${nameTok.line}`,
+          nameTok,
+        );
+      }
+      seen.add(p.name);
+    }
+
     consume('KEYWORD', 'is');
     consumeNewline();
     consume('INDENT');

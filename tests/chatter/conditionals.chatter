@@ -65,7 +65,7 @@ else
 end
 
 # if inside function body
-function describe(number n) is
+function describe takes number n is
     if n is 0
         return "zero"
     else if n is 1
@@ -94,7 +94,7 @@ if p is 5 and (q is 0 or q is 6)
 end
 
 # boolean param
-function negate(boolean v) is
+function negate takes boolean v is
     if v
         return false
     else
@@ -108,7 +108,7 @@ negate false
 say it
 
 # string param
-function greet(string name) is
+function greet takes string name is
     if name is "world"
         return "hello world"
     else

@@ -26,7 +26,7 @@ type Bindings = Map<string, BindingInfo>;
 
 class Compiler {
   private functions = new Map<string, FunctionDef>();
-  private functionSignatures = new Map<string, string[]>();
+  private functionSignatures = new Map<string, Array<{ name: string; label: string | null }>>();
   private outerBindings = new Set<string>();
   private topLevelBindings: Bindings | null = null;
   private tempCounter = 0;
@@ -39,7 +39,10 @@ class Compiler {
     // First pass: collect function signatures and outer bindings
     for (const stmt of program.body) {
       if (stmt.type === 'FunctionDeclaration') {
-        this.functionSignatures.set(stmt.name, stmt.params.map(p => p.name));
+        this.functionSignatures.set(
+          stmt.name,
+          stmt.params.map(p => ({ name: p.name, label: p.label })),
+        );
       }
       if (stmt.type === 'SetStatement' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
@@ -223,6 +226,11 @@ class Compiler {
     for (const bodyStmt of stmt.body) {
       this.compileStatement(bodyStmt, instructions, funcBindings);
     }
+    // Implicit return at the end of the function body so calls to functions
+    // that fall off the end (e.g. no explicit `return`) still leave a value
+    // on the stack for the caller's STORE_IT.
+    instructions.push({ op: 'PUSH_INT', value: 0 });
+    instructions.push({ op: 'RETURN' });
   }
 
   private compileCallStmt(
@@ -230,31 +238,61 @@ class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
-    const params = this.functionSignatures.get(stmt.name);
+    const sig = this.functionSignatures.get(stmt.name);
 
-    if (params !== undefined) {
-      const argMap = new Map<string, Expression>();
+    if (sig !== undefined) {
+      const bound: Array<Expression | undefined> = new Array(sig.length).fill(undefined);
+      let positionalUsed = false;
+
       for (const arg of stmt.args) {
         if (arg.name === null) {
-          if (params.length > 0) {
-            argMap.set(params[0], arg.value);
+          if (positionalUsed) {
+            throw new CompileError(
+              `Multiple positional arguments in call to '${stmt.name}'`,
+            );
           }
+          if (sig.length === 0) {
+            throw new CompileError(
+              `Function '${stmt.name}' takes no arguments`,
+            );
+          }
+          bound[0] = arg.value;
+          positionalUsed = true;
         } else {
-          argMap.set(arg.name, arg.value);
+          // Find the first unbound param whose label matches this argument name.
+          // (Duplicate labels bind in declaration order.)
+          let idx = -1;
+          for (let i = 0; i < sig.length; i++) {
+            if (bound[i] === undefined && sig[i].label === arg.name) {
+              idx = i;
+              break;
+            }
+          }
+          if (idx === -1) {
+            const anyMatch = sig.some(p => p.label === arg.name);
+            if (anyMatch) {
+              throw new CompileError(
+                `Too many arguments with label '${arg.name}' in call to '${stmt.name}'`,
+              );
+            }
+            throw new CompileError(
+              `Unknown argument label '${arg.name}' in call to '${stmt.name}'`,
+            );
+          }
+          bound[idx] = arg.value;
         }
       }
 
-      for (const param of params) {
-        const val = argMap.get(param);
-        if (val === undefined) {
+      for (let i = 0; i < sig.length; i++) {
+        if (bound[i] === undefined) {
           throw new CompileError(
-            `Missing argument for parameter '${param}' in call to '${stmt.name}'`,
+            `Missing argument for parameter '${sig[i].name}' in call to '${stmt.name}'`,
           );
         }
-        this.compileExpr(val, out, bindings);
+        this.compileExpr(bound[i]!, out, bindings);
       }
 
-      out.push({ op: 'CALL', name: stmt.name, argCount: params.length });
+      out.push({ op: 'CALL', name: stmt.name, argCount: sig.length });
     } else {
       for (const arg of stmt.args) {
         this.compileExpr(arg.value, out, bindings);

@@ -55,10 +55,16 @@ export interface SetStatement {
   value: Expression;
 }
 
+export interface FunctionParam {
+  paramType: string;
+  name: string;
+  label: string | null;  // null for first param; non-null for each subsequent param
+}
+
 export interface FunctionDeclaration {
   type: 'FunctionDeclaration';
   name: string;
-  params: Array<{ paramType: string; name: string }>;
+  params: FunctionParam[];
   body: Statement[];
 }
 

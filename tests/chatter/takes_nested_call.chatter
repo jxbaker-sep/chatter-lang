@@ -1,0 +1,11 @@
+function raise takes number base to number exponent is
+    return base ** exponent
+end function
+
+function cube takes number n is
+    raise n to 3
+    return it
+end function
+
+cube 4
+say it

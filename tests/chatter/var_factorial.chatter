@@ -1,4 +1,4 @@
-function fact(number n) is
+function fact takes number n is
     var result is 1
     repeat with i from 2 to n
         multiply result by i

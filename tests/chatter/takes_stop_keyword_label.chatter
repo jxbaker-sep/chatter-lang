@@ -1,0 +1,3 @@
+function bad takes number a end number b is
+    return a
+end function

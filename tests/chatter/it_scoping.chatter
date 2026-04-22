@@ -1,8 +1,8 @@
-function double(number a) is
+function double takes number a is
     return a * 2
 end
 
-function quadruple(number a) is
+function quadruple takes number a is
     double a
     double it
     return it

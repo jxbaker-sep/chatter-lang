@@ -28,11 +28,11 @@ describe('Parser', () => {
   });
 
   test('parses function declaration with single param', () => {
-    const ast = parseSource('function double(number a) is\n    return a * 2\nend');
+    const ast = parseSource('function double takes number a is\n    return a * 2\nend');
     expect(ast.body[0]).toMatchObject({
       type: 'FunctionDeclaration',
       name: 'double',
-      params: [{ paramType: 'number', name: 'a' }],
+      params: [{ paramType: 'number', name: 'a', label: null }],
       body: [{
         type: 'ReturnStatement',
         value: {
@@ -45,13 +45,22 @@ describe('Parser', () => {
     });
   });
 
-  test('parses function declaration with keyword param name', () => {
-    const src = 'function raise(number a, number to) is\n    return a ** to\nend';
+  test('parses function declaration with zero params (no `takes`)', () => {
+    const ast = parseSource('function greet is\n    say "hi"\nend');
+    expect(ast.body[0]).toMatchObject({
+      type: 'FunctionDeclaration',
+      name: 'greet',
+      params: [],
+    });
+  });
+
+  test('parses function declaration with keyword label/body name (`to`)', () => {
+    const src = 'function raise takes number a to number to is\n    return a ** to\nend';
     const ast = parseSource(src);
     const decl = ast.body[0] as FunctionDeclaration;
     expect(decl.params).toEqual([
-      { paramType: 'number', name: 'a' },
-      { paramType: 'number', name: 'to' },
+      { paramType: 'number', name: 'a',  label: null },
+      { paramType: 'number', name: 'to', label: 'to' },
     ]);
     expect((decl.body[0] as ReturnStatement).value).toMatchObject({
       type: 'BinaryExpression',
@@ -59,6 +68,44 @@ describe('Parser', () => {
       left:  { type: 'IdentifierExpression', name: 'a' },
       right: { type: 'IdentifierExpression', name: 'to' },
     });
+  });
+
+  test('parses function decl with distinct separator label and body name', () => {
+    const src = 'function raise takes number base to number exponent is\n    return base ** exponent\nend';
+    const ast = parseSource(src);
+    const decl = ast.body[0] as FunctionDeclaration;
+    expect(decl.params).toEqual([
+      { paramType: 'number', name: 'base',     label: null },
+      { paramType: 'number', name: 'exponent', label: 'to' },
+    ]);
+  });
+
+  test('parses function decl with duplicate labels (with ... with ...)', () => {
+    const src = 'function sum3 takes number a with number b with number c is\n    return a + b + c\nend';
+    const ast = parseSource(src);
+    const decl = ast.body[0] as FunctionDeclaration;
+    expect(decl.params).toEqual([
+      { paramType: 'number', name: 'a', label: null },
+      { paramType: 'number', name: 'b', label: 'with' },
+      { paramType: 'number', name: 'c', label: 'with' },
+    ]);
+  });
+
+  test('rejects legacy paren form with a helpful error', () => {
+    expect(() => parseSource('function f(number a) is\n    return a\nend'))
+      .toThrow(/takes/);
+  });
+
+  test('rejects duplicate body names', () => {
+    expect(() =>
+      parseSource('function bad takes number a with number a is\n    return a\nend'),
+    ).toThrow(/[Dd]uplicate parameter/);
+  });
+
+  test('rejects stop-keyword as a separator label', () => {
+    expect(() =>
+      parseSource('function bad takes number a end number b is\n    return a\nend'),
+    ).toThrow(/reserved keyword/);
   });
 
   test('parses call statement with positional arg (identifier)', () => {
@@ -232,7 +279,7 @@ describe('Parser', () => {
     });
 
     test('optional `end function` accepted on function decl', () => {
-      const ast = parseSource('function f(number a) is\n    return a\nend function');
+      const ast = parseSource('function f takes number a is\n    return a\nend function');
       expect(ast.body[0]).toMatchObject({ type: 'FunctionDeclaration', name: 'f' });
     });
 

@@ -1,8 +1,8 @@
-function triple(number a) is
+function triple takes number a is
     return a * 3
 end function
 
-function quad(number a) is
+function quad takes number a is
     return a * 4
 end
 

@@ -1,0 +1,3 @@
+function oldstyle(number a) is
+    return a
+end function
