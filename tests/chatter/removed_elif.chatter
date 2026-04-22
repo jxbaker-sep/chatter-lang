@@ -1,0 +1,5 @@
+if true
+    say "a"
+elif false
+    say "b"
+end if

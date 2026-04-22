@@ -1,0 +1,23 @@
+function triple(number a) is
+    return a * 3
+end function
+
+function quad(number a) is
+    return a * 4
+end
+
+set x to 5
+if x is 5
+    say "five"
+end if
+
+if x is 4
+    say "four"
+else
+    say "not four"
+end
+
+triple 2
+say it
+quad 2
+say it

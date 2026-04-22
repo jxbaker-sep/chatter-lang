@@ -1,0 +1,13 @@
+set x to 5
+if x is 5
+    say "match"
+end if
+
+if x is not 10
+    say "yes different"
+end if
+
+set s to "hello"
+if s is "hello"
+    say "greeting"
+end if
