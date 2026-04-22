@@ -1,0 +1,14 @@
+function double(number n) is
+    return n * 2
+end function
+
+function add(number a, number b) is
+    return a + b
+end function
+
+double 3 + 4
+say it
+add 1 + 2 b 10 - 5
+say it
+double (5 * 2)
+say it

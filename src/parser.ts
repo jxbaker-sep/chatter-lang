@@ -169,21 +169,21 @@ export function parse(tokens: Token[]): Program {
       first.type === 'LPAREN' ||
       isBoolKw
     ) {
-      args.push({ name: null, value: parsePrimary() });
+      args.push({ name: null, value: parseExpression() });
     }
 
-    // Named args: (IDENT | allowed KEYWORD) followed by a primary expr.
+    // Named args: (IDENT | allowed KEYWORD) followed by an expression.
     while (true) {
       const tok = peek();
       if (tok.type === 'IDENT') {
         const paramName = advance().value;
-        const value = parsePrimary();
+        const value = parseExpression();
         args.push({ name: paramName, value });
         continue;
       }
       if (tok.type === 'KEYWORD' && !NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
         const paramName = advance().value;
-        const value = parsePrimary();
+        const value = parseExpression();
         args.push({ name: paramName, value });
         continue;
       }
