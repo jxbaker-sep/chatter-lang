@@ -21,7 +21,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
   'true', 'false', 'is', 'say', 'set', 'function', 'return',
   'repeat', 'times', 'with', 'from', 'while',
-  'less', 'greater', 'than', 'at', 'least', 'most',
+  'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
 ]);
 
 export function parse(tokens: Token[]): Program {
@@ -353,10 +353,22 @@ export function parse(tokens: Token[]): Program {
         advance();
         consume('KEYWORD', 'than');
         op = '<';
+        if (peek().type === 'KEYWORD' && peek().value === 'or' &&
+            tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'equal') {
+          advance(); advance();
+          consume('KEYWORD', 'to');
+          op = '<=';
+        }
       } else if (next.type === 'KEYWORD' && next.value === 'greater') {
         advance();
         consume('KEYWORD', 'than');
         op = '>';
+        if (peek().type === 'KEYWORD' && peek().value === 'or' &&
+            tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'equal') {
+          advance(); advance();
+          consume('KEYWORD', 'to');
+          op = '>=';
+        }
       } else if (next.type === 'KEYWORD' && next.value === 'at') {
         advance();
         const after = peek();
