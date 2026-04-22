@@ -1,5 +1,16 @@
-function factorial(number n)
-    if n == 1
+function factorial(number n) is
+    if n is less than 2
         return 1
-        
+    end
+    factorial (n - 1)
+    return n * it
 end function
+
+factorial 5
+say it
+factorial 4
+say it
+factorial 3
+say it
+factorial 2
+say it
