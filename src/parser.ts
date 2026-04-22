@@ -24,7 +24,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'true', 'false', 'is', 'say', 'set', 'function', 'takes', 'returns', 'return',
   'repeat', 'times', 'while',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
-  'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by',
+  'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
 ]);
 
 export function parse(tokens: Token[]): Program {
@@ -548,8 +548,12 @@ export function parse(tokens: Token[]): Program {
   function parseMultiplicative(): Expression {
     let left = parseExponential();
     // `**` is a distinct token so peek().value === '*' only matches single `*`
-    while (peek().type === 'OP' && (peek().value === '*' || peek().value === '/')) {
-      const op = advance().value;
+    while (
+      (peek().type === 'OP' && (peek().value === '*' || peek().value === '/')) ||
+      (peek().type === 'KEYWORD' && peek().value === 'mod')
+    ) {
+      const tok = advance();
+      const op = tok.value === 'mod' ? 'mod' : tok.value;
       const right = parseExponential();
       left = { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
     }

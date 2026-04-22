@@ -12,6 +12,7 @@ export type Instruction =
   | { op: 'SUB' }
   | { op: 'MUL' }
   | { op: 'DIV' }
+  | { op: 'MOD' }
   | { op: 'POW' }
   | { op: 'EQ' }
   | { op: 'NEQ' }

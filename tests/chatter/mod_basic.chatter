@@ -1,0 +1,5 @@
+say 7 mod 3
+say 10 mod 5
+say 15 mod 4
+say 0 mod 7
+say 20 mod 6

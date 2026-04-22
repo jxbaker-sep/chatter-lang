@@ -26,7 +26,7 @@ const KEYWORDS = new Set([
   'true', 'false', 'not', 'and', 'or', 'if', 'else',
   'repeat', 'times', 'with', 'from', 'while',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
-  'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by',
+  'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
 ]);
 const TYPES = new Set(['number', 'boolean', 'string']);
 

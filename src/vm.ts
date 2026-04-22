@@ -120,6 +120,7 @@ export class VM {
       case 'SUB':
       case 'MUL':
       case 'DIV':
+      case 'MOD':
       case 'POW': {
         const b = this.pop();
         const a = this.pop();
@@ -128,8 +129,8 @@ export class VM {
             `Type mismatch: arithmetic requires numbers, got ${typeof a} and ${typeof b}`,
           );
         }
-        if (instr.op === 'DIV' && b === 0) {
-          throw new RuntimeError('Division by zero');
+        if ((instr.op === 'DIV' || instr.op === 'MOD') && b === 0) {
+          throw new RuntimeError(instr.op === 'MOD' ? 'Modulo by zero' : 'Division by zero');
         }
         let result: number;
         switch (instr.op) {
@@ -137,6 +138,7 @@ export class VM {
           case 'SUB': result = a - b; break;
           case 'MUL': result = a * b; break;
           case 'DIV': result = Math.trunc(a / b); break;
+          case 'MOD': result = a - Math.trunc(a / b) * b; break;
           case 'POW': result = Math.pow(a, b); break;
         }
         if (result < I32_MIN || result > I32_MAX) {

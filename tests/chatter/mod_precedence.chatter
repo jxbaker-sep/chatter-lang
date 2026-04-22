@@ -1,0 +1,2 @@
+say 1 + 2 * 3 mod 4
+say 10 mod 3 * 2

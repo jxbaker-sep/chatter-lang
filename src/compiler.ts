@@ -560,6 +560,7 @@ class Compiler {
       case '-':  out.push({ op: 'SUB' }); break;
       case '*':  out.push({ op: 'MUL' }); break;
       case '/':  out.push({ op: 'DIV' }); break;
+      case 'mod': out.push({ op: 'MOD' }); break;
       case '**': out.push({ op: 'POW' }); break;
       case '==': out.push({ op: 'EQ' }); break;
       case '!=': out.push({ op: 'NEQ' }); break;
@@ -584,7 +585,7 @@ class Compiler {
       case 'UnaryExpression': return 'boolean';
       case 'BinaryExpression': {
         const op = expr.operator;
-        if (op === '+' || op === '-' || op === '*' || op === '/' || op === '**') return 'number';
+        if (op === '+' || op === '-' || op === '*' || op === '/' || op === '**' || op === 'mod') return 'number';
         return 'boolean';
       }
       case 'IdentifierExpression': {
