@@ -134,7 +134,7 @@ describe('VM', () => {
   describe('it scoping', () => {
     test('it is updated after a call statement', () => {
       const src = [
-        'function double takes number a is',
+        'function double takes number a returns number is',
         '    return a * 2',
         'end',
         'double 5',
@@ -145,12 +145,12 @@ describe('VM', () => {
 
     test('outer it is unchanged after function call', () => {
       const src = [
-        'function double takes number a is',
+        'function double takes number a returns number is',
         '    return a * 2',
         'end',
         'double 5',
         // it = 10 in outer scope',
-        'function quadruple takes number a is',
+        'function quadruple takes number a returns number is',
         '    double a',
         '    double it',
         '    return it',
@@ -175,10 +175,10 @@ describe('VM', () => {
       // After double foo (=10), call quadruple which modifies its own it
       // outer it should still be 10 before set baz to it
       const src = [
-        'function double takes number a is',
+        'function double takes number a returns number is',
         '    return a * 2',
         'end',
-        'function quadruple takes number a is',
+        'function quadruple takes number a returns number is',
         '    double a',
         '    double it',
         '    return it',
@@ -200,7 +200,7 @@ describe('VM', () => {
   describe('Function calls', () => {
     test('positional arg', () => {
       const src = [
-        'function double takes number a is',
+        'function double takes number a returns number is',
         '    return a * 2',
         'end',
         'double 7',
@@ -211,7 +211,7 @@ describe('VM', () => {
 
     test('named arg (second param)', () => {
       const src = [
-        'function raise takes number a to number to is',
+        'function raise takes number a to number to returns number is',
         '    return a ** to',
         'end',
         'raise 2 to 8',
@@ -222,7 +222,7 @@ describe('VM', () => {
 
     test('duplicate labels bind by declaration order at the VM level', () => {
       const src = [
-        'function sub3 takes number a with number b with number c is',
+        'function sub3 takes number a with number b with number c returns number is',
         '    return a - b - c',
         'end',
         'sub3 100 with 10 with 1',
@@ -234,7 +234,7 @@ describe('VM', () => {
 
     test('zero-arg function is callable', () => {
       const src = [
-        'function greet is',
+        'function greet returns number is',
         '    return 7',
         'end',
         'greet',
@@ -245,10 +245,10 @@ describe('VM', () => {
 
     test('nested calls: quadruple via double', () => {
       const src = [
-        'function double takes number a is',
+        'function double takes number a returns number is',
         '    return a * 2',
         'end',
-        'function quadruple takes number a is',
+        'function quadruple takes number a returns number is',
         '    double a',
         '    double it',
         '    return it',
@@ -361,7 +361,7 @@ describe('VM', () => {
 
     test('say does NOT update it', () => {
       const src = [
-        'function double takes number a is',
+        'function double takes number a returns number is',
         '    return a * 2',
         'end',
         'double 5',
@@ -516,7 +516,7 @@ describe('VM', () => {
 
     test('var is function-local (each call reinitialises)', () => {
       const src = [
-        'function f is',
+        'function f returns number is',
         '    var x is 1',
         '    add 1 to x',
         '    return x',
@@ -531,7 +531,7 @@ describe('VM', () => {
 
     test('var/change/sugar do NOT update `it`', () => {
       const src = [
-        'function f is',
+        'function f returns number is',
         '    return 7',
         'end',
         'f',
@@ -546,7 +546,7 @@ describe('VM', () => {
 
     test('factorial using var + repeat range', () => {
       const src = [
-        'function fact takes number n is',
+        'function fact takes number n returns number is',
         '    var result is 1',
         '    repeat with i from 2 to n',
         '        multiply result by i',
@@ -557,6 +557,97 @@ describe('VM', () => {
         'say it',
       ].join('\n');
       expect(runSource(src)).toEqual(['120']);
+    });
+  });
+
+  describe('return types', () => {
+    test('void function call as statement does not update `it`', () => {
+      const src = [
+        'function double takes number n returns number is',
+        '    return n * 2',
+        'end',
+        'function greet is',
+        '    say "hi"',
+        'end',
+        'double 5',
+        'greet',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['hi', '10']);
+    });
+
+    test('typed function call updates `it`', () => {
+      const src = [
+        'function double takes number n returns number is',
+        '    return n * 2',
+        'end',
+        'double 7',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['14']);
+    });
+
+    test('typed function with if/else both returning runs correctly', () => {
+      const src = [
+        'function choose takes number n returns number is',
+        '    if n is 0',
+        '        return 10',
+        '    else',
+        '        return 20',
+        '    end',
+        'end',
+        'choose 0',
+        'say it',
+        'choose 5',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['10', '20']);
+    });
+
+    test('typed function: runtime type mismatch via `it`', () => {
+      const src = [
+        'function greeting returns string is',
+        '    return "hi"',
+        'end',
+        'function f returns number is',
+        '    greeting',
+        '    return it',
+        'end',
+        'f',
+      ].join('\n');
+      expect(() => runSource(src)).toThrow(/Type mismatch/);
+    });
+
+    test('typed function returning boolean works', () => {
+      const src = [
+        'function isZero takes number n returns boolean is',
+        '    if n is 0',
+        '        return true',
+        '    else',
+        '        return false',
+        '    end',
+        'end',
+        'isZero 0',
+        'say it',
+        'isZero 5',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['true', 'false']);
+    });
+
+    test('typed function returning string works', () => {
+      const src = [
+        'function label takes number n returns string is',
+        '    if n is 0',
+        '        return "zero"',
+        '    else',
+        '        return "other"',
+        '    end',
+        'end',
+        'label 0',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['zero']);
     });
   });
 });

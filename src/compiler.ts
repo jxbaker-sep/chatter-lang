@@ -27,22 +27,26 @@ type Bindings = Map<string, BindingInfo>;
 class Compiler {
   private functions = new Map<string, FunctionDef>();
   private functionSignatures = new Map<string, Array<{ name: string; label: string | null }>>();
+  private functionReturnTypes = new Map<string, ChatterType | null>();  // null = void
   private outerBindings = new Set<string>();
   private topLevelBindings: Bindings | null = null;
   private tempCounter = 0;
+  private currentFuncReturnType: ChatterType | null | undefined = undefined;  // undefined = top-level
+  private currentFuncName: string | null = null;
 
   private freshName(tag: string): string {
     return `_rep_${tag}_${this.tempCounter++}`;
   }
 
   compile(program: Program): BytecodeProgram {
-    // First pass: collect function signatures and outer bindings
+    // First pass: collect function signatures, return types, and outer bindings
     for (const stmt of program.body) {
       if (stmt.type === 'FunctionDeclaration') {
         this.functionSignatures.set(
           stmt.name,
           stmt.params.map(p => ({ name: p.name, label: p.label })),
         );
+        this.functionReturnTypes.set(stmt.name, stmt.returnType);
       }
       if (stmt.type === 'SetStatement' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
@@ -84,10 +88,17 @@ class Compiler {
       case 'FunctionDeclaration':
         this.compileFuncDecl(stmt);
         break;
-      case 'CallStatement':
+      case 'CallStatement': {
         this.compileCallStmt(stmt, out, bindings);
-        out.push({ op: 'STORE_IT' });
+        const rt = this.functionReturnTypes.get(stmt.name);
+        if (rt === null) {
+          // Void call: discard the implicit 0 returned by the callee. Does NOT update `it`.
+          out.push({ op: 'DROP' });
+        } else {
+          out.push({ op: 'STORE_IT' });
+        }
         break;
+      }
       case 'ReturnStatement':
         this.compileReturn(stmt, out, bindings);
         break;
@@ -210,6 +221,15 @@ class Compiler {
       }
     }
 
+    // Typed functions: every execution path must end with an explicit `return EXPR`.
+    if (stmt.returnType !== null) {
+      if (!blockTerminates(stmt.body)) {
+        throw new CompileError(
+          `missing return in typed function '${stmt.name}'; every path must return a ${stmt.returnType}`,
+        );
+      }
+    }
+
     const instructions: Instruction[] = [];
     const funcDef: FunctionDef = { name: stmt.name, params, instructions };
     this.functions.set(stmt.name, funcDef);
@@ -223,14 +243,24 @@ class Compiler {
           : undefined,
       });
     }
-    for (const bodyStmt of stmt.body) {
-      this.compileStatement(bodyStmt, instructions, funcBindings);
+    const prevReturnType = this.currentFuncReturnType;
+    const prevFuncName = this.currentFuncName;
+    this.currentFuncReturnType = stmt.returnType;
+    this.currentFuncName = stmt.name;
+    try {
+      for (const bodyStmt of stmt.body) {
+        this.compileStatement(bodyStmt, instructions, funcBindings);
+      }
+    } finally {
+      this.currentFuncReturnType = prevReturnType;
+      this.currentFuncName = prevFuncName;
     }
-    // Implicit return at the end of the function body so calls to functions
-    // that fall off the end (e.g. no explicit `return`) still leave a value
-    // on the stack for the caller's STORE_IT.
-    instructions.push({ op: 'PUSH_INT', value: 0 });
-    instructions.push({ op: 'RETURN' });
+    if (stmt.returnType === null) {
+      // Void: implicit `return 0` so the call site has a value to DROP.
+      instructions.push({ op: 'PUSH_INT', value: 0 });
+      instructions.push({ op: 'RETURN' });
+    }
+    // Typed functions: no implicit return — path analysis guarantees every path returns.
   }
 
   private compileCallStmt(
@@ -432,7 +462,43 @@ class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
+    const rt = this.currentFuncReturnType;
+    if (rt === undefined) {
+      throw new CompileError(`'return' outside of function body`);
+    }
+    if (rt === null) {
+      // Void function
+      if (stmt.value !== null) {
+        throw new CompileError(
+          `void function '${this.currentFuncName}' cannot return a value`,
+        );
+      }
+      // Emit implicit-0 + RETURN so the call site (which will DROP) sees a value.
+      out.push({ op: 'PUSH_INT', value: 0 });
+      out.push({ op: 'RETURN' });
+      return;
+    }
+    // Typed function
+    if (stmt.value === null) {
+      throw new CompileError(
+        `typed function '${this.currentFuncName}' must return a ${rt}`,
+      );
+    }
+    const st = this.staticType(stmt.value, bindings);
+    if (st !== null && st !== rt) {
+      throw new CompileError(
+        `Type mismatch: function '${this.currentFuncName}' declared to return ${rt}, but return expression has type ${st}`,
+      );
+    }
     this.compileExpr(stmt.value, out, bindings);
+    if (st === null) {
+      // Static type unknown — emit runtime check.
+      out.push({
+        op: 'CHECK_TYPE',
+        expected: rt,
+        context: `function '${this.currentFuncName}' return value`,
+      });
+    }
     out.push({ op: 'RETURN' });
   }
 
@@ -452,6 +518,11 @@ class Compiler {
         out.push({ op: 'PUSH_BOOL', value: expr.value });
         break;
       case 'IdentifierExpression':
+        if (this.functionReturnTypes.get(expr.name) === null) {
+          throw new CompileError(
+            `void function '${expr.name}' cannot be used as a value`,
+          );
+        }
         out.push({ op: 'LOAD', name: expr.name });
         break;
       case 'ItExpression':
@@ -464,9 +535,16 @@ class Compiler {
         this.compileExpr(expr.operand, out, bindings);
         out.push({ op: 'NOT' });
         break;
-      case 'CallStatement':
+      case 'CallStatement': {
+        const rt = this.functionReturnTypes.get(expr.name);
+        if (rt === null) {
+          throw new CompileError(
+            `void function '${expr.name}' cannot be used as a value`,
+          );
+        }
         this.compileCallStmt(expr, out, bindings);
         break;
+      }
     }
   }
 
@@ -513,10 +591,37 @@ class Compiler {
         const info = bindings.get(expr.name);
         return info?.type ?? null;
       }
+      case 'CallStatement': {
+        const rt = this.functionReturnTypes.get(expr.name);
+        return rt ?? null;  // undefined (unknown fn) or null (void) → null
+      }
       default:
         return null;
     }
   }
+}
+
+// --- Path-termination analyzer (pure helpers) ---
+
+export function statementTerminates(stmt: Statement): boolean {
+  if (stmt.type === 'ReturnStatement') return true;
+  if (stmt.type === 'IfStatement') {
+    if (stmt.elseBody === null) return false;
+    for (const b of stmt.branches) {
+      if (!blockTerminates(b.body)) return false;
+    }
+    if (!blockTerminates(stmt.elseBody)) return false;
+    return true;
+  }
+  // repeat bodies may run zero times → never terminating
+  return false;
+}
+
+export function blockTerminates(stmts: Statement[]): boolean {
+  for (const s of stmts) {
+    if (statementTerminates(s)) return true;
+  }
+  return false;
 }
 
 export function compile(program: Program): BytecodeProgram {

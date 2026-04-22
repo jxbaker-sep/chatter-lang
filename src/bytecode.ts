@@ -27,6 +27,8 @@ export type Instruction =
   | { op: 'CALL'; name: string; argCount: number }
   | { op: 'RETURN' }
   | { op: 'SAY' }
+  | { op: 'DROP' }  // pops and discards stack top; used at void call sites to ignore the implicit 0 left by the callee
+  | { op: 'CHECK_TYPE'; expected: 'number' | 'string' | 'boolean'; context: string }  // peeks stack top; throws if type mismatches; used to enforce typed-function return types when the static type is unknown
   | { op: 'ERROR'; message: string };
 
 export interface FunctionDef {

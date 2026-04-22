@@ -1,4 +1,4 @@
-function sum_to takes number n is
+function sum_to takes number n returns number is
     repeat with i from 1 to n
         say i
     end repeat

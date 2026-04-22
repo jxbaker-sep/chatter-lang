@@ -450,4 +450,64 @@ describe('Parser', () => {
       expect(cond.left).toMatchObject({ type: 'BinaryExpression', operator: '+' });
     });
   });
+
+  describe('return types', () => {
+    test('function decl without returns has returnType null', () => {
+      const ast = parseSource('function greet is\n    say "hi"\nend');
+      expect(ast.body[0]).toMatchObject({
+        type: 'FunctionDeclaration',
+        name: 'greet',
+        returnType: null,
+      });
+    });
+
+    test('function decl with returns number', () => {
+      const ast = parseSource('function double takes number n returns number is\n    return n * 2\nend');
+      expect(ast.body[0]).toMatchObject({
+        type: 'FunctionDeclaration',
+        name: 'double',
+        returnType: 'number',
+      });
+    });
+
+    test('function decl with returns string and zero args', () => {
+      const ast = parseSource('function hello returns string is\n    return "hi"\nend');
+      expect(ast.body[0]).toMatchObject({
+        type: 'FunctionDeclaration',
+        returnType: 'string',
+      });
+    });
+
+    test('function decl with returns boolean', () => {
+      const ast = parseSource('function yep returns boolean is\n    return true\nend');
+      expect(ast.body[0]).toMatchObject({ returnType: 'boolean' });
+    });
+
+    test('bare return parses with null value', () => {
+      const ast = parseSource('function f is\n    return\nend');
+      const decl = ast.body[0] as FunctionDeclaration;
+      expect(decl.body[0]).toMatchObject({ type: 'ReturnStatement', value: null });
+    });
+
+    test('return with expression parses with non-null value', () => {
+      const ast = parseSource('function f returns number is\n    return 1 + 2\nend');
+      const decl = ast.body[0] as FunctionDeclaration;
+      const r = decl.body[0] as ReturnStatement;
+      expect(r.value).not.toBeNull();
+      expect(r.value).toMatchObject({ type: 'BinaryExpression', operator: '+' });
+    });
+
+    test('returns clause after multi-param takes list', () => {
+      const ast = parseSource(
+        'function raise takes number base to number exponent returns number is\n    return base ** exponent\nend',
+      );
+      expect(ast.body[0]).toMatchObject({
+        returnType: 'number',
+        params: [
+          { paramType: 'number', name: 'base', label: null },
+          { paramType: 'number', name: 'exponent', label: 'to' },
+        ],
+      });
+    });
+  });
 });

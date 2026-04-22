@@ -21,7 +21,7 @@ export class ParseError extends Error {
 // These start new statements or form expression operators.
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
-  'true', 'false', 'is', 'say', 'set', 'function', 'takes', 'return',
+  'true', 'false', 'is', 'say', 'set', 'function', 'takes', 'returns', 'return',
   'repeat', 'times', 'while',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by',
@@ -218,8 +218,8 @@ export function parse(tokens: Token[]): Program {
       // Subsequent params: LABEL TYPE IDENT
       while (true) {
         const next = peek();
-        // Stop at `is` (start of body).
-        if (next.type === 'KEYWORD' && next.value === 'is') break;
+        // Stop at `is` (start of body) or `returns` (return-type clause).
+        if (next.type === 'KEYWORD' && (next.value === 'is' || next.value === 'returns')) break;
         if (!isValidParamWord(next)) {
           // Produce a targeted error for stop keywords used where a label is expected.
           if (next.type === 'KEYWORD' && NAMED_ARG_STOP_KEYWORDS.has(next.value)) {
@@ -252,6 +252,20 @@ export function parse(tokens: Token[]): Program {
       seen.add(p.name);
     }
 
+    // Optional `returns TYPE` clause (before `is`).
+    let returnType: 'number' | 'string' | 'boolean' | null = null;
+    if (peek().type === 'KEYWORD' && peek().value === 'returns') {
+      advance();
+      const tTok = consume('TYPE');
+      if (tTok.value !== 'number' && tTok.value !== 'string' && tTok.value !== 'boolean') {
+        throw new ParseError(
+          `Invalid return type '${tTok.value}' at line ${tTok.line}`,
+          tTok,
+        );
+      }
+      returnType = tTok.value;
+    }
+
     consume('KEYWORD', 'is');
     consumeNewline();
     consume('INDENT');
@@ -270,11 +284,15 @@ export function parse(tokens: Token[]): Program {
     }
     consumeNewline();
 
-    return { type: 'FunctionDeclaration', name: nameTok.value, params, body };
+    return { type: 'FunctionDeclaration', name: nameTok.value, params, returnType, body };
   }
 
   function parseReturnStatement(): ReturnStatement {
     consume('KEYWORD', 'return');
+    if (peek().type === 'NEWLINE') {
+      advance();
+      return { type: 'ReturnStatement', value: null };
+    }
     const value = parseExpression();
     consumeNewline();
     return { type: 'ReturnStatement', value };

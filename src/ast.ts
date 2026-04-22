@@ -65,6 +65,7 @@ export interface FunctionDeclaration {
   type: 'FunctionDeclaration';
   name: string;
   params: FunctionParam[];
+  returnType: 'number' | 'string' | 'boolean' | null;  // null = void
   body: Statement[];
 }
 
@@ -76,7 +77,7 @@ export interface CallStatement {
 
 export interface ReturnStatement {
   type: 'ReturnStatement';
-  value: Expression;
+  value: Expression | null;
 }
 
 export interface BinaryExpression {

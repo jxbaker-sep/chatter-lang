@@ -1,0 +1,5 @@
+function f takes number n returns number is
+    if n is 0
+        return 1
+    end
+end function

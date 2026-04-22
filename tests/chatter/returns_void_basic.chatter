@@ -1,0 +1,5 @@
+function greet is
+    say "hi"
+end function
+
+greet

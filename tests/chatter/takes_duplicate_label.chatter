@@ -1,4 +1,4 @@
-function sum3 takes number a with number b with number c is
+function sum3 takes number a with number b with number c returns number is
     return a + b + c
 end function
 

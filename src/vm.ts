@@ -234,6 +234,25 @@ export class VM {
       case 'ERROR':
         throw new RuntimeError(instr.message);
 
+      case 'DROP': {
+        this.pop();
+        break;
+      }
+
+      case 'CHECK_TYPE': {
+        if (this.stack.length === 0) {
+          throw new RuntimeError('Stack underflow in CHECK_TYPE');
+        }
+        const top = this.stack[this.stack.length - 1];
+        const actual = typeof top as 'number' | 'string' | 'boolean';
+        if (actual !== instr.expected) {
+          throw new RuntimeError(
+            `Type mismatch: ${instr.context} (expected ${instr.expected}, got ${actual})`,
+          );
+        }
+        break;
+      }
+
       case 'NOT': {
         const a = this.pop();
         if (typeof a !== 'boolean') {

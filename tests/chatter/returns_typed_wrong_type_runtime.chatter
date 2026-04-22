@@ -1,0 +1,10 @@
+function greeting returns string is
+    return "hi"
+end function
+
+function f returns number is
+    greeting
+    return it
+end function
+
+f

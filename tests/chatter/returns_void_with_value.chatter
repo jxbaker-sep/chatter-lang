@@ -1,0 +1,3 @@
+function f is
+    return 5
+end function

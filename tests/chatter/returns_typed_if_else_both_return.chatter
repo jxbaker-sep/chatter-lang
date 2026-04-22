@@ -1,0 +1,12 @@
+function choose takes number n returns number is
+    if n is 0
+        return 10
+    else
+        return 20
+    end
+end function
+
+choose 0
+say it
+choose 5
+say it

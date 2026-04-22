@@ -1,0 +1,3 @@
+function f returns number is
+    say "hi"
+end function

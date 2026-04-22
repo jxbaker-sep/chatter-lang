@@ -1,8 +1,8 @@
-function double takes number n is
+function double takes number n returns number is
     return n * 2
 end function
 
-function plus takes number a b number b is
+function plus takes number a b number b returns number is
     return a + b
 end function
 

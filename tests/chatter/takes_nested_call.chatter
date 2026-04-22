@@ -1,8 +1,8 @@
-function raise takes number base to number exponent is
+function raise takes number base to number exponent returns number is
     return base ** exponent
 end function
 
-function cube takes number n is
+function cube takes number n returns number is
     raise n to 3
     return it
 end function

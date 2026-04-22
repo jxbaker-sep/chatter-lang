@@ -1,4 +1,4 @@
-function raise takes number base to number exponent is
+function raise takes number base to number exponent returns number is
     return base ** exponent
 end function
 

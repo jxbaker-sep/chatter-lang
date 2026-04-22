@@ -2,5 +2,10 @@ function double takes number n returns number is
     return n * 2
 end function
 
-double 21
+function greet is
+    say "hi"
+end function
+
+double 5
+greet
 say it

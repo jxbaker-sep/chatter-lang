@@ -1,0 +1,3 @@
+function f returns number is
+    return
+end function
