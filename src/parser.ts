@@ -6,7 +6,10 @@ import {
   BinaryExpression, UnaryExpression, IdentifierExpression,
   NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
   IfStatement, IfBranch, RepeatStatement,
-  VarDeclaration, ChangeStatement, CompoundAssignStatement,
+  VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
+  ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
+  LengthExpression, AppendStatement, PrependStatement, InsertStatement,
+  RemoveItemStatement, TypeAnnotation, ScalarTypeName,
 } from './ast';
 
 export class ParseError extends Error {
@@ -25,6 +28,9 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'repeat', 'times', 'while',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
+  'list', 'of', 'readonly', 'empty',
+  'item', 'first', 'last', 'length', 'contains',
+  'append', 'prepend', 'insert', 'in', 'remove',
 ]);
 
 export function parse(tokens: Token[]): Program {
@@ -84,6 +90,10 @@ export function parse(tokens: Token[]): Program {
         case 'return':   return parseReturnStatement();
         case 'if':       return parseIfStatement();
         case 'repeat':   return parseRepeatStatement();
+        case 'append':   return parseAppendStatement();
+        case 'prepend':  return parsePrependStatement();
+        case 'insert':   return parseInsertStatement();
+        case 'remove':   return parseRemoveStatement();
         default:
           throw new ParseError(`Unexpected keyword '${tok.value}' at line ${tok.line}`, tok);
       }
@@ -122,8 +132,19 @@ export function parse(tokens: Token[]): Program {
     return { type: 'VarDeclaration', name: nameTok.value, value };
   }
 
-  function parseChangeStatement(): ChangeStatement {
+  function parseChangeStatement(): ChangeStatement | ChangeItemStatement {
     consume('KEYWORD', 'change');
+    // `change item EXPR of IDENT to EXPR` — list element assignment
+    if (peek().type === 'KEYWORD' && peek().value === 'item') {
+      advance(); // item
+      const index = parseExpression();
+      consume('KEYWORD', 'of');
+      const nameTok = consume('IDENT');
+      consume('KEYWORD', 'to');
+      const value = parseExpression();
+      consumeNewline();
+      return { type: 'ChangeItemStatement', listName: nameTok.value, index, value };
+    }
     const nameTok = consume('IDENT');
     consume('KEYWORD', 'to');
     const value = parseExpression();
@@ -165,6 +186,53 @@ export function parse(tokens: Token[]): Program {
     const value = parseExpression();
     consumeNewline();
     return { type: 'CompoundAssignStatement', op: 'divide', name: nameTok.value, value };
+  }
+
+  function parseTypeAnnotation(allowReadonly: boolean): TypeAnnotation {
+    const tok = peek();
+    if (tok.type === 'KEYWORD' && tok.value === 'readonly') {
+      if (!allowReadonly) {
+        throw new ParseError(
+          `'readonly' is only allowed in parameter type annotations at line ${tok.line}`,
+          tok,
+        );
+      }
+      advance();
+      // must be followed by `list of TYPE`
+      if (!(peek().type === 'KEYWORD' && peek().value === 'list')) {
+        throw new ParseError(
+          `'readonly' must be followed by 'list of TYPE' at line ${peek().line}`,
+          peek(),
+        );
+      }
+      advance(); // list
+      consume('KEYWORD', 'of');
+      const inner = parseTypeAnnotation(false);
+      if (inner.kind !== 'scalar') {
+        throw new ParseError(`nested lists not supported at line ${tok.line}`, tok);
+      }
+      return { kind: 'list', element: inner.name, readonly: true };
+    }
+    if (tok.type === 'KEYWORD' && tok.value === 'list') {
+      advance();
+      consume('KEYWORD', 'of');
+      const inner = parseTypeAnnotation(false);
+      if (inner.kind !== 'scalar') {
+        throw new ParseError(`nested lists not supported at line ${tok.line}`, tok);
+      }
+      return { kind: 'list', element: inner.name, readonly: false };
+    }
+    if (tok.type === 'TYPE') {
+      advance();
+      if (tok.value !== 'number' && tok.value !== 'string' && tok.value !== 'boolean') {
+        throw new ParseError(`Invalid type '${tok.value}' at line ${tok.line}`, tok);
+      }
+      return { kind: 'scalar', name: tok.value as ScalarTypeName };
+    }
+    throw new ParseError(
+      `Expected type annotation at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+      tok,
+    );
   }
 
   function parseFunctionDeclaration(): FunctionDeclaration {
@@ -211,9 +279,9 @@ export function parse(tokens: Token[]): Program {
       advance(); // consume `takes`
 
       // First param: TYPE IDENT, no label.
-      const t0 = consume('TYPE');
+      const t0 = parseTypeAnnotation(true);
       const n0 = consumeParamBodyName();
-      params.push({ paramType: t0.value, name: n0.value, label: null });
+      params.push({ paramType: t0, name: n0.value, label: null });
 
       // Subsequent params: LABEL TYPE IDENT
       while (true) {
@@ -234,9 +302,9 @@ export function parse(tokens: Token[]): Program {
           );
         }
         const labelTok = advance();
-        const tN = consume('TYPE');
+        const tN = parseTypeAnnotation(true);
         const nN = consumeParamBodyName();
-        params.push({ paramType: tN.value, name: nN.value, label: labelTok.value });
+        params.push({ paramType: tN, name: nN.value, label: labelTok.value });
       }
     }
 
@@ -253,17 +321,10 @@ export function parse(tokens: Token[]): Program {
     }
 
     // Optional `returns TYPE` clause (before `is`).
-    let returnType: 'number' | 'string' | 'boolean' | null = null;
+    let returnType: TypeAnnotation | null = null;
     if (peek().type === 'KEYWORD' && peek().value === 'returns') {
       advance();
-      const tTok = consume('TYPE');
-      if (tTok.value !== 'number' && tTok.value !== 'string' && tTok.value !== 'boolean') {
-        throw new ParseError(
-          `Invalid return type '${tTok.value}' at line ${tTok.line}`,
-          tTok,
-        );
-      }
-      returnType = tTok.value;
+      returnType = parseTypeAnnotation(false);
     }
 
     consume('KEYWORD', 'is');
@@ -408,18 +469,31 @@ export function parse(tokens: Token[]): Program {
         );
       }
       advance();
-      consume('KEYWORD', 'from');
-      const fromExpr = parseExpression();
-      consume('KEYWORD', 'to');
-      const toExpr = parseExpression();
-      result = {
-        type: 'RepeatStatement',
-        kind: 'range',
-        varName: varTok.value,
-        from: fromExpr,
-        to: toExpr,
-        body: [],
-      };
+      const after = peek();
+      if (after.type === 'KEYWORD' && after.value === 'in') {
+        advance();
+        const listExpr = parseExpression();
+        result = {
+          type: 'RepeatStatement',
+          kind: 'list',
+          varName: varTok.value,
+          list: listExpr,
+          body: [],
+        };
+      } else {
+        consume('KEYWORD', 'from');
+        const fromExpr = parseExpression();
+        consume('KEYWORD', 'to');
+        const toExpr = parseExpression();
+        result = {
+          type: 'RepeatStatement',
+          kind: 'range',
+          varName: varTok.value,
+          from: fromExpr,
+          to: toExpr,
+          body: [],
+        };
+      }
     } else if (next.type === 'KEYWORD' && next.value === 'while') {
       advance();
       const cond = parseExpression();
@@ -442,6 +516,45 @@ export function parse(tokens: Token[]): Program {
 
     result.body = body;
     return result;
+  }
+
+  function parseAppendStatement(): AppendStatement {
+    consume('KEYWORD', 'append');
+    const value = parseExpression();
+    consume('KEYWORD', 'to');
+    const nameTok = consume('IDENT');
+    consumeNewline();
+    return { type: 'AppendStatement', listName: nameTok.value, value };
+  }
+
+  function parsePrependStatement(): PrependStatement {
+    consume('KEYWORD', 'prepend');
+    const value = parseExpression();
+    consume('KEYWORD', 'to');
+    const nameTok = consume('IDENT');
+    consumeNewline();
+    return { type: 'PrependStatement', listName: nameTok.value, value };
+  }
+
+  function parseInsertStatement(): InsertStatement {
+    consume('KEYWORD', 'insert');
+    const value = parseExpression();
+    consume('KEYWORD', 'at');
+    const index = parseExpression();
+    consume('KEYWORD', 'in');
+    const nameTok = consume('IDENT');
+    consumeNewline();
+    return { type: 'InsertStatement', listName: nameTok.value, index, value };
+  }
+
+  function parseRemoveStatement(): RemoveItemStatement {
+    consume('KEYWORD', 'remove');
+    consume('KEYWORD', 'item');
+    const index = parseExpression();
+    consume('KEYWORD', 'from');
+    const nameTok = consume('IDENT');
+    consumeNewline();
+    return { type: 'RemoveItemStatement', listName: nameTok.value, index };
   }
 
   // --- Expression parsing with precedence ---
@@ -482,11 +595,16 @@ export function parse(tokens: Token[]): Program {
 
   function parseEquality(): Expression {
     let left = parseAdditive();
-    // `is` and `is not` replace `==` and `!=`. `is` is a KEYWORD.
-    // Ambiguity with `is` as function-body opener is resolved structurally:
-    // function decls consume their `is` before the NEWLINE, so here we only
-    // encounter `is` mid-expression.
-    while (peek().type === 'KEYWORD' && peek().value === 'is') {
+    while (
+      (peek().type === 'KEYWORD' && peek().value === 'is') ||
+      (peek().type === 'KEYWORD' && peek().value === 'contains')
+    ) {
+      if (peek().value === 'contains') {
+        advance();
+        const right = parseAdditive();
+        left = { type: 'BinaryExpression', operator: 'contains', left, right } as BinaryExpression;
+        continue;
+      }
       advance(); // consume `is`
       let op: '==' | '!=' | '<' | '<=' | '>' | '>=' = '==';
       const next = peek();
@@ -572,6 +690,75 @@ export function parse(tokens: Token[]): Program {
 
   function parsePrimary(): Expression {
     const tok = peek();
+
+    // List literals and list-read prefix forms
+    if (tok.type === 'KEYWORD') {
+      if (tok.value === 'list') {
+        // `list of EXPR (, EXPR)*` — nonempty list literal.
+        advance();
+        consume('KEYWORD', 'of');
+        // Reject nested `list of list of ...`
+        if (peek().type === 'KEYWORD' && (peek().value === 'list' || peek().value === 'readonly')) {
+          throw new ParseError(`nested lists not supported at line ${peek().line}`, peek());
+        }
+        const elements: Expression[] = [];
+        elements.push(parsePrimary());
+        while (peek().type === 'COMMA') {
+          advance();
+          if (peek().type === 'KEYWORD' && (peek().value === 'list' || peek().value === 'readonly')) {
+            throw new ParseError(`nested lists not supported at line ${peek().line}`, peek());
+          }
+          elements.push(parsePrimary());
+        }
+        return { type: 'ListLiteral', kind: 'nonempty', elementType: null, elements } as ListLiteral;
+      }
+      if (tok.value === 'empty') {
+        advance();
+        consume('KEYWORD', 'list');
+        consume('KEYWORD', 'of');
+        const tTok = peek();
+        if (tTok.type !== 'TYPE') {
+          throw new ParseError(`Expected element type after 'empty list of' at line ${tTok.line}`, tTok);
+        }
+        advance();
+        if (tTok.value === 'list' || tTok.value === 'readonly') {
+          throw new ParseError(`nested lists not supported at line ${tTok.line}`, tTok);
+        }
+        return {
+          type: 'ListLiteral',
+          kind: 'empty',
+          elementType: tTok.value as ScalarTypeName,
+          elements: [],
+        } as ListLiteral;
+      }
+      if (tok.value === 'item') {
+        advance();
+        const index = parseExpression();
+        consume('KEYWORD', 'of');
+        const target = parsePrimary();
+        return { type: 'ItemAccessExpression', index, target } as ItemAccessExpression;
+      }
+      if (tok.value === 'first') {
+        advance();
+        consume('KEYWORD', 'item');
+        consume('KEYWORD', 'of');
+        const target = parsePrimary();
+        return { type: 'FirstItemExpression', target } as FirstItemExpression;
+      }
+      if (tok.value === 'last') {
+        advance();
+        consume('KEYWORD', 'item');
+        consume('KEYWORD', 'of');
+        const target = parsePrimary();
+        return { type: 'LastItemExpression', target } as LastItemExpression;
+      }
+      if (tok.value === 'length') {
+        advance();
+        consume('KEYWORD', 'of');
+        const target = parsePrimary();
+        return { type: 'LengthExpression', target } as LengthExpression;
+      }
+    }
 
     if (tok.type === 'NUMBER') {
       advance();

@@ -1,0 +1,4 @@
+set l to list of 1, 2
+insert 3 at 3 in l
+say length of l
+say last item of l

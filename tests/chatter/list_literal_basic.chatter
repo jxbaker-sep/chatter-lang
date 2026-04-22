@@ -1,0 +1,3 @@
+set l to list of 1, 2, 3
+say length of l
+say item 2 of l

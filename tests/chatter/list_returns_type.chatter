@@ -1,0 +1,7 @@
+function makeList returns list of number is
+    set l to list of 1, 2, 3
+    return l
+end function
+
+makeList
+say length of it

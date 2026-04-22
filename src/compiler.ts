@@ -3,7 +3,10 @@ import {
   SayStatement, SetStatement, FunctionDeclaration,
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
   IfStatement, RepeatStatement,
-  VarDeclaration, ChangeStatement, CompoundAssignStatement,
+  VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
+  ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
+  LengthExpression, AppendStatement, PrependStatement, InsertStatement,
+  RemoveItemStatement, TypeAnnotation, ScalarTypeName,
 } from './ast';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 
@@ -14,19 +17,41 @@ export class CompileError extends Error {
   }
 }
 
-type ChatterType = 'number' | 'string' | 'boolean';
+export type ChatterType =
+  | { kind: 'scalar'; name: ScalarTypeName }
+  | { kind: 'list'; element: ScalarTypeName; readonly: boolean };
+
+function typesEqual(a: ChatterType, b: ChatterType): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'scalar' && b.kind === 'scalar') return a.name === b.name;
+  if (a.kind === 'list' && b.kind === 'list') {
+    return a.element === b.element && a.readonly === b.readonly;
+  }
+  return false;
+}
+
+function typeToString(t: ChatterType): string {
+  if (t.kind === 'scalar') return t.name;
+  return (t.readonly ? 'readonly list of ' : 'list of ') + t.element;
+}
+
+function fromAnnotation(a: TypeAnnotation): ChatterType {
+  if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
+  return { kind: 'list', element: a.element, readonly: a.readonly };
+}
+
 type BindingKind = 'set' | 'var' | 'param' | 'loop';
 
 interface BindingInfo {
   kind: BindingKind;
-  type?: ChatterType;  // statically known type (locked for var, declared for param, always number for loop)
+  type?: ChatterType;  // statically known type
 }
 
 type Bindings = Map<string, BindingInfo>;
 
 class Compiler {
   private functions = new Map<string, FunctionDef>();
-  private functionSignatures = new Map<string, Array<{ name: string; label: string | null }>>();
+  private functionSignatures = new Map<string, Array<{ name: string; label: string | null; type: ChatterType }>>();
   private functionReturnTypes = new Map<string, ChatterType | null>();  // null = void
   private outerBindings = new Set<string>();
   private topLevelBindings: Bindings | null = null;
@@ -44,9 +69,12 @@ class Compiler {
       if (stmt.type === 'FunctionDeclaration') {
         this.functionSignatures.set(
           stmt.name,
-          stmt.params.map(p => ({ name: p.name, label: p.label })),
+          stmt.params.map(p => ({ name: p.name, label: p.label, type: fromAnnotation(p.paramType) })),
         );
-        this.functionReturnTypes.set(stmt.name, stmt.returnType);
+        this.functionReturnTypes.set(
+          stmt.name,
+          stmt.returnType === null ? null : fromAnnotation(stmt.returnType),
+        );
       }
       if (stmt.type === 'SetStatement' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
@@ -82,6 +110,9 @@ class Compiler {
       case 'ChangeStatement':
         this.compileChange(stmt, out, bindings);
         break;
+      case 'ChangeItemStatement':
+        this.compileChangeItem(stmt, out, bindings);
+        break;
       case 'CompoundAssignStatement':
         this.compileCompoundAssign(stmt, out, bindings);
         break;
@@ -108,6 +139,18 @@ class Compiler {
       case 'RepeatStatement':
         this.compileRepeat(stmt, out, bindings);
         break;
+      case 'AppendStatement':
+        this.compileAppend(stmt, out, bindings);
+        break;
+      case 'PrependStatement':
+        this.compilePrepend(stmt, out, bindings);
+        break;
+      case 'InsertStatement':
+        this.compileInsert(stmt, out, bindings);
+        break;
+      case 'RemoveItemStatement':
+        this.compileRemove(stmt, out, bindings);
+        break;
     }
   }
 
@@ -120,6 +163,18 @@ class Compiler {
     out.push({ op: 'SAY' });
   }
 
+  private checkNotReadonlySmuggle(value: Expression, bindings: Bindings, ctx: string): void {
+    // Cannot bind a readonly-list reference to a set/var binding.
+    if (value.type === 'IdentifierExpression') {
+      const info = bindings.get(value.name);
+      if (info?.type && info.type.kind === 'list' && info.type.readonly) {
+        throw new CompileError(
+          `cannot bind a readonly-list reference to a '${ctx}' binding (name '${value.name}')`,
+        );
+      }
+    }
+  }
+
   private compileSet(
     stmt: SetStatement,
     out: Instruction[],
@@ -128,9 +183,11 @@ class Compiler {
     if (bindings.has(stmt.name)) {
       throw new CompileError(`Duplicate binding: '${stmt.name}' is already set`);
     }
+    this.checkNotReadonlySmuggle(stmt.value, bindings, 'set');
     this.compileExpr(stmt.value, out, bindings);
     out.push({ op: 'STORE', name: stmt.name });
-    bindings.set(stmt.name, { kind: 'set', type: this.staticType(stmt.value, bindings) ?? undefined });
+    const st = this.staticType(stmt.value, bindings);
+    bindings.set(stmt.name, { kind: 'set', type: st ?? undefined });
   }
 
   private compileVarDecl(
@@ -148,12 +205,11 @@ class Compiler {
         `Variable '${stmt.name}' shadows outer binding`,
       );
     }
+    this.checkNotReadonlySmuggle(stmt.value, bindings, 'var');
     this.compileExpr(stmt.value, out, bindings);
     out.push({ op: 'STORE_VAR', name: stmt.name });
-    bindings.set(stmt.name, {
-      kind: 'var',
-      type: this.staticType(stmt.value, bindings) ?? undefined,
-    });
+    const st = this.staticType(stmt.value, bindings);
+    bindings.set(stmt.name, { kind: 'var', type: st ?? undefined });
   }
 
   private compileChange(
@@ -172,8 +228,147 @@ class Compiler {
         `Cannot change '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
       );
     }
+    // Static type check for list vars: exact match required.
+    if (info.type && info.type.kind === 'list') {
+      const rhs = this.staticType(stmt.value, bindings);
+      if (rhs !== null && !typesEqual(rhs, info.type)) {
+        throw new CompileError(
+          `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rhs)}`,
+        );
+      }
+      // Prevent readonly smuggling via change
+      if (rhs && rhs.kind === 'list' && rhs.readonly && !info.type.readonly) {
+        throw new CompileError(
+          `cannot change '${stmt.name}' to a readonly-list reference`,
+        );
+      }
+    }
     this.compileExpr(stmt.value, out, bindings);
     out.push({ op: 'STORE_VAR', name: stmt.name });
+  }
+
+  private compileChangeItem(
+    stmt: ChangeItemStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const info = bindings.get(stmt.listName);
+    if (!info) {
+      throw new CompileError(
+        `Cannot change item of '${stmt.listName}': no such binding`,
+      );
+    }
+    if (!info.type || info.type.kind !== 'list') {
+      if (info.type) {
+        throw new CompileError(
+          `Cannot change item of '${stmt.listName}': not a list (type ${typeToString(info.type)})`,
+        );
+      }
+    } else {
+      if (info.type.readonly) {
+        throw new CompileError(
+          `Cannot change item of '${stmt.listName}': it is a readonly list reference`,
+        );
+      }
+      const rhs = this.staticType(stmt.value, bindings);
+      if (rhs && rhs.kind === 'scalar' && rhs.name !== info.type.element) {
+        throw new CompileError(
+          `Type mismatch: cannot assign ${rhs.name} to list of ${info.type.element}`,
+        );
+      }
+    }
+    // Emit: LOAD list; <index>; <value>; LIST_SET
+    out.push({ op: 'LOAD', name: stmt.listName });
+    this.compileExpr(stmt.index, out, bindings);
+    this.compileExpr(stmt.value, out, bindings);
+    out.push({ op: 'LIST_SET' });
+  }
+
+  private compileListMutationTarget(listName: string, bindings: Bindings, op: string): ChatterType | null {
+    const info = bindings.get(listName);
+    if (!info) {
+      throw new CompileError(`Cannot ${op} to '${listName}': no such binding`);
+    }
+    if (info.type && info.type.kind !== 'list') {
+      throw new CompileError(
+        `Cannot ${op} to '${listName}': not a list (type ${typeToString(info.type)})`,
+      );
+    }
+    if (info.type && info.type.kind === 'list' && info.type.readonly) {
+      throw new CompileError(
+        `Cannot ${op} to '${listName}': it is a readonly list reference`,
+      );
+    }
+    return info.type ?? null;
+  }
+
+  private checkElementType(
+    listType: ChatterType | null,
+    value: Expression,
+    bindings: Bindings,
+    op: string,
+  ): void {
+    if (listType && listType.kind === 'list') {
+      const rhs = this.staticType(value, bindings);
+      if (rhs && rhs.kind === 'scalar' && rhs.name !== listType.element) {
+        throw new CompileError(
+          `Type mismatch: cannot ${op} ${rhs.name} to list of ${listType.element}`,
+        );
+      }
+      if (rhs && rhs.kind === 'list') {
+        throw new CompileError(
+          `Type mismatch: cannot ${op} a list value to list of ${listType.element}`,
+        );
+      }
+    }
+  }
+
+  private compileAppend(
+    stmt: AppendStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'append');
+    this.checkElementType(lt, stmt.value, bindings, 'append');
+    out.push({ op: 'LOAD', name: stmt.listName });
+    this.compileExpr(stmt.value, out, bindings);
+    out.push({ op: 'LIST_APPEND' });
+  }
+
+  private compilePrepend(
+    stmt: PrependStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'prepend');
+    this.checkElementType(lt, stmt.value, bindings, 'prepend');
+    out.push({ op: 'LOAD', name: stmt.listName });
+    this.compileExpr(stmt.value, out, bindings);
+    out.push({ op: 'LIST_PREPEND' });
+  }
+
+  private compileInsert(
+    stmt: InsertStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'insert');
+    this.checkElementType(lt, stmt.value, bindings, 'insert');
+    out.push({ op: 'LOAD', name: stmt.listName });
+    this.compileExpr(stmt.index, out, bindings);
+    this.compileExpr(stmt.value, out, bindings);
+    out.push({ op: 'LIST_INSERT' });
+  }
+
+  private compileRemove(
+    stmt: RemoveItemStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    this.compileListMutationTarget(stmt.listName, bindings, 'remove');
+    out.push({ op: 'LOAD', name: stmt.listName });
+    this.compileExpr(stmt.index, out, bindings);
+    out.push({ op: 'LIST_REMOVE' });
   }
 
   private compileCompoundAssign(
@@ -192,9 +387,9 @@ class Compiler {
         `Cannot ${stmt.op} '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
       );
     }
-    if (info.type !== undefined && info.type !== 'number') {
+    if (info.type !== undefined && !(info.type.kind === 'scalar' && info.type.name === 'number')) {
       throw new CompileError(
-        `Cannot ${stmt.op} '${stmt.name}': its type is ${info.type}, not number`,
+        `Cannot ${stmt.op} '${stmt.name}': its type is ${typeToString(info.type)}, not number`,
       );
     }
     // Emit: LOAD name; <value>; OP; STORE_VAR name
@@ -225,7 +420,7 @@ class Compiler {
     if (stmt.returnType !== null) {
       if (!blockTerminates(stmt.body)) {
         throw new CompileError(
-          `missing return in typed function '${stmt.name}'; every path must return a ${stmt.returnType}`,
+          `missing return in typed function '${stmt.name}'; every path must return a ${typeToString(fromAnnotation(stmt.returnType))}`,
         );
       }
     }
@@ -238,14 +433,12 @@ class Compiler {
     for (const p of stmt.params) {
       funcBindings.set(p.name, {
         kind: 'param',
-        type: (p.paramType === 'number' || p.paramType === 'string' || p.paramType === 'boolean')
-          ? p.paramType as ChatterType
-          : undefined,
+        type: fromAnnotation(p.paramType),
       });
     }
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
-    this.currentFuncReturnType = stmt.returnType;
+    this.currentFuncReturnType = stmt.returnType === null ? null : fromAnnotation(stmt.returnType);
     this.currentFuncName = stmt.name;
     try {
       for (const bodyStmt of stmt.body) {
@@ -260,7 +453,6 @@ class Compiler {
       instructions.push({ op: 'PUSH_INT', value: 0 });
       instructions.push({ op: 'RETURN' });
     }
-    // Typed functions: no implicit return — path analysis guarantees every path returns.
   }
 
   private compileCallStmt(
@@ -289,8 +481,6 @@ class Compiler {
           bound[0] = arg.value;
           positionalUsed = true;
         } else {
-          // Find the first unbound param whose label matches this argument name.
-          // (Duplicate labels bind in declaration order.)
           let idx = -1;
           for (let i = 0; i < sig.length; i++) {
             if (bound[i] === undefined && sig[i].label === arg.name) {
@@ -319,7 +509,32 @@ class Compiler {
             `Missing argument for parameter '${sig[i].name}' in call to '${stmt.name}'`,
           );
         }
-        this.compileExpr(bound[i]!, out, bindings);
+        const argExpr = bound[i]!;
+        // Static list-type check for arguments.
+        const paramType = sig[i].type;
+        const argType = this.staticType(argExpr, bindings);
+        if (paramType.kind === 'list' && argType && argType.kind === 'list') {
+          if (argType.element !== paramType.element) {
+            throw new CompileError(
+              `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
+            );
+          }
+          // Widening: mutable → readonly OK. Narrowing: readonly → mutable rejected.
+          if (argType.readonly && !paramType.readonly) {
+            throw new CompileError(
+              `Cannot pass readonly-list reference to mutable-list param '${sig[i].name}' in call to '${stmt.name}'`,
+            );
+          }
+        } else if (paramType.kind === 'list' && argType && argType.kind === 'scalar') {
+          throw new CompileError(
+            `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${argType.name}`,
+          );
+        } else if (paramType.kind === 'scalar' && argType && argType.kind === 'list') {
+          throw new CompileError(
+            `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${paramType.name}, got ${typeToString(argType)}`,
+          );
+        }
+        this.compileExpr(argExpr, out, bindings);
       }
 
       out.push({ op: 'CALL', name: stmt.name, argCount: sig.length });
@@ -428,7 +643,7 @@ class Compiler {
       const jifEndIdx = out.length;
       out.push({ op: 'JUMP_IF_FALSE', target: -1 });
 
-      bindings.set(loopVar, { kind: 'loop', type: 'number' });
+      bindings.set(loopVar, { kind: 'loop', type: { kind: 'scalar', name: 'number' } });
       for (const s of stmt.body) {
         this.compileStatement(s, out, bindings);
       }
@@ -442,6 +657,68 @@ class Compiler {
       (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
       out.push({ op: 'DELETE', name: loopVar });
       out.push({ op: 'DELETE', name: limit });
+      return;
+    }
+
+    if (stmt.kind === 'list') {
+      const loopVar = stmt.varName;
+      if (bindings.has(loopVar) || this.outerBindings.has(loopVar)) {
+        throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`);
+      }
+
+      // Determine element type if statically known.
+      const lt = this.staticType(stmt.list, bindings);
+      let elemType: ChatterType | undefined;
+      if (lt) {
+        if (lt.kind !== 'list') {
+          throw new CompileError(
+            `'repeat with x in ...' requires a list, got ${typeToString(lt)}`,
+          );
+        }
+        elemType = { kind: 'scalar', name: lt.element };
+      }
+
+      const listTmp = this.freshName('list');
+      const idxTmp = this.freshName('idx');
+      const lenTmp = this.freshName('len');
+
+      this.compileExpr(stmt.list, out, bindings);
+      out.push({ op: 'STORE', name: listTmp });
+      out.push({ op: 'LOAD', name: listTmp });
+      out.push({ op: 'LIST_LENGTH' });
+      out.push({ op: 'STORE', name: lenTmp });
+      out.push({ op: 'PUSH_INT', value: 1 });
+      out.push({ op: 'STORE', name: idxTmp });
+
+      const topIdx = out.length;
+      out.push({ op: 'LOAD', name: idxTmp });
+      out.push({ op: 'LOAD', name: lenTmp });
+      out.push({ op: 'LE' });
+      const jifEndIdx = out.length;
+      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+
+      // Bind loop var to current element.
+      out.push({ op: 'LOAD', name: listTmp });
+      out.push({ op: 'LOAD', name: idxTmp });
+      out.push({ op: 'LIST_GET' });
+      out.push({ op: 'STORE', name: loopVar });
+
+      bindings.set(loopVar, { kind: 'loop', type: elemType });
+      for (const s of stmt.body) {
+        this.compileStatement(s, out, bindings);
+      }
+      bindings.delete(loopVar);
+
+      out.push({ op: 'LOAD', name: idxTmp });
+      out.push({ op: 'PUSH_INT', value: 1 });
+      out.push({ op: 'ADD' });
+      out.push({ op: 'STORE', name: idxTmp });
+      out.push({ op: 'JUMP', target: topIdx });
+      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+      out.push({ op: 'DELETE', name: loopVar });
+      out.push({ op: 'DELETE', name: listTmp });
+      out.push({ op: 'DELETE', name: idxTmp });
+      out.push({ op: 'DELETE', name: lenTmp });
       return;
     }
 
@@ -473,7 +750,6 @@ class Compiler {
           `void function '${this.currentFuncName}' cannot return a value`,
         );
       }
-      // Emit implicit-0 + RETURN so the call site (which will DROP) sees a value.
       out.push({ op: 'PUSH_INT', value: 0 });
       out.push({ op: 'RETURN' });
       return;
@@ -481,21 +757,49 @@ class Compiler {
     // Typed function
     if (stmt.value === null) {
       throw new CompileError(
-        `typed function '${this.currentFuncName}' must return a ${rt}`,
+        `typed function '${this.currentFuncName}' must return a ${typeToString(rt)}`,
       );
+    }
+    // Smuggling ban: a typed function that `return NAME` where NAME is a readonly list → error.
+    // (Also: the return type itself is never readonly per spec §8.)
+    if (stmt.value.type === 'IdentifierExpression') {
+      const info = bindings.get(stmt.value.name);
+      if (info?.type && info.type.kind === 'list' && info.type.readonly) {
+        throw new CompileError(
+          `cannot return readonly-list reference '${stmt.value.name}' from function '${this.currentFuncName}'`,
+        );
+      }
     }
     const st = this.staticType(stmt.value, bindings);
-    if (st !== null && st !== rt) {
-      throw new CompileError(
-        `Type mismatch: function '${this.currentFuncName}' declared to return ${rt}, but return expression has type ${st}`,
-      );
+    if (st !== null) {
+      if (st.kind !== rt.kind) {
+        throw new CompileError(
+          `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
+        );
+      }
+      if (rt.kind === 'scalar' && st.kind === 'scalar' && rt.name !== st.name) {
+        throw new CompileError(
+          `Type mismatch: function '${this.currentFuncName}' declared to return ${rt.name}, but return expression has type ${st.name}`,
+        );
+      }
+      if (rt.kind === 'list' && st.kind === 'list') {
+        if (rt.element !== st.element) {
+          throw new CompileError(
+            `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
+          );
+        }
+        if (st.readonly && !rt.readonly) {
+          throw new CompileError(
+            `cannot return readonly-list reference from function '${this.currentFuncName}'`,
+          );
+        }
+      }
     }
     this.compileExpr(stmt.value, out, bindings);
-    if (st === null) {
-      // Static type unknown — emit runtime check.
+    if (st === null && rt.kind === 'scalar') {
       out.push({
         op: 'CHECK_TYPE',
-        expected: rt,
+        expected: rt.name,
         context: `function '${this.currentFuncName}' return value`,
       });
     }
@@ -545,7 +849,72 @@ class Compiler {
         this.compileCallStmt(expr, out, bindings);
         break;
       }
+      case 'ListLiteral':
+        this.compileListLiteral(expr, out, bindings);
+        break;
+      case 'ItemAccessExpression':
+        this.compileExpr(expr.target, out, bindings);
+        this.compileExpr(expr.index, out, bindings);
+        out.push({ op: 'LIST_GET' });
+        break;
+      case 'FirstItemExpression':
+        this.compileExpr(expr.target, out, bindings);
+        out.push({ op: 'PUSH_INT', value: 1 });
+        out.push({ op: 'LIST_GET' });
+        break;
+      case 'LastItemExpression': {
+        // LOAD list; LIST_LENGTH; LIST_GET — but we need the list twice.
+        // Use a fresh temp.
+        const tmp = this.freshName('last');
+        this.compileExpr(expr.target, out, bindings);
+        out.push({ op: 'STORE', name: tmp });
+        out.push({ op: 'LOAD', name: tmp });
+        out.push({ op: 'LOAD', name: tmp });
+        out.push({ op: 'LIST_LENGTH' });
+        out.push({ op: 'LIST_GET' });
+        out.push({ op: 'DELETE', name: tmp });
+        break;
+      }
+      case 'LengthExpression':
+        this.compileExpr(expr.target, out, bindings);
+        out.push({ op: 'LIST_LENGTH' });
+        break;
     }
+  }
+
+  private compileListLiteral(
+    expr: ListLiteral,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (expr.kind === 'empty') {
+      out.push({ op: 'MAKE_EMPTY_LIST', elementType: expr.elementType! });
+      return;
+    }
+    // Nonempty: static type check when knowable.
+    let inferred: ScalarTypeName | null = null;
+    let allKnown = true;
+    for (const e of expr.elements) {
+      const t = this.staticType(e, bindings);
+      if (t === null) { allKnown = false; continue; }
+      if (t.kind !== 'scalar') {
+        throw new CompileError(`nested lists not supported`);
+      }
+      if (inferred === null) inferred = t.name;
+      else if (inferred !== t.name) {
+        throw new CompileError(
+          `Type mismatch in list literal: mixed element types (${inferred} and ${t.name})`,
+        );
+      }
+    }
+    for (const e of expr.elements) {
+      this.compileExpr(e, out, bindings);
+    }
+    out.push({
+      op: 'MAKE_LIST',
+      count: expr.elements.length,
+      elementType: allKnown ? inferred : null,
+    });
   }
 
   private compileBinary(
@@ -553,6 +922,12 @@ class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
+    if (expr.operator === 'contains') {
+      this.compileExpr(expr.left, out, bindings);
+      this.compileExpr(expr.right, out, bindings);
+      out.push({ op: 'LIST_CONTAINS' });
+      return;
+    }
     this.compileExpr(expr.left, out, bindings);
     this.compileExpr(expr.right, out, bindings);
     switch (expr.operator) {
@@ -575,18 +950,19 @@ class Compiler {
     }
   }
 
-  // Best-effort static type inference for literals and trivial expressions.
-  // Returns null if the type is not trivially knowable.
+  // Best-effort static type inference.
   private staticType(expr: Expression, bindings: Bindings): ChatterType | null {
     switch (expr.type) {
-      case 'NumberLiteral': return 'number';
-      case 'StringLiteral': return 'string';
-      case 'BooleanLiteral': return 'boolean';
-      case 'UnaryExpression': return 'boolean';
+      case 'NumberLiteral': return { kind: 'scalar', name: 'number' };
+      case 'StringLiteral': return { kind: 'scalar', name: 'string' };
+      case 'BooleanLiteral': return { kind: 'scalar', name: 'boolean' };
+      case 'UnaryExpression': return { kind: 'scalar', name: 'boolean' };
       case 'BinaryExpression': {
         const op = expr.operator;
-        if (op === '+' || op === '-' || op === '*' || op === '/' || op === '**' || op === 'mod') return 'number';
-        return 'boolean';
+        if (op === '+' || op === '-' || op === '*' || op === '/' || op === '**' || op === 'mod') {
+          return { kind: 'scalar', name: 'number' };
+        }
+        return { kind: 'scalar', name: 'boolean' };
       }
       case 'IdentifierExpression': {
         const info = bindings.get(expr.name);
@@ -594,8 +970,29 @@ class Compiler {
       }
       case 'CallStatement': {
         const rt = this.functionReturnTypes.get(expr.name);
-        return rt ?? null;  // undefined (unknown fn) or null (void) → null
+        return rt ?? null;
       }
+      case 'ListLiteral': {
+        if (expr.kind === 'empty') {
+          return { kind: 'list', element: expr.elementType!, readonly: false };
+        }
+        // Try to infer from first element with known type.
+        let inferred: ScalarTypeName | null = null;
+        for (const e of expr.elements) {
+          const t = this.staticType(e, bindings);
+          if (t && t.kind === 'scalar') { inferred = t.name; break; }
+        }
+        return inferred ? { kind: 'list', element: inferred, readonly: false } : null;
+      }
+      case 'ItemAccessExpression':
+      case 'FirstItemExpression':
+      case 'LastItemExpression': {
+        const tt = this.staticType((expr as any).target, bindings);
+        if (tt && tt.kind === 'list') return { kind: 'scalar', name: tt.element };
+        return null;
+      }
+      case 'LengthExpression':
+        return { kind: 'scalar', name: 'number' };
       default:
         return null;
     }
@@ -614,7 +1011,6 @@ export function statementTerminates(stmt: Statement): boolean {
     if (!blockTerminates(stmt.elseBody)) return false;
     return true;
   }
-  // repeat bodies may run zero times → never terminating
   return false;
 }
 

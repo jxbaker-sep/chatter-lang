@@ -104,4 +104,13 @@ describe('Lexer', () => {
       expect(kws.has(w)).toBe(true);
     }
   });
+
+  test('list-related keywords tokenize as KEYWORDs', () => {
+    const src = 'set l to list of 1, 2\nempty list of number\nfirst item of l\nlast item of l\nlength of l\nl contains 1\nappend 1 to l\nprepend 1 to l\ninsert 1 at 1 in l\nremove item 1 from l\nrepeat with x in l\n    say x\nend repeat\nreadonly list of number';
+    const tokens = lex(src);
+    const kws = new Set(tokens.filter(t => t.type === 'KEYWORD').map(t => t.value));
+    for (const w of ['list', 'of', 'empty', 'item', 'first', 'last', 'length', 'contains', 'append', 'prepend', 'insert', 'in', 'remove', 'readonly']) {
+      expect(kws.has(w)).toBe(true);
+    }
+  });
 });

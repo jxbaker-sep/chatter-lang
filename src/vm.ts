@@ -7,13 +7,45 @@ export class RuntimeError extends Error {
   }
 }
 
-type ChatterValue = number | string | boolean;
+export interface ChatterList {
+  kind: 'list';
+  element: 'number' | 'string' | 'boolean';
+  items: ChatterValue[];
+}
+
+export type ChatterValue = number | string | boolean | ChatterList;
+
+function isList(v: ChatterValue): v is ChatterList {
+  return typeof v === 'object' && v !== null && (v as any).kind === 'list';
+}
+
+function describe(v: ChatterValue): string {
+  if (isList(v)) return `list of ${v.element}`;
+  return typeof v;
+}
+
+function formatScalar(v: number | string | boolean): string {
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return String(v);
+  return v;
+}
+
+function formatValue(v: ChatterValue): string {
+  if (isList(v)) {
+    return '[' + v.items.map(e => {
+      if (isList(e)) return formatValue(e);
+      if (typeof e === 'string') return `"${e}"`;
+      return formatScalar(e);
+    }).join(', ') + ']';
+  }
+  return formatScalar(v);
+}
 
 interface Frame {
   instructions: Instruction[];
   ip: number;
   locals: Map<string, ChatterValue>;
-  varTypes: Map<string, 'number' | 'string' | 'boolean'>;
+  varTypes: Map<string, 'number' | 'string' | 'boolean' | string>;
   it: ChatterValue | null;
 }
 
@@ -85,7 +117,7 @@ export class VM {
 
       case 'STORE_VAR': {
         const val = this.pop();
-        const valType = typeof val as 'number' | 'string' | 'boolean';
+        const valType = isList(val) ? `list:${val.element}` : (typeof val as string);
         const existing = frame.varTypes.get(instr.name);
         if (existing === undefined) {
           frame.varTypes.set(instr.name, valType);
@@ -181,11 +213,7 @@ export class VM {
         if (val === undefined) {
           throw new RuntimeError('Stack underflow in SAY');
         }
-        if (typeof val === 'boolean') {
-          console.log(val ? 'true' : 'false');
-        } else {
-          console.log(typeof val === 'number' ? String(val) : val);
-        }
+        console.log(formatValue(val));
         break;
       }
 
@@ -307,6 +335,177 @@ export class VM {
       case 'RETURN':
         // Handled in executeFrame; this branch is unreachable.
         break;
+
+      case 'MAKE_LIST': {
+        const elems: ChatterValue[] = new Array(instr.count);
+        for (let i = instr.count - 1; i >= 0; i--) {
+          elems[i] = this.pop();
+        }
+        if (instr.count === 0) {
+          throw new RuntimeError('MAKE_LIST with zero elements (use MAKE_EMPTY_LIST)');
+        }
+        let elementType: 'number' | 'string' | 'boolean';
+        if (instr.elementType !== null) {
+          elementType = instr.elementType;
+        } else {
+          const first = elems[0];
+          if (isList(first)) {
+            throw new RuntimeError('nested lists not supported');
+          }
+          elementType = typeof first as 'number' | 'string' | 'boolean';
+        }
+        for (let i = 0; i < elems.length; i++) {
+          const e = elems[i];
+          if (isList(e) || typeof e !== elementType) {
+            throw new RuntimeError(
+              `Type mismatch: list element ${i + 1} has type ${describe(e)}, expected ${elementType}`,
+            );
+          }
+        }
+        const list: ChatterList = { kind: 'list', element: elementType, items: elems };
+        this.stack.push(list);
+        break;
+      }
+
+      case 'MAKE_EMPTY_LIST': {
+        const list: ChatterList = { kind: 'list', element: instr.elementType, items: [] };
+        this.stack.push(list);
+        break;
+      }
+
+      case 'LIST_GET': {
+        const idx = this.pop();
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'item N of X' requires a list, got ${describe(list)}`);
+        }
+        if (typeof idx !== 'number') {
+          throw new RuntimeError(`Type mismatch: list index must be a number, got ${typeof idx}`);
+        }
+        if (idx < 1 || idx > list.items.length) {
+          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`);
+        }
+        this.stack.push(list.items[idx - 1]);
+        break;
+      }
+
+      case 'LIST_SET': {
+        const value = this.pop();
+        const idx = this.pop();
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'change item N of X' requires a list, got ${describe(list)}`);
+        }
+        if (typeof idx !== 'number') {
+          throw new RuntimeError(`Type mismatch: list index must be a number, got ${typeof idx}`);
+        }
+        if (idx < 1 || idx > list.items.length) {
+          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`);
+        }
+        if (isList(value) || typeof value !== list.element) {
+          throw new RuntimeError(
+            `Type mismatch: cannot assign ${describe(value)} to list of ${list.element}`,
+          );
+        }
+        list.items[idx - 1] = value;
+        break;
+      }
+
+      case 'LIST_LENGTH': {
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'length of X' requires a list, got ${describe(list)}`);
+        }
+        this.stack.push(list.items.length);
+        break;
+      }
+
+      case 'LIST_CONTAINS': {
+        const value = this.pop();
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'contains' requires a list on the left, got ${describe(list)}`);
+        }
+        if (isList(value) || typeof value !== list.element) {
+          throw new RuntimeError(
+            `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${list.element}`,
+          );
+        }
+        let found = false;
+        for (const e of list.items) {
+          if (e === value) { found = true; break; }
+        }
+        this.stack.push(found);
+        break;
+      }
+
+      case 'LIST_APPEND': {
+        const value = this.pop();
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'append' target must be a list, got ${describe(list)}`);
+        }
+        if (isList(value) || typeof value !== list.element) {
+          throw new RuntimeError(
+            `Type mismatch: cannot append ${describe(value)} to list of ${list.element}`,
+          );
+        }
+        list.items.push(value);
+        break;
+      }
+
+      case 'LIST_PREPEND': {
+        const value = this.pop();
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'prepend' target must be a list, got ${describe(list)}`);
+        }
+        if (isList(value) || typeof value !== list.element) {
+          throw new RuntimeError(
+            `Type mismatch: cannot prepend ${describe(value)} to list of ${list.element}`,
+          );
+        }
+        list.items.unshift(value);
+        break;
+      }
+
+      case 'LIST_INSERT': {
+        const value = this.pop();
+        const idx = this.pop();
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'insert' target must be a list, got ${describe(list)}`);
+        }
+        if (typeof idx !== 'number') {
+          throw new RuntimeError(`Type mismatch: insert position must be a number, got ${typeof idx}`);
+        }
+        if (idx < 1 || idx > list.items.length + 1) {
+          throw new RuntimeError(`List insert position out of range: ${idx} (list has ${list.items.length} items)`);
+        }
+        if (isList(value) || typeof value !== list.element) {
+          throw new RuntimeError(
+            `Type mismatch: cannot insert ${describe(value)} into list of ${list.element}`,
+          );
+        }
+        list.items.splice(idx - 1, 0, value);
+        break;
+      }
+
+      case 'LIST_REMOVE': {
+        const idx = this.pop();
+        const list = this.pop();
+        if (!isList(list)) {
+          throw new RuntimeError(`Type mismatch: 'remove' target must be a list, got ${describe(list)}`);
+        }
+        if (typeof idx !== 'number') {
+          throw new RuntimeError(`Type mismatch: remove position must be a number, got ${typeof idx}`);
+        }
+        if (idx < 1 || idx > list.items.length) {
+          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`);
+        }
+        list.items.splice(idx - 1, 1);
+        break;
+      }
     }
   }
 

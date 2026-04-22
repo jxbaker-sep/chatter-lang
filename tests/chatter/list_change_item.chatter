@@ -1,0 +1,5 @@
+set l to list of 1, 2, 3
+change item 2 of l to 99
+say item 1 of l
+say item 2 of l
+say item 3 of l

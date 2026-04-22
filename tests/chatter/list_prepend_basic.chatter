@@ -1,0 +1,4 @@
+set l to list of 2, 3
+prepend 1 to l
+say length of l
+say first item of l

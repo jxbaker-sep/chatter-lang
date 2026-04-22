@@ -1,0 +1,4 @@
+set a to list of 1, 2, 3
+set b to a
+append 4 to a
+say length of b

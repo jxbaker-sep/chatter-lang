@@ -1,0 +1,3 @@
+function tryMutate takes readonly list of number nums is
+    append 99 to nums
+end function

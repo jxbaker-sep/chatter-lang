@@ -32,7 +32,7 @@ describe('Parser', () => {
     expect(ast.body[0]).toMatchObject({
       type: 'FunctionDeclaration',
       name: 'double',
-      params: [{ paramType: 'number', name: 'a', label: null }],
+      params: [{ paramType: { kind: 'scalar', name: 'number' }, name: 'a', label: null }],
       body: [{
         type: 'ReturnStatement',
         value: {
@@ -59,8 +59,8 @@ describe('Parser', () => {
     const ast = parseSource(src);
     const decl = ast.body[0] as FunctionDeclaration;
     expect(decl.params).toEqual([
-      { paramType: 'number', name: 'a',  label: null },
-      { paramType: 'number', name: 'to', label: 'to' },
+      { paramType: { kind: 'scalar', name: 'number' }, name: 'a',  label: null },
+      { paramType: { kind: 'scalar', name: 'number' }, name: 'to', label: 'to' },
     ]);
     expect((decl.body[0] as ReturnStatement).value).toMatchObject({
       type: 'BinaryExpression',
@@ -75,8 +75,8 @@ describe('Parser', () => {
     const ast = parseSource(src);
     const decl = ast.body[0] as FunctionDeclaration;
     expect(decl.params).toEqual([
-      { paramType: 'number', name: 'base',     label: null },
-      { paramType: 'number', name: 'exponent', label: 'to' },
+      { paramType: { kind: 'scalar', name: 'number' }, name: 'base',     label: null },
+      { paramType: { kind: 'scalar', name: 'number' }, name: 'exponent', label: 'to' },
     ]);
   });
 
@@ -85,9 +85,9 @@ describe('Parser', () => {
     const ast = parseSource(src);
     const decl = ast.body[0] as FunctionDeclaration;
     expect(decl.params).toEqual([
-      { paramType: 'number', name: 'a', label: null },
-      { paramType: 'number', name: 'b', label: 'with' },
-      { paramType: 'number', name: 'c', label: 'with' },
+      { paramType: { kind: 'scalar', name: 'number' }, name: 'a', label: null },
+      { paramType: { kind: 'scalar', name: 'number' }, name: 'b', label: 'with' },
+      { paramType: { kind: 'scalar', name: 'number' }, name: 'c', label: 'with' },
     ]);
   });
 
@@ -466,7 +466,7 @@ describe('Parser', () => {
       expect(ast.body[0]).toMatchObject({
         type: 'FunctionDeclaration',
         name: 'double',
-        returnType: 'number',
+        returnType: { kind: 'scalar', name: 'number' },
       });
     });
 
@@ -474,13 +474,13 @@ describe('Parser', () => {
       const ast = parseSource('function hello returns string is\n    return "hi"\nend');
       expect(ast.body[0]).toMatchObject({
         type: 'FunctionDeclaration',
-        returnType: 'string',
+        returnType: { kind: 'scalar', name: 'string' },
       });
     });
 
     test('function decl with returns boolean', () => {
       const ast = parseSource('function yep returns boolean is\n    return true\nend');
-      expect(ast.body[0]).toMatchObject({ returnType: 'boolean' });
+      expect(ast.body[0]).toMatchObject({ returnType: { kind: 'scalar', name: 'boolean' } });
     });
 
     test('bare return parses with null value', () => {
@@ -502,12 +502,99 @@ describe('Parser', () => {
         'function raise takes number base to number exponent returns number is\n    return base ** exponent\nend',
       );
       expect(ast.body[0]).toMatchObject({
-        returnType: 'number',
+        returnType: { kind: 'scalar', name: 'number' },
         params: [
-          { paramType: 'number', name: 'base', label: null },
-          { paramType: 'number', name: 'exponent', label: 'to' },
+          { paramType: { kind: 'scalar', name: 'number' }, name: 'base', label: null },
+          { paramType: { kind: 'scalar', name: 'number' }, name: 'exponent', label: 'to' },
         ],
       });
+    });
+  });
+
+  describe('lists', () => {
+    test('parses nonempty list literal', () => {
+      const ast = parseSource('set l to list of 1, 2, 3');
+      expect(ast.body[0]).toMatchObject({
+        type: 'SetStatement',
+        name: 'l',
+        value: {
+          type: 'ListLiteral',
+          kind: 'nonempty',
+          elements: [
+            { type: 'NumberLiteral', value: 1 },
+            { type: 'NumberLiteral', value: 2 },
+            { type: 'NumberLiteral', value: 3 },
+          ],
+        },
+      });
+    });
+
+    test('parses empty list literal with element type', () => {
+      const ast = parseSource('set l to empty list of string');
+      expect(ast.body[0]).toMatchObject({
+        type: 'SetStatement',
+        value: { type: 'ListLiteral', kind: 'empty', elementType: 'string', elements: [] },
+      });
+    });
+
+    test('rejects nested list type in literal', () => {
+      expect(() => parseSource('set l to list of list of 1, 2')).toThrow(/nested lists not supported/);
+    });
+
+    test('rejects nested list in type annotation', () => {
+      expect(() => parseSource('function f takes list of list of number xs is\n    say 1\nend')).toThrow(/nested lists not supported/);
+    });
+
+    test('parses item N of L', () => {
+      const ast = parseSource('say item 2 of xs');
+      expect(ast.body[0]).toMatchObject({
+        type: 'SayStatement',
+        expression: {
+          type: 'ItemAccessExpression',
+          index: { type: 'NumberLiteral', value: 2 },
+          target: { type: 'IdentifierExpression', name: 'xs' },
+        },
+      });
+    });
+
+    test('parses first item of / last item of / length of', () => {
+      const ast = parseSource('say first item of xs\nsay last item of xs\nsay length of xs');
+      expect(ast.body[0]).toMatchObject({ expression: { type: 'FirstItemExpression' } });
+      expect(ast.body[1]).toMatchObject({ expression: { type: 'LastItemExpression' } });
+      expect(ast.body[2]).toMatchObject({ expression: { type: 'LengthExpression' } });
+    });
+
+    test('parses contains as binary operator', () => {
+      const ast = parseSource('set r to xs contains 3');
+      expect((ast.body[0] as SetStatement).value).toMatchObject({
+        type: 'BinaryExpression',
+        operator: 'contains',
+      });
+    });
+
+    test('parses list mutation statements', () => {
+      const ast = parseSource('append 1 to xs\nprepend 2 to xs\ninsert 3 at 1 in xs\nremove item 2 from xs\nchange item 1 of xs to 9');
+      expect(ast.body[0]).toMatchObject({ type: 'AppendStatement', listName: 'xs' });
+      expect(ast.body[1]).toMatchObject({ type: 'PrependStatement', listName: 'xs' });
+      expect(ast.body[2]).toMatchObject({ type: 'InsertStatement', listName: 'xs' });
+      expect(ast.body[3]).toMatchObject({ type: 'RemoveItemStatement', listName: 'xs' });
+      expect(ast.body[4]).toMatchObject({ type: 'ChangeItemStatement', listName: 'xs' });
+    });
+
+    test('parses repeat with x in L', () => {
+      const ast = parseSource('repeat with x in xs\n    say x\nend repeat');
+      expect(ast.body[0]).toMatchObject({ type: 'RepeatStatement', kind: 'list', varName: 'x' });
+    });
+
+    test('parses list of TYPE and readonly list of TYPE param annotations', () => {
+      const ast = parseSource('function f takes list of number xs other readonly list of string ys is\n    say 1\nend');
+      const fn = ast.body[0] as FunctionDeclaration;
+      expect(fn.params[0].paramType).toEqual({ kind: 'list', element: 'number', readonly: false });
+      expect(fn.params[1].paramType).toEqual({ kind: 'list', element: 'string', readonly: true });
+    });
+
+    test('rejects readonly outside parameter annotations', () => {
+      expect(() => parseSource('set l to readonly list of number')).toThrow(/readonly/);
     });
   });
 });

@@ -1,0 +1,7 @@
+function inner takes list of number nums is
+    append 1 to nums
+end function
+
+function outer takes readonly list of number nums is
+    inner nums
+end function

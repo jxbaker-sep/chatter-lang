@@ -30,6 +30,16 @@ export type Instruction =
   | { op: 'SAY' }
   | { op: 'DROP' }  // pops and discards stack top; used at void call sites to ignore the implicit 0 left by the callee
   | { op: 'CHECK_TYPE'; expected: 'number' | 'string' | 'boolean'; context: string }  // peeks stack top; throws if type mismatches; used to enforce typed-function return types when the static type is unknown
+  | { op: 'MAKE_LIST'; count: number; elementType: 'number' | 'string' | 'boolean' | null }  // pop count values, push list; elementType=null means infer from first
+  | { op: 'MAKE_EMPTY_LIST'; elementType: 'number' | 'string' | 'boolean' }
+  | { op: 'LIST_GET' }        // pop index, pop list, push element
+  | { op: 'LIST_SET' }        // pop value, pop index, pop list, mutate
+  | { op: 'LIST_LENGTH' }     // pop list, push number
+  | { op: 'LIST_CONTAINS' }   // pop value, pop list, push boolean
+  | { op: 'LIST_APPEND' }     // pop value, pop list, mutate
+  | { op: 'LIST_PREPEND' }    // pop value, pop list, mutate
+  | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate
+  | { op: 'LIST_REMOVE' }     // pop index, pop list, mutate
   | { op: 'ERROR'; message: string };
 
 export interface FunctionDef {

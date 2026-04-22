@@ -1,0 +1,3 @@
+repeat with x in list of 1, 2, 3
+    say x
+end repeat

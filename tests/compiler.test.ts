@@ -527,4 +527,91 @@ describe('Compiler', () => {
       expect(() => compileSource(src)).toThrow(/void function 'greet'/);
     });
   });
+
+  describe('lists', () => {
+    test('emits MAKE_LIST for nonempty literal', () => {
+      const bc = compileSource('set l to list of 1, 2, 3');
+      expect(bc.main).toContainEqual({ op: 'MAKE_LIST', count: 3, elementType: 'number' });
+    });
+
+    test('emits MAKE_EMPTY_LIST with element type', () => {
+      const bc = compileSource('set l to empty list of boolean');
+      expect(bc.main).toContainEqual({ op: 'MAKE_EMPTY_LIST', elementType: 'boolean' });
+    });
+
+    test('mixed static types in literal → compile error', () => {
+      expect(() => compileSource('set l to list of 1, "hi"')).toThrow(/mixed element types/);
+    });
+
+    test('append to non-list var → compile error', () => {
+      expect(() => compileSource('set x to 5\nappend 1 to x')).toThrow(/not a list/);
+    });
+
+    test('append inside function with readonly param → compile error', () => {
+      const src = 'function f takes readonly list of number xs is\n    append 1 to xs\nend';
+      expect(() => compileSource(src)).toThrow(/readonly list reference/);
+    });
+
+    test('change item with readonly param → compile error', () => {
+      const src = 'function f takes readonly list of number xs is\n    change item 1 of xs to 9\nend';
+      expect(() => compileSource(src)).toThrow(/readonly/);
+    });
+
+    test('set x to readonly param → compile error (no smuggling)', () => {
+      const src = 'function f takes readonly list of number xs is\n    set other to xs\n    say length of other\nend';
+      expect(() => compileSource(src)).toThrow(/readonly-list reference/);
+    });
+
+    test('var other is readonly param → compile error', () => {
+      const src = 'function f takes readonly list of number xs is\n    var other is xs\nend';
+      expect(() => compileSource(src)).toThrow(/readonly-list reference/);
+    });
+
+    test('widening: mutable arg → readonly param OK', () => {
+      const src = 'function f takes readonly list of number xs returns number is\n    return length of xs\nend\nset l to list of 1, 2\nf l\nsay it';
+      expect(() => compileSource(src)).not.toThrow();
+    });
+
+    test('narrowing: readonly arg → mutable param rejected', () => {
+      const src = [
+        'function inner takes list of number xs is',
+        '    append 1 to xs',
+        'end',
+        'function outer takes readonly list of number xs is',
+        '    inner xs',
+        'end',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(/Cannot pass readonly-list reference/);
+    });
+
+    test('pass scalar to list param → compile error', () => {
+      const src = 'function f takes list of number xs is\n    say length of xs\nend\nf 5';
+      expect(() => compileSource(src)).toThrow(/Type mismatch/);
+    });
+
+    test('return readonly list reference from function → compile error', () => {
+      const src = 'function f takes readonly list of number xs returns list of number is\n    return xs\nend';
+      expect(() => compileSource(src)).toThrow(/readonly/);
+    });
+
+    test('change var list to different element type → compile error', () => {
+      const src = 'var l is list of 1, 2\nchange l to list of "a", "b"';
+      expect(() => compileSource(src)).toThrow(/Type mismatch/);
+    });
+
+    test('append wrong-type literal → compile error', () => {
+      const src = 'set l to list of 1, 2\nappend "hi" to l';
+      expect(() => compileSource(src)).toThrow(/cannot append string to list of number/);
+    });
+
+    test('change x in list iteration → compile error', () => {
+      const src = 'repeat with x in list of 1, 2, 3\n    change x to 5\nend repeat';
+      expect(() => compileSource(src)).toThrow(/Cannot change 'x'/);
+    });
+
+    test('contains compiles to LIST_CONTAINS', () => {
+      const bc = compileSource('set l to list of 1, 2\nsay l contains 1');
+      expect(bc.main).toContainEqual({ op: 'LIST_CONTAINS' });
+    });
+  });
 });

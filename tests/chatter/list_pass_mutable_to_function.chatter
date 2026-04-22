@@ -1,0 +1,8 @@
+function push takes list of number nums is
+    append 99 to nums
+end function
+
+set l to list of 1, 2
+push l
+say length of l
+say last item of l

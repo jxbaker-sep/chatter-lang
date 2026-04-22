@@ -1,3 +1,9 @@
+export type ScalarTypeName = 'number' | 'string' | 'boolean';
+
+export type TypeAnnotation =
+  | { kind: 'scalar'; name: ScalarTypeName }
+  | { kind: 'list'; element: ScalarTypeName; readonly: boolean };
+
 export type Expression =
   | BinaryExpression
   | UnaryExpression
@@ -6,19 +12,29 @@ export type Expression =
   | StringLiteral
   | BooleanLiteral
   | ItExpression
-  | CallStatement;
+  | CallStatement
+  | ListLiteral
+  | ItemAccessExpression
+  | FirstItemExpression
+  | LastItemExpression
+  | LengthExpression;
 
 export type Statement =
   | SayStatement
   | SetStatement
   | VarDeclaration
   | ChangeStatement
+  | ChangeItemStatement
   | CompoundAssignStatement
   | FunctionDeclaration
   | CallStatement
   | ReturnStatement
   | IfStatement
-  | RepeatStatement;
+  | RepeatStatement
+  | AppendStatement
+  | PrependStatement
+  | InsertStatement
+  | RemoveItemStatement;
 
 export interface VarDeclaration {
   type: 'VarDeclaration';
@@ -29,6 +45,13 @@ export interface VarDeclaration {
 export interface ChangeStatement {
   type: 'ChangeStatement';
   name: string;
+  value: Expression;
+}
+
+export interface ChangeItemStatement {
+  type: 'ChangeItemStatement';
+  listName: string;
+  index: Expression;
   value: Expression;
 }
 
@@ -56,7 +79,7 @@ export interface SetStatement {
 }
 
 export interface FunctionParam {
-  paramType: string;
+  paramType: TypeAnnotation;
   name: string;
   label: string | null;  // null for first param; non-null for each subsequent param
 }
@@ -65,7 +88,7 @@ export interface FunctionDeclaration {
   type: 'FunctionDeclaration';
   name: string;
   params: FunctionParam[];
-  returnType: 'number' | 'string' | 'boolean' | null;  // null = void
+  returnType: TypeAnnotation | null;  // null = void
   body: Statement[];
 }
 
@@ -131,4 +154,59 @@ export interface IfStatement {
 export type RepeatStatement =
   | { type: 'RepeatStatement'; kind: 'times'; count: Expression; body: Statement[] }
   | { type: 'RepeatStatement'; kind: 'range'; varName: string; from: Expression; to: Expression; body: Statement[] }
-  | { type: 'RepeatStatement'; kind: 'while'; condition: Expression; body: Statement[] };
+  | { type: 'RepeatStatement'; kind: 'while'; condition: Expression; body: Statement[] }
+  | { type: 'RepeatStatement'; kind: 'list'; varName: string; list: Expression; body: Statement[] };
+
+export interface ListLiteral {
+  type: 'ListLiteral';
+  kind: 'nonempty' | 'empty';
+  elementType: ScalarTypeName | null;  // required for empty; null for nonempty (inferred)
+  elements: Expression[];
+}
+
+export interface ItemAccessExpression {
+  type: 'ItemAccessExpression';
+  index: Expression;
+  target: Expression;
+}
+
+export interface FirstItemExpression {
+  type: 'FirstItemExpression';
+  target: Expression;
+}
+
+export interface LastItemExpression {
+  type: 'LastItemExpression';
+  target: Expression;
+}
+
+export interface LengthExpression {
+  type: 'LengthExpression';
+  target: Expression;
+}
+
+export interface AppendStatement {
+  type: 'AppendStatement';
+  listName: string;
+  value: Expression;
+}
+
+export interface PrependStatement {
+  type: 'PrependStatement';
+  listName: string;
+  value: Expression;
+}
+
+export interface InsertStatement {
+  type: 'InsertStatement';
+  listName: string;
+  index: Expression;
+  value: Expression;
+}
+
+export interface RemoveItemStatement {
+  type: 'RemoveItemStatement';
+  listName: string;
+  index: Expression;
+}
+

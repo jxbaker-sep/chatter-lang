@@ -650,4 +650,97 @@ describe('VM', () => {
       expect(runSource(src)).toEqual(['zero']);
     });
   });
+
+  describe('lists', () => {
+    test('basic literal + length + item access', () => {
+      expect(runSource('set l to list of 10, 20, 30\nsay length of l\nsay item 2 of l'))
+        .toEqual(['3', '20']);
+    });
+
+    test('empty list length is 0', () => {
+      expect(runSource('set l to empty list of number\nsay length of l')).toEqual(['0']);
+    });
+
+    test('item OOB runtime error', () => {
+      expectRuntimeError('set l to list of 1, 2\nsay item 5 of l');
+    });
+
+    test('first/last item of empty → runtime error', () => {
+      expectRuntimeError('set l to empty list of number\nsay first item of l');
+      expectRuntimeError('set l to empty list of string\nsay last item of l');
+    });
+
+    test('contains predicate', () => {
+      expect(runSource('set l to list of 1, 2, 3\nsay l contains 2')).toEqual(['true']);
+      expect(runSource('set l to list of 1, 2, 3\nsay l contains 99')).toEqual(['false']);
+    });
+
+    test('reference semantics via alias', () => {
+      const src = 'set a to list of 1, 2, 3\nset b to a\nappend 4 to a\nsay length of b';
+      expect(runSource(src)).toEqual(['4']);
+    });
+
+    test('reference semantics via function arg', () => {
+      const src = [
+        'function push takes list of number xs is',
+        '    append 42 to xs',
+        'end',
+        'set l to list of 1, 2',
+        'push l',
+        'say length of l',
+        'say last item of l',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['3', '42']);
+    });
+
+    test('insert/remove/change item basic', () => {
+      const src = [
+        'set l to list of 1, 3',
+        'insert 2 at 2 in l',
+        'change item 3 of l to 99',
+        'remove item 1 from l',
+        'say length of l',
+        'say item 1 of l',
+        'say item 2 of l',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['2', '2', '99']);
+    });
+
+    test('insert at length+1 == append position', () => {
+      const src = 'set l to list of 1, 2\ninsert 3 at 3 in l\nsay last item of l';
+      expect(runSource(src)).toEqual(['3']);
+    });
+
+    test('insert OOB runtime error', () => {
+      expectRuntimeError('set l to list of 1\ninsert 9 at 5 in l');
+    });
+
+    test('iteration sums elements', () => {
+      const src = [
+        'var total is 0',
+        'repeat with x in list of 1, 2, 3, 4',
+        '    add x to total',
+        'end repeat',
+        'say total',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['10']);
+    });
+
+    test('iteration over empty list does zero iterations', () => {
+      const src = [
+        'var count is 0',
+        'set l to empty list of number',
+        'repeat with x in l',
+        '    add 1 to count',
+        'end repeat',
+        'say count',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['0']);
+    });
+
+    test('say of a list formats as bracketed literal', () => {
+      expect(runSource('say list of 1, 2, 3')).toEqual(['[1, 2, 3]']);
+      expect(runSource('say list of "a", "b"')).toEqual(['["a", "b"]']);
+    });
+  });
 });
