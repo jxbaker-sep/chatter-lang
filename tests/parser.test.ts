@@ -298,4 +298,47 @@ describe('Parser', () => {
       });
     });
   });
+
+  describe('comparison operators', () => {
+    function getCond(src: string): BinaryExpression {
+      const ast = parseSource(src);
+      return (ast.body[0] as any).branches[0].condition as BinaryExpression;
+    }
+
+    test('is less than → <', () => {
+      expect(getCond('if a is less than b\n    say 1\nend')).toMatchObject({
+        type: 'BinaryExpression', operator: '<',
+        left: { type: 'IdentifierExpression', name: 'a' },
+        right: { type: 'IdentifierExpression', name: 'b' },
+      });
+    });
+
+    test('is greater than → >', () => {
+      expect(getCond('if a is greater than b\n    say 1\nend')).toMatchObject({
+        type: 'BinaryExpression', operator: '>',
+      });
+    });
+
+    test('is at most → <=', () => {
+      expect(getCond('if a is at most b\n    say 1\nend')).toMatchObject({
+        type: 'BinaryExpression', operator: '<=',
+      });
+    });
+
+    test('is at least → >=', () => {
+      expect(getCond('if a is at least b\n    say 1\nend')).toMatchObject({
+        type: 'BinaryExpression', operator: '>=',
+      });
+    });
+
+    test('is at foo without least/most is a ParseError mentioning least', () => {
+      expect(() => parseSource('if a is at 5\n    say 1\nend')).toThrow(/least/);
+    });
+
+    test('arithmetic binds tighter than comparison', () => {
+      const cond = getCond('if a + 1 is at least 5\n    say 1\nend');
+      expect(cond.operator).toBe('>=');
+      expect(cond.left).toMatchObject({ type: 'BinaryExpression', operator: '+' });
+    });
+  });
 });

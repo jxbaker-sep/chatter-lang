@@ -348,6 +348,10 @@ class Compiler {
       case '**': out.push({ op: 'POW' }); break;
       case '==': out.push({ op: 'EQ' }); break;
       case '!=': out.push({ op: 'NEQ' }); break;
+      case '<':  out.push({ op: 'LT' }); break;
+      case '<=': out.push({ op: 'LE' }); break;
+      case '>':  out.push({ op: 'GT' }); break;
+      case '>=': out.push({ op: 'GE' }); break;
       case 'and': out.push({ op: 'AND' }); break;
       case 'or':  out.push({ op: 'OR' }); break;
       default:

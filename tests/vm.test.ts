@@ -440,4 +440,33 @@ describe('VM', () => {
       expectRuntimeError('repeat with i from 1 to 2\n    say i\nend repeat\nsay i');
     });
   });
+
+  describe('Comparison operators', () => {
+    const truthy = (src: string) => runSource(`if ${src}\n    say "yes"\nelse\n    say "no"\nend`);
+
+    test('GT: 5 > 3 true, 3 > 5 false', () => {
+      expect(truthy('5 is greater than 3')).toEqual(['yes']);
+      expect(truthy('3 is greater than 5')).toEqual(['no']);
+      expect(truthy('5 is greater than 5')).toEqual(['no']);
+    });
+    test('GE: >= semantics', () => {
+      expect(truthy('5 is at least 5')).toEqual(['yes']);
+      expect(truthy('5 is at least 6')).toEqual(['no']);
+      expect(truthy('7 is at least 3')).toEqual(['yes']);
+    });
+    test('LT: < semantics', () => {
+      expect(truthy('3 is less than 5')).toEqual(['yes']);
+      expect(truthy('5 is less than 5')).toEqual(['no']);
+    });
+    test('LE: <= semantics', () => {
+      expect(truthy('5 is at most 5')).toEqual(['yes']);
+      expect(truthy('6 is at most 5')).toEqual(['no']);
+    });
+    test('type mismatch throws RuntimeError', () => {
+      expectRuntimeError('if 5 is greater than "x"\n    say 1\nend');
+      expectRuntimeError('if 5 is at least "x"\n    say 1\nend');
+      expectRuntimeError('if 5 is less than "x"\n    say 1\nend');
+      expectRuntimeError('if 5 is at most "x"\n    say 1\nend');
+    });
+  });
 });

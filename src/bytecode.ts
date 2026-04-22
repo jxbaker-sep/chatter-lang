@@ -16,6 +16,8 @@ export type Instruction =
   | { op: 'NEQ' }
   | { op: 'LT' }
   | { op: 'LE' }
+  | { op: 'GT' }
+  | { op: 'GE' }
   | { op: 'AND' }
   | { op: 'OR' }
   | { op: 'NOT' }

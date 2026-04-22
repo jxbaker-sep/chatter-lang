@@ -1,0 +1,11 @@
+set x to 6
+if x is at least 5 and x is less than 10
+    say "in range"
+end if
+
+set y to 20
+if y is at least 5 and y is less than 10
+    say "wrong"
+else
+    say "out of range"
+end if

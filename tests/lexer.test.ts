@@ -87,4 +87,12 @@ describe('Lexer', () => {
     const tokens3 = lex('repeat while false\n    say 1\nend');
     expect(tokens3.filter(t => t.type === 'KEYWORD').map(t => t.value)).toContain('while');
   });
+
+  test('comparison words tokenize as KEYWORDs', () => {
+    const tokens = lex('if a is less than b and c is at least d and e is greater than f and g is at most h\n    say 1\nend');
+    const kws = new Set(tokens.filter(t => t.type === 'KEYWORD').map(t => t.value));
+    for (const w of ['less', 'greater', 'than', 'at', 'least', 'most']) {
+      expect(kws.has(w)).toBe(true);
+    }
+  });
 });

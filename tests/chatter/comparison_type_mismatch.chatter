@@ -1,0 +1,3 @@
+if 5 is less than "apple"
+    say "unreachable"
+end if

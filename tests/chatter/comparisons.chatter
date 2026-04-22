@@ -1,0 +1,41 @@
+set x to 5
+
+if x is less than 10
+    say "lt-ok"
+end if
+
+if x is less than 5
+    say "wrong"
+else
+    say "lt-false"
+end if
+
+if x is at most 5
+    say "le-eq"
+end if
+
+if x is at most 4
+    say "wrong"
+else
+    say "le-false"
+end if
+
+if x is greater than 0
+    say "gt-ok"
+end if
+
+if x is greater than 5
+    say "wrong"
+else
+    say "gt-false"
+end if
+
+if x is at least 5
+    say "ge-eq"
+end if
+
+if x is at least 6
+    say "wrong"
+else
+    say "ge-false"
+end if

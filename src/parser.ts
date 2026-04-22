@@ -21,6 +21,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
   'true', 'false', 'is', 'say', 'set', 'function', 'return',
   'repeat', 'times', 'with', 'from', 'while',
+  'less', 'greater', 'than', 'at', 'least', 'most',
 ]);
 
 export function parse(tokens: Token[]): Program {
@@ -343,10 +344,34 @@ export function parse(tokens: Token[]): Program {
     // encounter `is` mid-expression.
     while (peek().type === 'KEYWORD' && peek().value === 'is') {
       advance(); // consume `is`
-      let op: '==' | '!=' = '==';
-      if (peek().type === 'KEYWORD' && peek().value === 'not') {
+      let op: '==' | '!=' | '<' | '<=' | '>' | '>=' = '==';
+      const next = peek();
+      if (next.type === 'KEYWORD' && next.value === 'not') {
         advance();
         op = '!=';
+      } else if (next.type === 'KEYWORD' && next.value === 'less') {
+        advance();
+        consume('KEYWORD', 'than');
+        op = '<';
+      } else if (next.type === 'KEYWORD' && next.value === 'greater') {
+        advance();
+        consume('KEYWORD', 'than');
+        op = '>';
+      } else if (next.type === 'KEYWORD' && next.value === 'at') {
+        advance();
+        const after = peek();
+        if (after.type === 'KEYWORD' && after.value === 'least') {
+          advance();
+          op = '>=';
+        } else if (after.type === 'KEYWORD' && after.value === 'most') {
+          advance();
+          op = '<=';
+        } else {
+          throw new ParseError(
+            `Expected 'least' or 'most' after 'is at' at line ${after.line}, got ${after.type} '${after.value}'`,
+            after,
+          );
+        }
       }
       const right = parseAdditive();
       left = { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;

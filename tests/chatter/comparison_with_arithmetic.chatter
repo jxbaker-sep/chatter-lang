@@ -1,0 +1,8 @@
+set x to 3
+if x + 2 is at least 5
+    say "ok"
+end if
+
+if x * 2 is greater than 5
+    say "also ok"
+end if

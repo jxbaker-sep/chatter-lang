@@ -229,4 +229,23 @@ describe('Compiler', () => {
       expect(() => compileSource(src)).not.toThrow();
     });
   });
+
+  describe('comparison operators', () => {
+    test('is less than emits LT', () => {
+      const bc = compileSource('if 1 is less than 2\n    say 1\nend');
+      expect(bc.main.some(i => i.op === 'LT')).toBe(true);
+    });
+    test('is at most emits LE', () => {
+      const bc = compileSource('if 1 is at most 2\n    say 1\nend');
+      expect(bc.main.some(i => i.op === 'LE')).toBe(true);
+    });
+    test('is greater than emits GT', () => {
+      const bc = compileSource('if 1 is greater than 2\n    say 1\nend');
+      expect(bc.main.some(i => i.op === 'GT')).toBe(true);
+    });
+    test('is at least emits GE', () => {
+      const bc = compileSource('if 1 is at least 2\n    say 1\nend');
+      expect(bc.main.some(i => i.op === 'GE')).toBe(true);
+    });
+  });
 });

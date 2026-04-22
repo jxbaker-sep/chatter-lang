@@ -194,13 +194,22 @@ export class VM {
       }
 
       case 'LT':
-      case 'LE': {
+      case 'LE':
+      case 'GT':
+      case 'GE': {
         const b = this.pop();
         const a = this.pop();
         if (typeof a !== 'number' || typeof b !== 'number') {
           throw new RuntimeError('Type mismatch: comparison requires numbers');
         }
-        this.stack.push(instr.op === 'LT' ? a < b : a <= b);
+        let r: boolean;
+        switch (instr.op) {
+          case 'LT': r = a < b; break;
+          case 'LE': r = a <= b; break;
+          case 'GT': r = a > b; break;
+          case 'GE': r = a >= b; break;
+        }
+        this.stack.push(r);
         break;
       }
 

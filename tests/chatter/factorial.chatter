@@ -1,0 +1,5 @@
+function factorial(number n)
+    if n == 1
+        return 1
+        
+end function
