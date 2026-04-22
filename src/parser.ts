@@ -6,6 +6,7 @@ import {
   BinaryExpression, UnaryExpression, IdentifierExpression,
   NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
   IfStatement, IfBranch, RepeatStatement,
+  VarDeclaration, ChangeStatement, CompoundAssignStatement,
 } from './ast';
 
 export class ParseError extends Error {
@@ -22,6 +23,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'true', 'false', 'is', 'say', 'set', 'function', 'return',
   'repeat', 'times', 'with', 'from', 'while',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
+  'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by',
 ]);
 
 export function parse(tokens: Token[]): Program {
@@ -71,6 +73,12 @@ export function parse(tokens: Token[]): Program {
       switch (tok.value) {
         case 'say':      return parseSayStatement();
         case 'set':      return parseSetStatement();
+        case 'var':      return parseVarDeclaration();
+        case 'change':   return parseChangeStatement();
+        case 'add':      return parseAddStatement();
+        case 'subtract': return parseSubtractStatement();
+        case 'multiply': return parseMultiplyStatement();
+        case 'divide':   return parseDivideStatement();
         case 'function': return parseFunctionDeclaration();
         case 'return':   return parseReturnStatement();
         case 'if':       return parseIfStatement();
@@ -102,6 +110,60 @@ export function parse(tokens: Token[]): Program {
     const value = parseExpression();
     consumeNewline();
     return { type: 'SetStatement', name: nameTok.value, value };
+  }
+
+  function parseVarDeclaration(): VarDeclaration {
+    consume('KEYWORD', 'var');
+    const nameTok = consume('IDENT');
+    consume('KEYWORD', 'is');
+    const value = parseExpression();
+    consumeNewline();
+    return { type: 'VarDeclaration', name: nameTok.value, value };
+  }
+
+  function parseChangeStatement(): ChangeStatement {
+    consume('KEYWORD', 'change');
+    const nameTok = consume('IDENT');
+    consume('KEYWORD', 'to');
+    const value = parseExpression();
+    consumeNewline();
+    return { type: 'ChangeStatement', name: nameTok.value, value };
+  }
+
+  function parseAddStatement(): CompoundAssignStatement {
+    consume('KEYWORD', 'add');
+    const value = parseExpression();
+    consume('KEYWORD', 'to');
+    const nameTok = consume('IDENT');
+    consumeNewline();
+    return { type: 'CompoundAssignStatement', op: 'add', name: nameTok.value, value };
+  }
+
+  function parseSubtractStatement(): CompoundAssignStatement {
+    consume('KEYWORD', 'subtract');
+    const value = parseExpression();
+    consume('KEYWORD', 'from');
+    const nameTok = consume('IDENT');
+    consumeNewline();
+    return { type: 'CompoundAssignStatement', op: 'subtract', name: nameTok.value, value };
+  }
+
+  function parseMultiplyStatement(): CompoundAssignStatement {
+    consume('KEYWORD', 'multiply');
+    const nameTok = consume('IDENT');
+    consume('KEYWORD', 'by');
+    const value = parseExpression();
+    consumeNewline();
+    return { type: 'CompoundAssignStatement', op: 'multiply', name: nameTok.value, value };
+  }
+
+  function parseDivideStatement(): CompoundAssignStatement {
+    consume('KEYWORD', 'divide');
+    const nameTok = consume('IDENT');
+    consume('KEYWORD', 'by');
+    const value = parseExpression();
+    consumeNewline();
+    return { type: 'CompoundAssignStatement', op: 'divide', name: nameTok.value, value };
   }
 
   function parseFunctionDeclaration(): FunctionDeclaration {

@@ -469,4 +469,71 @@ describe('VM', () => {
       expectRuntimeError('if 5 is at most "x"\n    say 1\nend');
     });
   });
+
+  describe('var / change / compound assign', () => {
+    test('var declares and stores a value readable by identifier', () => {
+      expect(runSource('var x is 42\nsay x')).toEqual(['42']);
+    });
+
+    test('change reassigns a var', () => {
+      expect(runSource('var x is 1\nchange x to 2\nsay x')).toEqual(['2']);
+    });
+
+    test('change to a different type throws a RuntimeError mentioning the name and types', () => {
+      const program = compile(parse(lex('var x is 5\nchange x to "hi"')));
+      expect(() => new VM(program).run()).toThrow(/Type mismatch.*x.*number.*string/);
+    });
+
+    test('add/subtract/multiply/divide mutate a numeric var', () => {
+      expect(runSource('var n is 10\nadd 5 to n\nsay n')).toEqual(['15']);
+      expect(runSource('var n is 10\nsubtract 3 from n\nsay n')).toEqual(['7']);
+      expect(runSource('var n is 10\nmultiply n by 3\nsay n')).toEqual(['30']);
+      expect(runSource('var n is 10\ndivide n by 2\nsay n')).toEqual(['5']);
+    });
+
+    test('var is function-local (each call reinitialises)', () => {
+      const src = [
+        'function f() is',
+        '    var x is 1',
+        '    add 1 to x',
+        '    return x',
+        'end',
+        'f',
+        'say it',
+        'f',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['2', '2']);
+    });
+
+    test('var/change/sugar do NOT update `it`', () => {
+      const src = [
+        'function f() is',
+        '    return 7',
+        'end',
+        'f',
+        'var x is 99',
+        'change x to 100',
+        'add 1 to x',
+        'say it',
+      ].join('\n');
+      // `it` should still be 7 (from the call to f); var/change/add don't touch it.
+      expect(runSource(src)).toEqual(['7']);
+    });
+
+    test('factorial using var + repeat range', () => {
+      const src = [
+        'function fact(number n) is',
+        '    var result is 1',
+        '    repeat with i from 2 to n',
+        '        multiply result by i',
+        '    end repeat',
+        '    return result',
+        'end',
+        'fact 5',
+        'say it',
+      ].join('\n');
+      expect(runSource(src)).toEqual(['120']);
+    });
+  });
 });

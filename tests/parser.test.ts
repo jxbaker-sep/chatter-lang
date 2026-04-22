@@ -299,6 +299,68 @@ describe('Parser', () => {
     });
   });
 
+  describe('var / change / compound assign', () => {
+    test('var x is EXPR produces VarDeclaration', () => {
+      const ast = parseSource('var x is 5');
+      expect(ast.body[0]).toMatchObject({
+        type: 'VarDeclaration',
+        name: 'x',
+        value: { type: 'NumberLiteral', value: 5 },
+      });
+    });
+
+    test('var without initializer is a parse error', () => {
+      expect(() => parseSource('var x')).toThrow();
+    });
+
+    test('change x to EXPR produces ChangeStatement', () => {
+      const ast = parseSource('change x to 7');
+      expect(ast.body[0]).toMatchObject({
+        type: 'ChangeStatement',
+        name: 'x',
+        value: { type: 'NumberLiteral', value: 7 },
+      });
+    });
+
+    test('add EXPR to NAME produces CompoundAssignStatement op=add', () => {
+      const ast = parseSource('add 3 to n');
+      expect(ast.body[0]).toMatchObject({
+        type: 'CompoundAssignStatement', op: 'add', name: 'n',
+        value: { type: 'NumberLiteral', value: 3 },
+      });
+    });
+
+    test('subtract EXPR from NAME', () => {
+      const ast = parseSource('subtract 3 from n');
+      expect(ast.body[0]).toMatchObject({
+        type: 'CompoundAssignStatement', op: 'subtract', name: 'n',
+      });
+    });
+
+    test('multiply NAME by EXPR', () => {
+      const ast = parseSource('multiply n by 4');
+      expect(ast.body[0]).toMatchObject({
+        type: 'CompoundAssignStatement', op: 'multiply', name: 'n',
+        value: { type: 'NumberLiteral', value: 4 },
+      });
+    });
+
+    test('divide NAME by EXPR', () => {
+      const ast = parseSource('divide n by 2');
+      expect(ast.body[0]).toMatchObject({
+        type: 'CompoundAssignStatement', op: 'divide', name: 'n',
+      });
+    });
+
+    test('add accepts a full expression on the RHS', () => {
+      const ast = parseSource('add 2 + 3 to n');
+      expect(ast.body[0]).toMatchObject({
+        type: 'CompoundAssignStatement', op: 'add', name: 'n',
+        value: { type: 'BinaryExpression', operator: '+' },
+      });
+    });
+  });
+
   describe('comparison operators', () => {
     function getCond(src: string): BinaryExpression {
       const ast = parseSource(src);

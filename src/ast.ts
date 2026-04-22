@@ -11,11 +11,33 @@ export type Expression =
 export type Statement =
   | SayStatement
   | SetStatement
+  | VarDeclaration
+  | ChangeStatement
+  | CompoundAssignStatement
   | FunctionDeclaration
   | CallStatement
   | ReturnStatement
   | IfStatement
   | RepeatStatement;
+
+export interface VarDeclaration {
+  type: 'VarDeclaration';
+  name: string;
+  value: Expression;
+}
+
+export interface ChangeStatement {
+  type: 'ChangeStatement';
+  name: string;
+  value: Expression;
+}
+
+export interface CompoundAssignStatement {
+  type: 'CompoundAssignStatement';
+  op: 'add' | 'subtract' | 'multiply' | 'divide';
+  name: string;
+  value: Expression;
+}
 
 export interface Program {
   type: 'Program';

@@ -1,0 +1,5 @@
+var n is 20
+divide n by 4
+say n
+divide n by 1 + 1
+say n

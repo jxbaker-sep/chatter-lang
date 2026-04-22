@@ -1,0 +1,3 @@
+set x to 5
+change x to 6
+say x

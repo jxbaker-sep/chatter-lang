@@ -1,0 +1,6 @@
+var x is 10
+say x
+change x to 20
+say x
+change x to x + 5
+say x

@@ -95,4 +95,13 @@ describe('Lexer', () => {
       expect(kws.has(w)).toBe(true);
     }
   });
+
+  test('var/change/add/subtract/multiply/divide/by tokenize as KEYWORDs', () => {
+    const src = 'var x is 1\nchange x to 2\nadd 1 to x\nsubtract 1 from x\nmultiply x by 2\ndivide x by 2';
+    const tokens = lex(src);
+    const kws = new Set(tokens.filter(t => t.type === 'KEYWORD').map(t => t.value));
+    for (const w of ['var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by']) {
+      expect(kws.has(w)).toBe(true);
+    }
+  });
 });

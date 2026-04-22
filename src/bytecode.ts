@@ -4,6 +4,7 @@ export type Instruction =
   | { op: 'PUSH_BOOL'; value: boolean }
   | { op: 'LOAD'; name: string }
   | { op: 'STORE'; name: string }   // emitted for `set X to Y`
+  | { op: 'STORE_VAR'; name: string }  // for `var` decl / `change`: type-locked store (records type on first store, checks on subsequent)
   | { op: 'DELETE'; name: string }  // unset a frame local (for scoped loop vars)
   | { op: 'LOAD_IT' }
   | { op: 'STORE_IT' }

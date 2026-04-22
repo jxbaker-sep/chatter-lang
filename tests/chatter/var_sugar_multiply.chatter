@@ -1,0 +1,5 @@
+var n is 4
+multiply n by 3
+say n
+multiply n by 2 + 0
+say n

@@ -248,4 +248,127 @@ describe('Compiler', () => {
       expect(bc.main.some(i => i.op === 'GE')).toBe(true);
     });
   });
+
+  describe('var / change / compound assign', () => {
+    test('var x is 5 emits STORE_VAR', () => {
+      const bc = compileSource('var x is 5');
+      expect(bc.main).toContainEqual({ op: 'PUSH_INT', value: 5 });
+      expect(bc.main).toContainEqual({ op: 'STORE_VAR', name: 'x' });
+    });
+
+    test('change x to 6 emits STORE_VAR', () => {
+      const bc = compileSource('var x is 5\nchange x to 6');
+      const storeVars = bc.main.filter(i => i.op === 'STORE_VAR' && (i as any).name === 'x');
+      expect(storeVars).toHaveLength(2);
+    });
+
+    test('add N to x emits LOAD, PUSH, ADD, STORE_VAR', () => {
+      const bc = compileSource('var x is 5\nadd 3 to x');
+      const tail = bc.main.slice(-4);
+      expect(tail).toEqual([
+        { op: 'LOAD', name: 'x' },
+        { op: 'PUSH_INT', value: 3 },
+        { op: 'ADD' },
+        { op: 'STORE_VAR', name: 'x' },
+      ]);
+    });
+
+    test('multiply x by 2 emits LOAD, PUSH, MUL, STORE_VAR', () => {
+      const bc = compileSource('var x is 5\nmultiply x by 2');
+      const tail = bc.main.slice(-4);
+      expect(tail).toEqual([
+        { op: 'LOAD', name: 'x' },
+        { op: 'PUSH_INT', value: 2 },
+        { op: 'MUL' },
+        { op: 'STORE_VAR', name: 'x' },
+      ]);
+    });
+
+    test('change targeting a set binding is a compile error', () => {
+      expect(() => compileSource('set x to 5\nchange x to 6')).toThrow(CompileError);
+    });
+
+    test('change targeting an undeclared name is a compile error', () => {
+      expect(() => compileSource('change x to 5')).toThrow(CompileError);
+    });
+
+    test('var redeclaring a set is a compile error', () => {
+      expect(() => compileSource('set x to 5\nvar x is 6')).toThrow(CompileError);
+    });
+
+    test('var redeclaring a var is a compile error', () => {
+      expect(() => compileSource('var x is 5\nvar x is 6')).toThrow(CompileError);
+    });
+
+    test('set after var is a compile error', () => {
+      expect(() => compileSource('var x is 5\nset x to 6')).toThrow(CompileError);
+    });
+
+    test('add on a string-locked var is a compile error', () => {
+      expect(() => compileSource('var s is "hi"\nadd 1 to s')).toThrow(/not number/);
+    });
+
+    test('add on a boolean-locked var is a compile error', () => {
+      expect(() => compileSource('var b is true\nadd 1 to b')).toThrow(/not number/);
+    });
+
+    test('var inside a function does not leak to siblings; sibling function can reuse the name', () => {
+      const src = [
+        'function f() is',
+        '    var x is 1',
+        '    return x',
+        'end',
+        'function g() is',
+        '    var x is 2',
+        '    return x',
+        'end',
+      ].join('\n');
+      expect(() => compileSource(src)).not.toThrow();
+    });
+
+    test('var shadowing an outer (top-level) set is a compile error inside a function', () => {
+      const src = [
+        'set x to 1',
+        'function f() is',
+        '    var x is 2',
+        '    return x',
+        'end',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(/shadow/);
+    });
+
+    test('change on a loop variable is a compile error', () => {
+      const src = [
+        'repeat with i from 1 to 3',
+        '    change i to 99',
+        'end',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(CompileError);
+    });
+
+    test('change on a function parameter is a compile error', () => {
+      const src = [
+        'function f(number a) is',
+        '    change a to 99',
+        '    return a',
+        'end',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(CompileError);
+    });
+
+    test('var declared in outer function is not visible to inner change (function-local)', () => {
+      // f has var x; g is a sibling that tries to change x — should fail.
+      const src = [
+        'function f() is',
+        '    var x is 1',
+        '    return x',
+        'end',
+        'function g() is',
+        '    change x to 5',
+        '    return x',
+        'end',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(CompileError);
+    });
+  });
 });

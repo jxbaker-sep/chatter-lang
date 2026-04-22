@@ -3,6 +3,7 @@ import {
   SayStatement, SetStatement, FunctionDeclaration,
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
   IfStatement, RepeatStatement,
+  VarDeclaration, ChangeStatement, CompoundAssignStatement,
 } from './ast';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 
@@ -13,10 +14,21 @@ export class CompileError extends Error {
   }
 }
 
+type ChatterType = 'number' | 'string' | 'boolean';
+type BindingKind = 'set' | 'var' | 'param' | 'loop';
+
+interface BindingInfo {
+  kind: BindingKind;
+  type?: ChatterType;  // statically known type (locked for var, declared for param, always number for loop)
+}
+
+type Bindings = Map<string, BindingInfo>;
+
 class Compiler {
   private functions = new Map<string, FunctionDef>();
   private functionSignatures = new Map<string, string[]>();
   private outerBindings = new Set<string>();
+  private topLevelBindings: Bindings | null = null;
   private tempCounter = 0;
 
   private freshName(tag: string): string {
@@ -29,13 +41,14 @@ class Compiler {
       if (stmt.type === 'FunctionDeclaration') {
         this.functionSignatures.set(stmt.name, stmt.params.map(p => p.name));
       }
-      if (stmt.type === 'SetStatement') {
+      if (stmt.type === 'SetStatement' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
       }
     }
 
     const main: Instruction[] = [];
-    const bindings = new Set<string>();
+    const bindings: Bindings = new Map();
+    this.topLevelBindings = bindings;
 
     for (const stmt of program.body) {
       this.compileStatement(stmt, main, bindings);
@@ -47,7 +60,7 @@ class Compiler {
   private compileStatement(
     stmt: Statement,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     switch (stmt.type) {
       case 'SayStatement':
@@ -55,6 +68,15 @@ class Compiler {
         break;
       case 'SetStatement':
         this.compileSet(stmt, out, bindings);
+        break;
+      case 'VarDeclaration':
+        this.compileVarDecl(stmt, out, bindings);
+        break;
+      case 'ChangeStatement':
+        this.compileChange(stmt, out, bindings);
+        break;
+      case 'CompoundAssignStatement':
+        this.compileCompoundAssign(stmt, out, bindings);
         break;
       case 'FunctionDeclaration':
         this.compileFuncDecl(stmt);
@@ -78,7 +100,7 @@ class Compiler {
   private compileSay(
     stmt: SayStatement,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     this.compileExpr(stmt.expression, out, bindings);
     out.push({ op: 'SAY' });
@@ -87,14 +109,90 @@ class Compiler {
   private compileSet(
     stmt: SetStatement,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     if (bindings.has(stmt.name)) {
       throw new CompileError(`Duplicate binding: '${stmt.name}' is already set`);
     }
     this.compileExpr(stmt.value, out, bindings);
     out.push({ op: 'STORE', name: stmt.name });
-    bindings.add(stmt.name);
+    bindings.set(stmt.name, { kind: 'set', type: this.staticType(stmt.value, bindings) ?? undefined });
+  }
+
+  private compileVarDecl(
+    stmt: VarDeclaration,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (bindings.has(stmt.name)) {
+      throw new CompileError(
+        `Duplicate binding: '${stmt.name}' is already declared`,
+      );
+    }
+    if (bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name)) {
+      throw new CompileError(
+        `Variable '${stmt.name}' shadows outer binding`,
+      );
+    }
+    this.compileExpr(stmt.value, out, bindings);
+    out.push({ op: 'STORE_VAR', name: stmt.name });
+    bindings.set(stmt.name, {
+      kind: 'var',
+      type: this.staticType(stmt.value, bindings) ?? undefined,
+    });
+  }
+
+  private compileChange(
+    stmt: ChangeStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const info = bindings.get(stmt.name);
+    if (!info) {
+      throw new CompileError(
+        `Cannot change '${stmt.name}': no such variable declared in this function`,
+      );
+    }
+    if (info.kind !== 'var') {
+      throw new CompileError(
+        `Cannot change '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
+      );
+    }
+    this.compileExpr(stmt.value, out, bindings);
+    out.push({ op: 'STORE_VAR', name: stmt.name });
+  }
+
+  private compileCompoundAssign(
+    stmt: CompoundAssignStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const info = bindings.get(stmt.name);
+    if (!info) {
+      throw new CompileError(
+        `Cannot ${stmt.op} '${stmt.name}': no such variable declared in this function`,
+      );
+    }
+    if (info.kind !== 'var') {
+      throw new CompileError(
+        `Cannot ${stmt.op} '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
+      );
+    }
+    if (info.type !== undefined && info.type !== 'number') {
+      throw new CompileError(
+        `Cannot ${stmt.op} '${stmt.name}': its type is ${info.type}, not number`,
+      );
+    }
+    // Emit: LOAD name; <value>; OP; STORE_VAR name
+    out.push({ op: 'LOAD', name: stmt.name });
+    this.compileExpr(stmt.value, out, bindings);
+    switch (stmt.op) {
+      case 'add':      out.push({ op: 'ADD' }); break;
+      case 'subtract': out.push({ op: 'SUB' }); break;
+      case 'multiply': out.push({ op: 'MUL' }); break;
+      case 'divide':   out.push({ op: 'DIV' }); break;
+    }
+    out.push({ op: 'STORE_VAR', name: stmt.name });
   }
 
   private compileFuncDecl(stmt: FunctionDeclaration): void {
@@ -113,7 +211,15 @@ class Compiler {
     const funcDef: FunctionDef = { name: stmt.name, params, instructions };
     this.functions.set(stmt.name, funcDef);
 
-    const funcBindings = new Set<string>(params);
+    const funcBindings: Bindings = new Map();
+    for (const p of stmt.params) {
+      funcBindings.set(p.name, {
+        kind: 'param',
+        type: (p.paramType === 'number' || p.paramType === 'string' || p.paramType === 'boolean')
+          ? p.paramType as ChatterType
+          : undefined,
+      });
+    }
     for (const bodyStmt of stmt.body) {
       this.compileStatement(bodyStmt, instructions, funcBindings);
     }
@@ -122,12 +228,11 @@ class Compiler {
   private compileCallStmt(
     stmt: CallStatement,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     const params = this.functionSignatures.get(stmt.name);
 
     if (params !== undefined) {
-      // Map each arg to its parameter by name, with the first (positional) arg mapping to params[0]
       const argMap = new Map<string, Expression>();
       for (const arg of stmt.args) {
         if (arg.name === null) {
@@ -139,7 +244,6 @@ class Compiler {
         }
       }
 
-      // Emit args in parameter declaration order
       for (const param of params) {
         const val = argMap.get(param);
         if (val === undefined) {
@@ -152,7 +256,6 @@ class Compiler {
 
       out.push({ op: 'CALL', name: stmt.name, argCount: params.length });
     } else {
-      // Unknown function – emit args in the order given
       for (const arg of stmt.args) {
         this.compileExpr(arg.value, out, bindings);
       }
@@ -163,7 +266,7 @@ class Compiler {
   private compileIf(
     stmt: IfStatement,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     const exitJumps: number[] = [];
 
@@ -180,8 +283,6 @@ class Compiler {
       out.push({ op: 'JUMP', target: -1 });
       exitJumps.push(exitIdx);
 
-      // Patch the branch's JUMP_IF_FALSE to point to the start of the next branch
-      // (or the else body, or the end).
       (out[jifIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
     }
 
@@ -200,7 +301,7 @@ class Compiler {
   private compileRepeat(
     stmt: RepeatStatement,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     if (stmt.kind === 'times') {
       const limit = this.freshName('limit');
@@ -211,7 +312,6 @@ class Compiler {
       out.push({ op: 'PUSH_INT', value: 0 });
       out.push({ op: 'STORE', name: counter });
 
-      // Negative check: if limit < 0 -> ERROR.
       out.push({ op: 'LOAD', name: limit });
       out.push({ op: 'PUSH_INT', value: 0 });
       out.push({ op: 'LT' });
@@ -260,7 +360,7 @@ class Compiler {
       const jifEndIdx = out.length;
       out.push({ op: 'JUMP_IF_FALSE', target: -1 });
 
-      bindings.add(loopVar);
+      bindings.set(loopVar, { kind: 'loop', type: 'number' });
       for (const s of stmt.body) {
         this.compileStatement(s, out, bindings);
       }
@@ -292,7 +392,7 @@ class Compiler {
   private compileReturn(
     stmt: ReturnStatement,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     this.compileExpr(stmt.value, out, bindings);
     out.push({ op: 'RETURN' });
@@ -301,7 +401,7 @@ class Compiler {
   private compileExpr(
     expr: Expression,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     switch (expr.type) {
       case 'NumberLiteral':
@@ -327,7 +427,6 @@ class Compiler {
         out.push({ op: 'NOT' });
         break;
       case 'CallStatement':
-        // Call used as an expression: result left on the stack (no STORE_IT here)
         this.compileCallStmt(expr, out, bindings);
         break;
     }
@@ -336,7 +435,7 @@ class Compiler {
   private compileBinary(
     expr: BinaryExpression,
     out: Instruction[],
-    bindings: Set<string>,
+    bindings: Bindings,
   ): void {
     this.compileExpr(expr.left, out, bindings);
     this.compileExpr(expr.right, out, bindings);
@@ -356,6 +455,28 @@ class Compiler {
       case 'or':  out.push({ op: 'OR' }); break;
       default:
         throw new CompileError(`Unknown operator: ${expr.operator}`);
+    }
+  }
+
+  // Best-effort static type inference for literals and trivial expressions.
+  // Returns null if the type is not trivially knowable.
+  private staticType(expr: Expression, bindings: Bindings): ChatterType | null {
+    switch (expr.type) {
+      case 'NumberLiteral': return 'number';
+      case 'StringLiteral': return 'string';
+      case 'BooleanLiteral': return 'boolean';
+      case 'UnaryExpression': return 'boolean';
+      case 'BinaryExpression': {
+        const op = expr.operator;
+        if (op === '+' || op === '-' || op === '*' || op === '/' || op === '**') return 'number';
+        return 'boolean';
+      }
+      case 'IdentifierExpression': {
+        const info = bindings.get(expr.name);
+        return info?.type ?? null;
+      }
+      default:
+        return null;
     }
   }
 }

@@ -13,6 +13,7 @@ interface Frame {
   instructions: Instruction[];
   ip: number;
   locals: Map<string, ChatterValue>;
+  varTypes: Map<string, 'number' | 'string' | 'boolean'>;
   it: ChatterValue | null;
 }
 
@@ -30,6 +31,7 @@ export class VM {
       instructions: this.program.main,
       ip: 0,
       locals: new Map(),
+      varTypes: new Map(),
       it: null,
     };
     this.callStack.push(mainFrame);
@@ -78,6 +80,21 @@ export class VM {
 
       case 'STORE': {
         frame.locals.set(instr.name, this.pop());
+        break;
+      }
+
+      case 'STORE_VAR': {
+        const val = this.pop();
+        const valType = typeof val as 'number' | 'string' | 'boolean';
+        const existing = frame.varTypes.get(instr.name);
+        if (existing === undefined) {
+          frame.varTypes.set(instr.name, valType);
+        } else if (existing !== valType) {
+          throw new RuntimeError(
+            `Type mismatch: cannot change '${instr.name}' (expected ${existing}, got ${valType})`,
+          );
+        }
+        frame.locals.set(instr.name, val);
         break;
       }
 
@@ -147,6 +164,7 @@ export class VM {
           instructions: funcDef.instructions,
           ip: 0,
           locals,
+          varTypes: new Map(),
           it: null,
         };
         this.callStack.push(newFrame);
