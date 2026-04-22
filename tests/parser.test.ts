@@ -244,4 +244,58 @@ describe('Parser', () => {
       expect(() => parseSource('if a\n    say 1\nelif b\n    say 2\nend')).toThrow();
     });
   });
+
+  describe('repeat statements', () => {
+    test('repeat N times produces RepeatStatement kind=times', () => {
+      const ast = parseSource('repeat 3 times\n    say "hi"\nend repeat');
+      expect(ast.body[0]).toMatchObject({
+        type: 'RepeatStatement',
+        kind: 'times',
+        count: { type: 'NumberLiteral', value: 3 },
+      });
+      const rep = ast.body[0] as any;
+      expect(rep.body).toHaveLength(1);
+      expect(rep.body[0]).toMatchObject({ type: 'SayStatement' });
+    });
+
+    test('repeat with i from A to B produces kind=range', () => {
+      const ast = parseSource('repeat with i from 1 to 10\n    say i\nend repeat');
+      expect(ast.body[0]).toMatchObject({
+        type: 'RepeatStatement',
+        kind: 'range',
+        varName: 'i',
+        from: { type: 'NumberLiteral', value: 1 },
+        to: { type: 'NumberLiteral', value: 10 },
+      });
+    });
+
+    test('repeat while cond produces kind=while', () => {
+      const ast = parseSource('repeat while false\n    say "x"\nend repeat');
+      expect(ast.body[0]).toMatchObject({
+        type: 'RepeatStatement',
+        kind: 'while',
+        condition: { type: 'BooleanLiteral', value: false },
+      });
+    });
+
+    test('`end` alone (without `repeat`) is valid', () => {
+      const ast = parseSource('repeat 2 times\n    say "x"\nend');
+      expect(ast.body[0]).toMatchObject({ type: 'RepeatStatement', kind: 'times' });
+    });
+
+    test('`end repeat` is valid', () => {
+      const ast = parseSource('repeat 2 times\n    say "x"\nend repeat');
+      expect(ast.body[0]).toMatchObject({ type: 'RepeatStatement', kind: 'times' });
+    });
+
+    test('range expression boundaries can be expressions', () => {
+      const ast = parseSource('repeat with i from 1 + 1 to 2 * 5\n    say i\nend');
+      expect(ast.body[0]).toMatchObject({
+        type: 'RepeatStatement',
+        kind: 'range',
+        from: { type: 'BinaryExpression', operator: '+' },
+        to:   { type: 'BinaryExpression', operator: '*' },
+      });
+    });
+  });
 });

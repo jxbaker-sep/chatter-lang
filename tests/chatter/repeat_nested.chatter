@@ -1,0 +1,6 @@
+repeat with i from 1 to 3
+    repeat with j from 1 to 2
+        say i
+        say j
+    end repeat
+end repeat

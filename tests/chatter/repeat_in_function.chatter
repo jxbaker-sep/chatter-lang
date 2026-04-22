@@ -1,0 +1,9 @@
+function sum_to(number n) is
+    repeat with i from 1 to n
+        say i
+    end repeat
+    return n
+end function
+
+sum_to 3
+say it

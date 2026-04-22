@@ -4,6 +4,7 @@ export type Instruction =
   | { op: 'PUSH_BOOL'; value: boolean }
   | { op: 'LOAD'; name: string }
   | { op: 'STORE'; name: string }   // emitted for `set X to Y`
+  | { op: 'DELETE'; name: string }  // unset a frame local (for scoped loop vars)
   | { op: 'LOAD_IT' }
   | { op: 'STORE_IT' }
   | { op: 'ADD' }
@@ -13,6 +14,8 @@ export type Instruction =
   | { op: 'POW' }
   | { op: 'EQ' }
   | { op: 'NEQ' }
+  | { op: 'LT' }
+  | { op: 'LE' }
   | { op: 'AND' }
   | { op: 'OR' }
   | { op: 'NOT' }
@@ -20,7 +23,8 @@ export type Instruction =
   | { op: 'JUMP_IF_FALSE'; target: number }
   | { op: 'CALL'; name: string; argCount: number }
   | { op: 'RETURN' }
-  | { op: 'SAY' };
+  | { op: 'SAY' }
+  | { op: 'ERROR'; message: string };
 
 export interface FunctionDef {
   name: string;

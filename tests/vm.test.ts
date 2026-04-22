@@ -354,4 +354,90 @@ describe('VM', () => {
       expect(runSource('say true or false')).toEqual(['true']);
     });
   });
+
+  describe('repeat loops and LT/LE/ERROR', () => {
+    test('LT instruction: true when a < b', () => {
+      const program: BytecodeProgram = {
+        functions: new Map(),
+        main: [
+          { op: 'PUSH_INT', value: 2 },
+          { op: 'PUSH_INT', value: 5 },
+          { op: 'LT' },
+          { op: 'SAY' },
+        ],
+      };
+      const output: string[] = [];
+      const spy = jest.spyOn(console, 'log').mockImplementation((...a) => { output.push(a.join(' ')); });
+      try { new VM(program).run(); } finally { spy.mockRestore(); }
+      expect(output).toEqual(['true']);
+    });
+
+    test('LT rejects non-numbers', () => {
+      const program: BytecodeProgram = {
+        functions: new Map(),
+        main: [
+          { op: 'PUSH_STR', value: 'x' },
+          { op: 'PUSH_INT', value: 5 },
+          { op: 'LT' },
+        ],
+      };
+      expect(() => new VM(program).run()).toThrow(/comparison requires numbers/);
+    });
+
+    test('LE inclusive', () => {
+      const program: BytecodeProgram = {
+        functions: new Map(),
+        main: [
+          { op: 'PUSH_INT', value: 5 },
+          { op: 'PUSH_INT', value: 5 },
+          { op: 'LE' },
+          { op: 'SAY' },
+        ],
+      };
+      const output: string[] = [];
+      const spy = jest.spyOn(console, 'log').mockImplementation((...a) => { output.push(a.join(' ')); });
+      try { new VM(program).run(); } finally { spy.mockRestore(); }
+      expect(output).toEqual(['true']);
+    });
+
+    test('ERROR instruction throws RuntimeError with its message', () => {
+      const program: BytecodeProgram = {
+        functions: new Map(),
+        main: [{ op: 'ERROR', message: 'boom' }],
+      };
+      expect(() => new VM(program).run()).toThrow(/boom/);
+    });
+
+    test('repeat N times executes body N times', () => {
+      expect(runSource('repeat 3 times\n    say "x"\nend repeat')).toEqual(['x', 'x', 'x']);
+    });
+
+    test('repeat 0 times executes zero iterations', () => {
+      expect(runSource('repeat 0 times\n    say "x"\nend repeat\nsay "done"')).toEqual(['done']);
+    });
+
+    test('repeat with i from A to B is inclusive', () => {
+      expect(runSource('repeat with i from 1 to 3\n    say i\nend repeat')).toEqual(['1', '2', '3']);
+    });
+
+    test('repeat with A > B runs zero iterations', () => {
+      expect(runSource('repeat with i from 5 to 3\n    say i\nend repeat\nsay "done"')).toEqual(['done']);
+    });
+
+    test('repeat while false runs zero iterations', () => {
+      expect(runSource('repeat while false\n    say "x"\nend repeat\nsay "done"')).toEqual(['done']);
+    });
+
+    test('repeat while with non-boolean condition raises runtime error', () => {
+      expectRuntimeError('repeat while 5\n    say "x"\nend repeat');
+    });
+
+    test('repeat with negative count raises runtime error', () => {
+      expectRuntimeError('repeat 0 - 3 times\n    say "x"\nend repeat');
+    });
+
+    test('loop variable not visible after loop', () => {
+      expectRuntimeError('repeat with i from 1 to 2\n    say i\nend repeat\nsay i');
+    });
+  });
 });

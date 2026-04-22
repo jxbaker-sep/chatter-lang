@@ -1,0 +1,9 @@
+repeat with i from 1 to 5
+    say i
+end repeat
+
+repeat with n from 10 to 8
+    say "should not appear"
+end repeat
+
+say "done"

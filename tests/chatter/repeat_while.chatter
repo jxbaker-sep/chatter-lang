@@ -1,0 +1,10 @@
+repeat while false
+    say "never"
+end repeat
+
+set x to 5
+repeat while x is not 5
+    say "never again"
+end
+
+say "done"

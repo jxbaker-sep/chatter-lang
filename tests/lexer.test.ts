@@ -72,4 +72,19 @@ describe('Lexer', () => {
     const tokens = lex(helloSource);
     expect(tokens.length).toBeGreaterThan(0);
   });
+
+  test('repeat/times/with/from/while tokenise as KEYWORD', () => {
+    const tokens = lex('repeat 3 times\n    say "hi"\nend repeat');
+    const kws = tokens.filter(t => t.type === 'KEYWORD').map(t => t.value);
+    expect(kws).toContain('repeat');
+    expect(kws).toContain('times');
+    expect(kws).toContain('end');
+    const tokens2 = lex('repeat with i from 1 to 5\n    say i\nend');
+    const kws2 = tokens2.filter(t => t.type === 'KEYWORD').map(t => t.value);
+    expect(kws2).toContain('with');
+    expect(kws2).toContain('from');
+    expect(kws2).toContain('to');
+    const tokens3 = lex('repeat while false\n    say 1\nend');
+    expect(tokens3.filter(t => t.type === 'KEYWORD').map(t => t.value)).toContain('while');
+  });
 });

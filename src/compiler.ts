@@ -2,7 +2,7 @@ import {
   Program, Statement, Expression,
   SayStatement, SetStatement, FunctionDeclaration,
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
-  IfStatement,
+  IfStatement, RepeatStatement,
 } from './ast';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 
@@ -15,10 +15,13 @@ export class CompileError extends Error {
 
 class Compiler {
   private functions = new Map<string, FunctionDef>();
-  // All param names from every function signature
   private functionSignatures = new Map<string, string[]>();
-  // All names bound via `set` at the top level (for shadowing detection)
   private outerBindings = new Set<string>();
+  private tempCounter = 0;
+
+  private freshName(tag: string): string {
+    return `_rep_${tag}_${this.tempCounter++}`;
+  }
 
   compile(program: Program): BytecodeProgram {
     // First pass: collect function signatures and outer bindings
@@ -65,6 +68,9 @@ class Compiler {
         break;
       case 'IfStatement':
         this.compileIf(stmt, out, bindings);
+        break;
+      case 'RepeatStatement':
+        this.compileRepeat(stmt, out, bindings);
         break;
     }
   }
@@ -189,6 +195,98 @@ class Compiler {
     for (const j of exitJumps) {
       (out[j] as { op: 'JUMP'; target: number }).target = endIdx;
     }
+  }
+
+  private compileRepeat(
+    stmt: RepeatStatement,
+    out: Instruction[],
+    bindings: Set<string>,
+  ): void {
+    if (stmt.kind === 'times') {
+      const limit = this.freshName('limit');
+      const counter = this.freshName('counter');
+
+      this.compileExpr(stmt.count, out, bindings);
+      out.push({ op: 'STORE', name: limit });
+      out.push({ op: 'PUSH_INT', value: 0 });
+      out.push({ op: 'STORE', name: counter });
+
+      // Negative check: if limit < 0 -> ERROR.
+      out.push({ op: 'LOAD', name: limit });
+      out.push({ op: 'PUSH_INT', value: 0 });
+      out.push({ op: 'LT' });
+      const jifNegIdx = out.length;
+      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+      out.push({ op: 'ERROR', message: 'repeat count cannot be negative' });
+      (out[jifNegIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+
+      const topIdx = out.length;
+      out.push({ op: 'LOAD', name: counter });
+      out.push({ op: 'LOAD', name: limit });
+      out.push({ op: 'LT' });
+      const jifEndIdx = out.length;
+      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+
+      for (const s of stmt.body) {
+        this.compileStatement(s, out, bindings);
+      }
+
+      out.push({ op: 'LOAD', name: counter });
+      out.push({ op: 'PUSH_INT', value: 1 });
+      out.push({ op: 'ADD' });
+      out.push({ op: 'STORE', name: counter });
+      out.push({ op: 'JUMP', target: topIdx });
+      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+      return;
+    }
+
+    if (stmt.kind === 'range') {
+      const loopVar = stmt.varName;
+      if (bindings.has(loopVar) || this.outerBindings.has(loopVar)) {
+        throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`);
+      }
+
+      const limit = this.freshName('limit');
+
+      this.compileExpr(stmt.from, out, bindings);
+      out.push({ op: 'STORE', name: loopVar });
+      this.compileExpr(stmt.to, out, bindings);
+      out.push({ op: 'STORE', name: limit });
+
+      const topIdx = out.length;
+      out.push({ op: 'LOAD', name: loopVar });
+      out.push({ op: 'LOAD', name: limit });
+      out.push({ op: 'LE' });
+      const jifEndIdx = out.length;
+      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+
+      bindings.add(loopVar);
+      for (const s of stmt.body) {
+        this.compileStatement(s, out, bindings);
+      }
+      bindings.delete(loopVar);
+
+      out.push({ op: 'LOAD', name: loopVar });
+      out.push({ op: 'PUSH_INT', value: 1 });
+      out.push({ op: 'ADD' });
+      out.push({ op: 'STORE', name: loopVar });
+      out.push({ op: 'JUMP', target: topIdx });
+      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+      out.push({ op: 'DELETE', name: loopVar });
+      out.push({ op: 'DELETE', name: limit });
+      return;
+    }
+
+    // while
+    const topIdx = out.length;
+    this.compileExpr(stmt.condition, out, bindings);
+    const jifEndIdx = out.length;
+    out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+    for (const s of stmt.body) {
+      this.compileStatement(s, out, bindings);
+    }
+    out.push({ op: 'JUMP', target: topIdx });
+    (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
   }
 
   private compileReturn(

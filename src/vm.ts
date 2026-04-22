@@ -81,6 +81,11 @@ export class VM {
         break;
       }
 
+      case 'DELETE': {
+        frame.locals.delete(instr.name);
+        break;
+      }
+
       case 'LOAD_IT': {
         if (frame.it === null) {
           throw new RuntimeError("'it' is not set in current scope");
@@ -187,6 +192,20 @@ export class VM {
         this.stack.push(a !== b);
         break;
       }
+
+      case 'LT':
+      case 'LE': {
+        const b = this.pop();
+        const a = this.pop();
+        if (typeof a !== 'number' || typeof b !== 'number') {
+          throw new RuntimeError('Type mismatch: comparison requires numbers');
+        }
+        this.stack.push(instr.op === 'LT' ? a < b : a <= b);
+        break;
+      }
+
+      case 'ERROR':
+        throw new RuntimeError(instr.message);
 
       case 'NOT': {
         const a = this.pop();

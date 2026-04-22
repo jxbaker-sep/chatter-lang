@@ -147,4 +147,86 @@ describe('Compiler', () => {
       { op: 'RETURN' },
     ]);
   });
+
+  describe('repeat statements', () => {
+    test('repeat N times emits LT comparison and a back-edge JUMP', () => {
+      const bc = compileSource('repeat 2 times\n    say "x"\nend repeat');
+      const ops = bc.main.map(i => i.op);
+      expect(ops).toContain('LT');
+      expect(ops).toContain('JUMP');
+      expect(ops).toContain('JUMP_IF_FALSE');
+      expect(ops).toContain('ERROR');
+      // back-edge JUMP target must point earlier (it's a loop)
+      const jumpIdx = bc.main.findIndex(i => i.op === 'JUMP');
+      const target = (bc.main[jumpIdx] as any).target;
+      expect(target).toBeLessThan(jumpIdx);
+    });
+
+    test('repeat range emits LE comparison and DELETEs the loop var', () => {
+      const bc = compileSource('repeat with i from 1 to 3\n    say i\nend repeat');
+      const ops = bc.main.map(i => i.op);
+      expect(ops).toContain('LE');
+      expect(bc.main).toContainEqual({ op: 'DELETE', name: 'i' });
+    });
+
+    test('repeat while emits no LT/LE/ERROR, just cond + JUMP_IF_FALSE + back-edge', () => {
+      const bc = compileSource('repeat while false\n    say "x"\nend repeat');
+      const ops = bc.main.map(i => i.op);
+      expect(ops).toContain('JUMP_IF_FALSE');
+      expect(ops).toContain('JUMP');
+      expect(ops).not.toContain('LT');
+      expect(ops).not.toContain('LE');
+      expect(ops).not.toContain('ERROR');
+    });
+
+    test('loop variable shadowing outer set raises CompileError', () => {
+      const src = 'set i to 5\nrepeat with i from 1 to 3\n    say i\nend repeat';
+      expect(() => compileSource(src)).toThrow(CompileError);
+      expect(() => compileSource(src)).toThrow(/shadow/);
+    });
+
+    test('loop variable shadowing an outer loop variable raises CompileError', () => {
+      const src = [
+        'repeat with i from 1 to 3',
+        '    repeat with i from 1 to 2',
+        '        say i',
+        '    end repeat',
+        'end repeat',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(CompileError);
+    });
+
+    test('loop variable shadowing a param raises CompileError', () => {
+      const src = [
+        'function f(number i) is',
+        '    repeat with i from 1 to 3',
+        '        say i',
+        '    end repeat',
+        '    return i',
+        'end function',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(CompileError);
+    });
+
+    test('`set i to X` inside loop body raises CompileError (duplicate binding)', () => {
+      const src = [
+        'repeat with i from 1 to 3',
+        '    set i to 99',
+        'end repeat',
+      ].join('\n');
+      expect(() => compileSource(src)).toThrow(CompileError);
+    });
+
+    test('reusing loop var name in a sibling (non-overlapping) loop is fine', () => {
+      const src = [
+        'repeat with i from 1 to 3',
+        '    say i',
+        'end repeat',
+        'repeat with i from 1 to 2',
+        '    say i',
+        'end repeat',
+      ].join('\n');
+      expect(() => compileSource(src)).not.toThrow();
+    });
+  });
 });

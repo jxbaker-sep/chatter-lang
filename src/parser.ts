@@ -5,7 +5,7 @@ import {
   CallStatement, ReturnStatement,
   BinaryExpression, UnaryExpression, IdentifierExpression,
   NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
-  IfStatement, IfBranch,
+  IfStatement, IfBranch, RepeatStatement,
 } from './ast';
 
 export class ParseError extends Error {
@@ -20,6 +20,7 @@ export class ParseError extends Error {
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
   'true', 'false', 'is', 'say', 'set', 'function', 'return',
+  'repeat', 'times', 'with', 'from', 'while',
 ]);
 
 export function parse(tokens: Token[]): Program {
@@ -72,6 +73,7 @@ export function parse(tokens: Token[]): Program {
         case 'function': return parseFunctionDeclaration();
         case 'return':   return parseReturnStatement();
         case 'if':       return parseIfStatement();
+        case 'repeat':   return parseRepeatStatement();
         default:
           throw new ParseError(`Unexpected keyword '${tok.value}' at line ${tok.line}`, tok);
       }
@@ -243,6 +245,58 @@ export function parse(tokens: Token[]): Program {
       stmts.push(parseStatement());
     }
     return stmts;
+  }
+
+  function parseRepeatStatement(): RepeatStatement {
+    consume('KEYWORD', 'repeat');
+    const next = peek();
+
+    let result: RepeatStatement;
+
+    if (next.type === 'KEYWORD' && next.value === 'with') {
+      advance();
+      const varTok = peek();
+      if (varTok.type !== 'IDENT') {
+        throw new ParseError(
+          `Expected loop variable name at line ${varTok.line}, got ${varTok.type} '${varTok.value}'`,
+          varTok,
+        );
+      }
+      advance();
+      consume('KEYWORD', 'from');
+      const fromExpr = parseExpression();
+      consume('KEYWORD', 'to');
+      const toExpr = parseExpression();
+      result = {
+        type: 'RepeatStatement',
+        kind: 'range',
+        varName: varTok.value,
+        from: fromExpr,
+        to: toExpr,
+        body: [],
+      };
+    } else if (next.type === 'KEYWORD' && next.value === 'while') {
+      advance();
+      const cond = parseExpression();
+      result = { type: 'RepeatStatement', kind: 'while', condition: cond, body: [] };
+    } else {
+      const count = parseExpression();
+      consume('KEYWORD', 'times');
+      result = { type: 'RepeatStatement', kind: 'times', count, body: [] };
+    }
+
+    consumeNewline();
+    consume('INDENT');
+    const body = parseBlock();
+    consume('DEDENT');
+    consume('KEYWORD', 'end');
+    if (peek().type === 'KEYWORD' && peek().value === 'repeat') {
+      advance();
+    }
+    consumeNewline();
+
+    result.body = body;
+    return result;
   }
 
   // --- Expression parsing with precedence ---

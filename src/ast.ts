@@ -14,7 +14,8 @@ export type Statement =
   | FunctionDeclaration
   | CallStatement
   | ReturnStatement
-  | IfStatement;
+  | IfStatement
+  | RepeatStatement;
 
 export interface Program {
   type: 'Program';
@@ -97,3 +98,8 @@ export interface IfStatement {
   branches: IfBranch[];
   elseBody: Statement[] | null;
 }
+
+export type RepeatStatement =
+  | { type: 'RepeatStatement'; kind: 'times'; count: Expression; body: Statement[] }
+  | { type: 'RepeatStatement'; kind: 'range'; varName: string; from: Expression; to: Expression; body: Statement[] }
+  | { type: 'RepeatStatement'; kind: 'while'; condition: Expression; body: Statement[] };
