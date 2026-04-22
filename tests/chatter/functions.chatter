@@ -1,0 +1,15 @@
+function double(number a) is
+    return a * 2
+end
+
+function raise(number a, number to) is
+    return a ** to
+end
+
+set foo to 5
+set bar to 6
+
+double foo
+say it
+raise foo to bar
+say it

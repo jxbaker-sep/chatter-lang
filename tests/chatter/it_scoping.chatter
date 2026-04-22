@@ -1,0 +1,17 @@
+function double(number a) is
+    return a * 2
+end
+
+function quadruple(number a) is
+    double a
+    double it
+    return it
+end
+
+set x to 5
+quadruple x
+say it
+# outer 'it' should still be 20 (from quadruple's return), but let's verify
+# 'it' scoping: the outer 'it' is whatever the last top-level statement produced.
+# `quadruple x` produced 20, so outer it is 20.
+say it

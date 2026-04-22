@@ -1,0 +1,4 @@
+set x to 10
+set y to 3
+say x + y
+say x * y
