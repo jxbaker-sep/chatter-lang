@@ -1,0 +1,247 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import { lex } from '../src/lexer';
+import { parse } from '../src/parser';
+import { FunctionDeclaration, SetStatement, CallStatement, ReturnStatement, BinaryExpression } from '../src/ast';
+
+function parseSource(src: string) {
+  return parse(lex(src));
+}
+
+describe('Parser', () => {
+  test('parses say statement with string literal', () => {
+    const ast = parseSource('say "Hello World"');
+    expect(ast.body).toHaveLength(1);
+    expect(ast.body[0]).toMatchObject({
+      type: 'SayStatement',
+      expression: { type: 'StringLiteral', value: 'Hello World' },
+    });
+  });
+
+  test('parses set statement', () => {
+    const ast = parseSource('set foo to 5');
+    expect(ast.body[0]).toMatchObject({
+      type: 'SetStatement',
+      name: 'foo',
+      value: { type: 'NumberLiteral', value: 5 },
+    });
+  });
+
+  test('parses function declaration with single param', () => {
+    const ast = parseSource('function double(number a) is\n    return a * 2\nend');
+    expect(ast.body[0]).toMatchObject({
+      type: 'FunctionDeclaration',
+      name: 'double',
+      params: [{ paramType: 'number', name: 'a' }],
+      body: [{
+        type: 'ReturnStatement',
+        value: {
+          type: 'BinaryExpression',
+          operator: '*',
+          left:  { type: 'IdentifierExpression', name: 'a' },
+          right: { type: 'NumberLiteral', value: 2 },
+        },
+      }],
+    });
+  });
+
+  test('parses function declaration with keyword param name', () => {
+    const src = 'function raise(number a, number to) is\n    return a ** to\nend';
+    const ast = parseSource(src);
+    const decl = ast.body[0] as FunctionDeclaration;
+    expect(decl.params).toEqual([
+      { paramType: 'number', name: 'a' },
+      { paramType: 'number', name: 'to' },
+    ]);
+    expect((decl.body[0] as ReturnStatement).value).toMatchObject({
+      type: 'BinaryExpression',
+      operator: '**',
+      left:  { type: 'IdentifierExpression', name: 'a' },
+      right: { type: 'IdentifierExpression', name: 'to' },
+    });
+  });
+
+  test('parses call statement with positional arg (identifier)', () => {
+    const ast = parseSource('double foo');
+    expect(ast.body[0]).toMatchObject({
+      type: 'CallStatement',
+      name: 'double',
+      args: [{ name: null, value: { type: 'IdentifierExpression', name: 'foo' } }],
+    });
+  });
+
+  test('parses call statement with `it` as positional arg', () => {
+    const ast = parseSource('double it');
+    expect(ast.body[0]).toMatchObject({
+      type: 'CallStatement',
+      name: 'double',
+      args: [{ name: null, value: { type: 'ItExpression' } }],
+    });
+  });
+
+  test('parses call with named args (keyword param name)', () => {
+    const ast = parseSource('raise foo to bar');
+    expect(ast.body[0]).toMatchObject({
+      type: 'CallStatement',
+      name: 'raise',
+      args: [
+        { name: null,  value: { type: 'IdentifierExpression', name: 'foo' } },
+        { name: 'to',  value: { type: 'IdentifierExpression', name: 'bar' } },
+      ],
+    });
+  });
+
+  test('parses call with no args', () => {
+    const ast = parseSource('noop\n');
+    // 'noop\n' – the NEWLINE comes from the source; parseSource adds a newline
+    const ast2 = parse(lex('noop'));
+    expect(ast2.body[0]).toMatchObject({ type: 'CallStatement', name: 'noop', args: [] });
+  });
+
+  test('operator precedence: + lower than *', () => {
+    const ast = parseSource('set x to 2 + 3 * 4');
+    const setStmt = ast.body[0] as SetStatement;
+    // Should be 2 + (3 * 4)
+    expect(setStmt.value).toMatchObject({
+      type: 'BinaryExpression',
+      operator: '+',
+      left:  { type: 'NumberLiteral', value: 2 },
+      right: {
+        type: 'BinaryExpression',
+        operator: '*',
+        left:  { type: 'NumberLiteral', value: 3 },
+        right: { type: 'NumberLiteral', value: 4 },
+      },
+    });
+  });
+
+  test('operator precedence: ** higher than *', () => {
+    const ast = parseSource('set x to 2 * 3 ** 4');
+    const setStmt = ast.body[0] as SetStatement;
+    // Should be 2 * (3 ** 4)
+    expect(setStmt.value).toMatchObject({
+      type: 'BinaryExpression',
+      operator: '*',
+      left: { type: 'NumberLiteral', value: 2 },
+      right: {
+        type: 'BinaryExpression',
+        operator: '**',
+        left:  { type: 'NumberLiteral', value: 3 },
+        right: { type: 'NumberLiteral', value: 4 },
+      },
+    });
+  });
+
+  test('parses hello_world.chatter without error', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '../examples/hello_world.chatter'),
+      'utf-8',
+    );
+    const ast = parseSource(source);
+    expect(ast.type).toBe('Program');
+    expect(ast.body.length).toBeGreaterThan(5);
+    const funcNames = ast.body
+      .filter(s => s.type === 'FunctionDeclaration')
+      .map(s => (s as FunctionDeclaration).name);
+    expect(funcNames).toEqual(['double', 'quadruple', 'raise']);
+  });
+
+  test('set baz to it produces ItExpression', () => {
+    const ast = parseSource('set baz to it');
+    expect((ast.body[0] as SetStatement).value).toMatchObject({ type: 'ItExpression' });
+  });
+
+  describe('booleans, logical ops, equality, if', () => {
+    test('true / false parse as BooleanLiteral', () => {
+      const ast = parseSource('set x to true\nset y to false');
+      expect((ast.body[0] as SetStatement).value).toMatchObject({ type: 'BooleanLiteral', value: true });
+      expect((ast.body[1] as SetStatement).value).toMatchObject({ type: 'BooleanLiteral', value: false });
+    });
+
+    test('`not a is b` parses as not (a is b) (equality binds tighter than not)', () => {
+      const ast = parseSource('set r to not a is b');
+      expect((ast.body[0] as SetStatement).value).toMatchObject({
+        type: 'UnaryExpression',
+        operator: 'not',
+        operand: {
+          type: 'BinaryExpression',
+          operator: '==',
+          left:  { type: 'IdentifierExpression', name: 'a' },
+          right: { type: 'IdentifierExpression', name: 'b' },
+        },
+      });
+    });
+
+    test('chained `a and b and c` parses fine (flat)', () => {
+      expect(() => parseSource('set r to a and b and c')).not.toThrow();
+    });
+
+    test('`(a and b) or c` parses fine (parens reset context)', () => {
+      expect(() => parseSource('set r to (a and b) or c')).not.toThrow();
+    });
+
+    test('`a and b or c` raises ParseError mentioning parentheses', () => {
+      expect(() => parseSource('set r to a and b or c')).toThrow(/parentheses/);
+    });
+
+    test('if / else if / else / end produces correct AST', () => {
+      const src = [
+        'if a is 1',
+        '    say "one"',
+        'else if a is 2',
+        '    say "two"',
+        'else',
+        '    say "other"',
+        'end',
+      ].join('\n');
+      const ast = parseSource(src);
+      const ifStmt = ast.body[0] as any;
+      expect(ifStmt.type).toBe('IfStatement');
+      expect(ifStmt.branches).toHaveLength(2);
+      expect(ifStmt.branches[0].condition).toMatchObject({
+        type: 'BinaryExpression', operator: '==',
+      });
+      expect(ifStmt.branches[0].body[0]).toMatchObject({ type: 'SayStatement' });
+      expect(ifStmt.branches[1].condition).toMatchObject({
+        type: 'BinaryExpression', operator: '==',
+      });
+      expect(ifStmt.elseBody).not.toBeNull();
+      expect(ifStmt.elseBody).toHaveLength(1);
+    });
+
+    test('if without else has elseBody === null', () => {
+      const ast = parseSource('if a\n    say 1\nend');
+      const ifStmt = ast.body[0] as any;
+      expect(ifStmt.elseBody).toBeNull();
+      expect(ifStmt.branches).toHaveLength(1);
+    });
+
+    test('`is not` produces BinaryExpression with operator !=', () => {
+      const ast = parseSource('set r to a is not b');
+      expect((ast.body[0] as SetStatement).value).toMatchObject({
+        type: 'BinaryExpression',
+        operator: '!=',
+        left:  { type: 'IdentifierExpression', name: 'a' },
+        right: { type: 'IdentifierExpression', name: 'b' },
+      });
+    });
+
+    test('optional `end if` accepted on if-statement', () => {
+      const ast = parseSource('if a\n    say 1\nend if');
+      expect(ast.body[0]).toMatchObject({ type: 'IfStatement' });
+    });
+
+    test('optional `end function` accepted on function decl', () => {
+      const ast = parseSource('function f(number a) is\n    return a\nend function');
+      expect(ast.body[0]).toMatchObject({ type: 'FunctionDeclaration', name: 'f' });
+    });
+
+    test('`==` is no longer tokenised as an operator (tokenisation error)', () => {
+      expect(() => parseSource('if a == b\n    say 1\nend')).toThrow();
+    });
+
+    test('`elif` is no longer a keyword (parse error)', () => {
+      expect(() => parseSource('if a\n    say 1\nelif b\n    say 2\nend')).toThrow();
+    });
+  });
+});

@@ -1,0 +1,387 @@
+import { Token, TokenType } from './lexer';
+import {
+  Program, Statement, Expression,
+  SayStatement, SetStatement, FunctionDeclaration,
+  CallStatement, ReturnStatement,
+  BinaryExpression, UnaryExpression, IdentifierExpression,
+  NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
+  IfStatement, IfBranch,
+} from './ast';
+
+export class ParseError extends Error {
+  constructor(message: string, public token: Token) {
+    super(message);
+    this.name = 'ParseError';
+  }
+}
+
+// Keywords that may NOT be used as a named-argument label in a call statement.
+// These start new statements or form expression operators.
+const NAMED_ARG_STOP_KEYWORDS = new Set([
+  'and', 'or', 'not', 'if', 'else', 'end',
+  'true', 'false', 'is', 'say', 'set', 'function', 'return',
+]);
+
+export function parse(tokens: Token[]): Program {
+  let pos = 0;
+
+  function peek(): Token {
+    return tokens[pos];
+  }
+
+  function advance(): Token {
+    return tokens[pos++];
+  }
+
+  function consume(type: TokenType, value?: string): Token {
+    const tok = peek();
+    if (tok.type !== type) {
+      throw new ParseError(
+        `Expected ${type}${value ? ` '${value}'` : ''} but got ${tok.type} '${tok.value}' at line ${tok.line}`,
+        tok,
+      );
+    }
+    if (value !== undefined && tok.value !== value) {
+      throw new ParseError(
+        `Expected '${value}' but got '${tok.value}' at line ${tok.line}`,
+        tok,
+      );
+    }
+    return advance();
+  }
+
+  function consumeNewline(): void {
+    consume('NEWLINE');
+  }
+
+  function parseProgram(): Program {
+    const body: Statement[] = [];
+    while (peek().type !== 'EOF') {
+      if (peek().type === 'NEWLINE') { advance(); continue; }
+      body.push(parseStatement());
+    }
+    return { type: 'Program', body };
+  }
+
+  function parseStatement(): Statement {
+    const tok = peek();
+    if (tok.type === 'KEYWORD') {
+      switch (tok.value) {
+        case 'say':      return parseSayStatement();
+        case 'set':      return parseSetStatement();
+        case 'function': return parseFunctionDeclaration();
+        case 'return':   return parseReturnStatement();
+        case 'if':       return parseIfStatement();
+        default:
+          throw new ParseError(`Unexpected keyword '${tok.value}' at line ${tok.line}`, tok);
+      }
+    }
+    if (tok.type === 'IDENT') {
+      return parseCallStatement();
+    }
+    throw new ParseError(
+      `Expected statement at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+      tok,
+    );
+  }
+
+  function parseSayStatement(): SayStatement {
+    consume('KEYWORD', 'say');
+    const expression = parseExpression();
+    consumeNewline();
+    return { type: 'SayStatement', expression };
+  }
+
+  function parseSetStatement(): SetStatement {
+    consume('KEYWORD', 'set');
+    const nameTok = consume('IDENT');
+    consume('KEYWORD', 'to');
+    const value = parseExpression();
+    consumeNewline();
+    return { type: 'SetStatement', name: nameTok.value, value };
+  }
+
+  function parseFunctionDeclaration(): FunctionDeclaration {
+    consume('KEYWORD', 'function');
+    const nameTok = consume('IDENT');
+    consume('LPAREN');
+
+    const params: Array<{ paramType: string; name: string }> = [];
+    while (peek().type !== 'RPAREN') {
+      const typeTok = consume('TYPE');
+      // Param names may coincide with keywords (e.g. `to`); accept both IDENT and KEYWORD
+      const paramNameTok = peek();
+      if (paramNameTok.type !== 'IDENT' && paramNameTok.type !== 'KEYWORD') {
+        throw new ParseError(
+          `Expected parameter name at line ${paramNameTok.line}, got ${paramNameTok.type} '${paramNameTok.value}'`,
+          paramNameTok,
+        );
+      }
+      advance();
+      params.push({ paramType: typeTok.value, name: paramNameTok.value });
+      if (peek().type === 'COMMA') advance();
+    }
+
+    consume('RPAREN');
+    consume('KEYWORD', 'is');
+    consumeNewline();
+    consume('INDENT');
+
+    const body: Statement[] = [];
+    while (peek().type !== 'DEDENT' && peek().type !== 'EOF') {
+      if (peek().type === 'NEWLINE') { advance(); continue; }
+      body.push(parseStatement());
+    }
+
+    consume('DEDENT');
+    consume('KEYWORD', 'end');
+    // Optional `end function` qualifier
+    if (peek().type === 'KEYWORD' && peek().value === 'function') {
+      advance();
+    }
+    consumeNewline();
+
+    return { type: 'FunctionDeclaration', name: nameTok.value, params, body };
+  }
+
+  function parseReturnStatement(): ReturnStatement {
+    consume('KEYWORD', 'return');
+    const value = parseExpression();
+    consumeNewline();
+    return { type: 'ReturnStatement', value };
+  }
+
+  function parseCallStatement(): CallStatement {
+    const nameTok = consume('IDENT');
+    const args: Array<{ name: string | null; value: Expression }> = [];
+
+    // First positional arg (optional): NUMBER, STRING, IDENT, or parenthesised expr.
+    // Boolean literals (true/false) are also allowed as positional args.
+    const first = peek();
+    const isBoolKw = first.type === 'KEYWORD' && (first.value === 'true' || first.value === 'false');
+    if (
+      first.type === 'NUMBER' ||
+      first.type === 'STRING' ||
+      first.type === 'IDENT' ||
+      first.type === 'LPAREN' ||
+      isBoolKw
+    ) {
+      args.push({ name: null, value: parsePrimary() });
+    }
+
+    // Named args: (IDENT | allowed KEYWORD) followed by a primary expr.
+    while (true) {
+      const tok = peek();
+      if (tok.type === 'IDENT') {
+        const paramName = advance().value;
+        const value = parsePrimary();
+        args.push({ name: paramName, value });
+        continue;
+      }
+      if (tok.type === 'KEYWORD' && !NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
+        const paramName = advance().value;
+        const value = parsePrimary();
+        args.push({ name: paramName, value });
+        continue;
+      }
+      break;
+    }
+
+    consumeNewline();
+    return { type: 'CallStatement', name: nameTok.value, args };
+  }
+
+  function parseIfStatement(): IfStatement {
+    consume('KEYWORD', 'if');
+    const firstCond = parseExpression();
+    consumeNewline();
+    consume('INDENT');
+    const firstBody = parseBlock();
+    consume('DEDENT');
+
+    const branches: IfBranch[] = [{ condition: firstCond, body: firstBody }];
+    let elseBody: Statement[] | null = null;
+
+    // Handle `else if` (chained) and a final `else`.
+    while (peek().type === 'KEYWORD' && peek().value === 'else') {
+      // Peek past `else` to see if it's `else if`
+      const next = tokens[pos + 1];
+      if (next && next.type === 'KEYWORD' && next.value === 'if') {
+        advance(); // else
+        advance(); // if
+        const cond = parseExpression();
+        consumeNewline();
+        consume('INDENT');
+        const body = parseBlock();
+        consume('DEDENT');
+        branches.push({ condition: cond, body });
+        continue;
+      }
+      // plain else
+      advance();
+      consumeNewline();
+      consume('INDENT');
+      elseBody = parseBlock();
+      consume('DEDENT');
+      break;
+    }
+
+    consume('KEYWORD', 'end');
+    // Optional `end if` qualifier
+    if (peek().type === 'KEYWORD' && peek().value === 'if') {
+      advance();
+    }
+    consumeNewline();
+
+    return { type: 'IfStatement', branches, elseBody };
+  }
+
+  function parseBlock(): Statement[] {
+    const stmts: Statement[] = [];
+    while (peek().type !== 'DEDENT' && peek().type !== 'EOF') {
+      if (peek().type === 'NEWLINE') { advance(); continue; }
+      stmts.push(parseStatement());
+    }
+    return stmts;
+  }
+
+  // --- Expression parsing with precedence ---
+
+  function parseExpression(): Expression {
+    return parseLogical();
+  }
+
+  // Flat `and`/`or` level — no mixing without parentheses.
+  function parseLogical(): Expression {
+    let left = parseLogicalNot();
+    let firstOp: string | null = null;
+    while (peek().type === 'KEYWORD' && (peek().value === 'and' || peek().value === 'or')) {
+      const op = peek().value;
+      if (firstOp === null) {
+        firstOp = op;
+      } else if (op !== firstOp) {
+        throw new ParseError(
+          `Mixing 'and' and 'or' requires parentheses at line ${peek().line}`,
+          peek(),
+        );
+      }
+      advance();
+      const right = parseLogicalNot();
+      left = { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
+    }
+    return left;
+  }
+
+  function parseLogicalNot(): Expression {
+    if (peek().type === 'KEYWORD' && peek().value === 'not') {
+      advance();
+      const operand = parseLogicalNot();
+      return { type: 'UnaryExpression', operator: 'not', operand } as UnaryExpression;
+    }
+    return parseEquality();
+  }
+
+  function parseEquality(): Expression {
+    let left = parseAdditive();
+    // `is` and `is not` replace `==` and `!=`. `is` is a KEYWORD.
+    // Ambiguity with `is` as function-body opener is resolved structurally:
+    // function decls consume their `is` before the NEWLINE, so here we only
+    // encounter `is` mid-expression.
+    while (peek().type === 'KEYWORD' && peek().value === 'is') {
+      advance(); // consume `is`
+      let op: '==' | '!=' = '==';
+      if (peek().type === 'KEYWORD' && peek().value === 'not') {
+        advance();
+        op = '!=';
+      }
+      const right = parseAdditive();
+      left = { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
+    }
+    return left;
+  }
+
+  function parseAdditive(): Expression {
+    let left = parseMultiplicative();
+    while (peek().type === 'OP' && (peek().value === '+' || peek().value === '-')) {
+      const op = advance().value;
+      const right = parseMultiplicative();
+      left = { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
+    }
+    return left;
+  }
+
+  function parseMultiplicative(): Expression {
+    let left = parseExponential();
+    // `**` is a distinct token so peek().value === '*' only matches single `*`
+    while (peek().type === 'OP' && (peek().value === '*' || peek().value === '/')) {
+      const op = advance().value;
+      const right = parseExponential();
+      left = { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
+    }
+    return left;
+  }
+
+  function parseExponential(): Expression {
+    let left = parsePrimary();
+    while (peek().type === 'OP' && peek().value === '**') {
+      advance();
+      const right = parsePrimary();
+      left = { type: 'BinaryExpression', operator: '**', left, right } as BinaryExpression;
+    }
+    return left;
+  }
+
+  function parsePrimary(): Expression {
+    const tok = peek();
+
+    if (tok.type === 'NUMBER') {
+      advance();
+      return { type: 'NumberLiteral', value: parseInt(tok.value, 10) } as NumberLiteral;
+    }
+
+    if (tok.type === 'STRING') {
+      advance();
+      return { type: 'StringLiteral', value: tok.value } as StringLiteral;
+    }
+
+    if (tok.type === 'IDENT') {
+      advance();
+      if (tok.value === 'it') {
+        return { type: 'ItExpression' } as ItExpression;
+      }
+      return { type: 'IdentifierExpression', name: tok.value } as IdentifierExpression;
+    }
+
+    // Allow keyword tokens as identifiers in expression position (e.g. param named `to`).
+    // But reserved keywords (true/false/not/and/or/if/elif/else/end/is/print/set/function/return)
+    // must not be consumed here — they either form their own expression shapes or end expressions.
+    if (tok.type === 'KEYWORD') {
+      if (tok.value === 'true' || tok.value === 'false') {
+        advance();
+        return { type: 'BooleanLiteral', value: tok.value === 'true' } as BooleanLiteral;
+      }
+      if (NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
+        throw new ParseError(
+          `Unexpected keyword '${tok.value}' in expression at line ${tok.line}`,
+          tok,
+        );
+      }
+      advance();
+      return { type: 'IdentifierExpression', name: tok.value } as IdentifierExpression;
+    }
+
+    if (tok.type === 'LPAREN') {
+      advance();
+      const expr = parseExpression();
+      consume('RPAREN');
+      return expr;
+    }
+
+    throw new ParseError(
+      `Expected expression at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+      tok,
+    );
+  }
+
+  return parseProgram();
+}
