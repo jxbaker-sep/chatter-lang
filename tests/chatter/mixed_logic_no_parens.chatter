@@ -1,0 +1,3 @@
+if true and false or true
+    say "bug"
+end

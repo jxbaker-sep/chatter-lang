@@ -1,0 +1,9 @@
+set x to 5
+function double(number a) is
+    return a * 2
+end
+double x
+# it is now 10
+say "hello"
+# it should still be 10, not "hello"
+say it
