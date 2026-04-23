@@ -1,4 +1,4 @@
-set rotations to list of number
+set rotations to empty list of string
 append "L68" to rotations
 append "L30" to rotations
 append "R48" to rotations
@@ -10,12 +10,41 @@ append "L99" to rotations
 append "R14" to rotations
 append "L82" to rotations
 
-function decode takes string returns numbers is
-    
+function decode takes string rotation returns number is
+    var result is 0
+    repeat with i from 2 to length of rotation
+        set c to character i of rotation
+        multiply result by 10
+        if c is "1"
+            add 1 to result
+        else if c is "2"
+            add 2 to result
+        else if c is "3"
+            add 3 to result
+        else if c is "4"
+            add 4 to result
+        else if c is "5"
+            add 5 to result
+        else if c is "6"
+            add 6 to result
+        else if c is "7"
+            add 7 to result
+        else if c is "8"
+            add 8 to result
+        else if c is "9"
+            add 9 to result
+        end
+    end repeat
+    if first character of rotation is "L"
+        multiply result by -1
+    end if
+    return result
+
 end function
 
 var result is 0
 var current_position is 50
 repeat with rotation in rotation
-
+    decode rotation
+    say it
 end repeat

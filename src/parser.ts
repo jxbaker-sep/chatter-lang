@@ -704,6 +704,15 @@ export function parse(tokens: Token[]): Program {
   function parsePrimary(): Expression {
     const tok = peek();
 
+    // Unary minus: `-EXPR` where EXPR is another primary.
+    // Binds tighter than `**` so `-2 ** 2` is `(-2) ** 2 = 4`. Matches how
+    // most people read a negative literal.
+    if (tok.type === 'OP' && tok.value === '-') {
+      advance();
+      const operand = parsePrimary();
+      return { type: 'UnaryExpression', operator: '-', operand } as UnaryExpression;
+    }
+
     // List literals and list-read prefix forms
     if (tok.type === 'KEYWORD') {
       if (tok.value === 'list') {

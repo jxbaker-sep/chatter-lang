@@ -838,8 +838,20 @@ class Compiler {
         this.compileBinary(expr, out, bindings);
         break;
       case 'UnaryExpression':
-        this.compileExpr(expr.operand, out, bindings);
-        out.push({ op: 'NOT' });
+        if (expr.operator === '-') {
+          const t = this.staticType(expr.operand, bindings);
+          if (t && !(t.kind === 'scalar' && t.name === 'number')) {
+            throw new CompileError(
+              `unary '-' requires number, got ${typeToString(t)}`,
+            );
+          }
+          out.push({ op: 'PUSH_INT', value: 0 });
+          this.compileExpr(expr.operand, out, bindings);
+          out.push({ op: 'SUB' });
+        } else {
+          this.compileExpr(expr.operand, out, bindings);
+          out.push({ op: 'NOT' });
+        }
         break;
       case 'CallStatement': {
         const rt = this.functionReturnTypes.get(expr.name);
@@ -1046,7 +1058,10 @@ class Compiler {
       case 'NumberLiteral': return { kind: 'scalar', name: 'number' };
       case 'StringLiteral': return { kind: 'scalar', name: 'string' };
       case 'BooleanLiteral': return { kind: 'scalar', name: 'boolean' };
-      case 'UnaryExpression': return { kind: 'scalar', name: 'boolean' };
+      case 'UnaryExpression':
+        return expr.operator === '-'
+          ? { kind: 'scalar', name: 'number' }
+          : { kind: 'scalar', name: 'boolean' };
       case 'BinaryExpression': {
         const op = expr.operator;
         if (op === '&') {

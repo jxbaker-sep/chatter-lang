@@ -140,7 +140,7 @@ export interface BooleanLiteral {
 
 export interface UnaryExpression {
   type: 'UnaryExpression';
-  operator: 'not';
+  operator: 'not' | '-';
   operand: Expression;
 }
 
