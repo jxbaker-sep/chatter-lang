@@ -1,14 +1,3 @@
-set rotations to empty list of string
-append "L68" to rotations
-append "L30" to rotations
-append "R48" to rotations
-append "L5" to rotations
-append "R60" to rotations
-append "L55" to rotations
-append "L1" to rotations
-append "L99" to rotations
-append "R14" to rotations
-append "L82" to rotations
 
 function decode takes string rotation returns number is
     var result is 0
@@ -42,19 +31,28 @@ function decode takes string rotation returns number is
 
 end function
 
-var current_position is 50
-var count is 0
-repeat with rotation in rotations
-    decode rotation
-    add it to current_position
-    if current_position is at least 100
-        subtract 100 from current_position
-    else if current_position is at most -1
-        add 100 to current_position
-    end
-    if current_position is 0
-        add 1 to count
-    end
-end repeat
+function find_password takes string path returns number is
+    set rotations to lines of file path
+    var current_position is 50
+    var count is 0
+    repeat with rotation in rotations
+        decode rotation
+        add it to current_position
+        set temp to current_position mod 100
+        if temp is less than 0
+            change current_position to temp + 100
+        else 
+            change current_position to temp
+        end if
+        if current_position is 0
+            add 1 to count
+        end
+    end repeat
 
-say count
+    return count
+end function
+
+find_password "tests/chatter/spinner_decode.1.input"
+say it
+find_password "tests/chatter/spinner_decode.2.input"
+say it
