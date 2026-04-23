@@ -8,12 +8,12 @@ Chatter is a small, HyperTalk-inspired programming language. Its goal is to read
 set foo to 5
 set bar to 6
 
-function double(number a) is
+function double takes number a returns number is
     return a * 2
 end function
 
-function raise(number a, number to) is
-    return a ** to
+function raise takes number a to number exponent returns number is
+    return a ** exponent
 end function
 
 double foo
