@@ -17,7 +17,11 @@ export type Expression =
   | ItemAccessExpression
   | FirstItemExpression
   | LastItemExpression
-  | LengthExpression;
+  | LengthExpression
+  | CharacterAccessExpression
+  | FirstCharacterExpression
+  | LastCharacterExpression
+  | SubstringExpression;
 
 export type Statement =
   | SayStatement
@@ -182,6 +186,29 @@ export interface LastItemExpression {
 
 export interface LengthExpression {
   type: 'LengthExpression';
+  target: Expression;
+}
+
+export interface CharacterAccessExpression {
+  type: 'CharacterAccessExpression';
+  index: Expression;
+  target: Expression;
+}
+
+export interface FirstCharacterExpression {
+  type: 'FirstCharacterExpression';
+  target: Expression;
+}
+
+export interface LastCharacterExpression {
+  type: 'LastCharacterExpression';
+  target: Expression;
+}
+
+export interface SubstringExpression {
+  type: 'SubstringExpression';
+  from: Expression;
+  to: Expression;
   target: Expression;
 }
 

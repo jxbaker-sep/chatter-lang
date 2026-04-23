@@ -34,8 +34,11 @@ export type Instruction =
   | { op: 'MAKE_EMPTY_LIST'; elementType: 'number' | 'string' | 'boolean' }
   | { op: 'LIST_GET' }        // pop index, pop list, push element
   | { op: 'LIST_SET' }        // pop value, pop index, pop list, mutate
-  | { op: 'LIST_LENGTH' }     // pop list, push number
-  | { op: 'LIST_CONTAINS' }   // pop value, pop list, push boolean
+  | { op: 'LENGTH' }          // pop value (list or string), push number
+  | { op: 'CONTAINS' }        // pop rhs, pop lhs (list or string), push boolean
+  | { op: 'CONCAT' }          // pop b, pop a; both coerced to string; push a+b
+  | { op: 'STR_CHAR_AT' }     // pop index, pop string, push 1-char string
+  | { op: 'STR_SUBSTRING' }   // pop to, pop from, pop string, push substring
   | { op: 'LIST_APPEND' }     // pop value, pop list, mutate
   | { op: 'LIST_PREPEND' }    // pop value, pop list, mutate
   | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate

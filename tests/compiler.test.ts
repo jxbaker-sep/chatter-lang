@@ -609,9 +609,61 @@ describe('Compiler', () => {
       expect(() => compileSource(src)).toThrow(/Cannot change 'x'/);
     });
 
-    test('contains compiles to LIST_CONTAINS', () => {
+    test('contains compiles to CONTAINS', () => {
       const bc = compileSource('set l to list of 1, 2\nsay l contains 1');
-      expect(bc.main).toContainEqual({ op: 'LIST_CONTAINS' });
+      expect(bc.main).toContainEqual({ op: 'CONTAINS' });
+    });
+  });
+
+  describe('string operations (static checks)', () => {
+    test('& compiles to CONCAT', () => {
+      const bc = compileSource('say "a" & "b"');
+      expect(bc.main).toContainEqual({ op: 'CONCAT' });
+    });
+
+    test('character N of S compiles to STR_CHAR_AT', () => {
+      const bc = compileSource('say character 1 of "hi"');
+      expect(bc.main).toContainEqual({ op: 'STR_CHAR_AT' });
+    });
+
+    test('characters A to B of S compiles to STR_SUBSTRING', () => {
+      const bc = compileSource('say characters 1 to 2 of "hi"');
+      expect(bc.main).toContainEqual({ op: 'STR_SUBSTRING' });
+    });
+
+    test('length of uses polymorphic LENGTH op', () => {
+      const bc = compileSource('say length of "hi"');
+      expect(bc.main).toContainEqual({ op: 'LENGTH' });
+    });
+
+    test('string contains non-string RHS → compile error', () => {
+      expect(() => compileSource('say "hi" contains 5')).toThrow(/contains/);
+    });
+
+    test('character N of non-string → compile error', () => {
+      expect(() => compileSource('set n to 5\nsay character 1 of n')).toThrow(/character/);
+    });
+
+    test('first character of non-string → compile error', () => {
+      expect(() => compileSource('set n to 5\nsay first character of n')).toThrow(/character/);
+    });
+
+    test('last character of non-string → compile error', () => {
+      expect(() => compileSource('set n to 5\nsay last character of n')).toThrow(/character/);
+    });
+
+    test('characters A to B of non-string → compile error', () => {
+      expect(() => compileSource('set n to 5\nsay characters 1 to 2 of n')).toThrow(/string/);
+    });
+
+    test('length of on boolean → compile error', () => {
+      expect(() => compileSource('set b to true\nsay length of b')).toThrow(/list or string/);
+    });
+
+    test('& always returns string (staticType via use in function return)', () => {
+      // If string return type enforcement works, compiling this should succeed.
+      const src = 'function f returns string is\n    return "x=" & 1 + 2\nend';
+      expect(() => compileSource(src)).not.toThrow();
     });
   });
 });

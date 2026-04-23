@@ -41,6 +41,10 @@ function formatValue(v: ChatterValue): string {
   return formatScalar(v);
 }
 
+function stringify(v: ChatterValue): string {
+  return formatValue(v);
+}
+
 interface Frame {
   instructions: Instruction[];
   ip: number;
@@ -411,31 +415,90 @@ export class VM {
         break;
       }
 
-      case 'LIST_LENGTH': {
-        const list = this.pop();
-        if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'length of X' requires a list, got ${describe(list)}`);
+      case 'LENGTH': {
+        const v = this.pop();
+        if (isList(v)) {
+          this.stack.push(v.items.length);
+          break;
         }
-        this.stack.push(list.items.length);
-        break;
+        if (typeof v === 'string') {
+          this.stack.push(v.length);
+          break;
+        }
+        throw new RuntimeError(`Type mismatch: 'length of X' requires a list or string, got ${describe(v)}`);
       }
 
-      case 'LIST_CONTAINS': {
+      case 'CONTAINS': {
         const value = this.pop();
-        const list = this.pop();
-        if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'contains' requires a list on the left, got ${describe(list)}`);
+        const left = this.pop();
+        if (typeof left === 'string') {
+          if (typeof value !== 'string') {
+            throw new RuntimeError(
+              `Type mismatch: 'contains' on string requires a string on the right, got ${describe(value)}`,
+            );
+          }
+          this.stack.push(left.includes(value));
+          break;
         }
-        if (isList(value) || typeof value !== list.element) {
+        if (!isList(left)) {
+          throw new RuntimeError(`Type mismatch: 'contains' requires a list or string on the left, got ${describe(left)}`);
+        }
+        if (isList(value) || typeof value !== left.element) {
           throw new RuntimeError(
-            `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${list.element}`,
+            `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${left.element}`,
           );
         }
         let found = false;
-        for (const e of list.items) {
+        for (const e of left.items) {
           if (e === value) { found = true; break; }
         }
         this.stack.push(found);
+        break;
+      }
+
+      case 'CONCAT': {
+        const b = this.pop();
+        const a = this.pop();
+        this.stack.push(stringify(a) + stringify(b));
+        break;
+      }
+
+      case 'STR_CHAR_AT': {
+        const idx = this.pop();
+        const s = this.pop();
+        if (typeof s !== 'string') {
+          throw new RuntimeError(`Type mismatch: 'character N of X' requires a string, got ${describe(s)}`);
+        }
+        if (typeof idx !== 'number') {
+          throw new RuntimeError(`Type mismatch: character index must be a number, got ${typeof idx}`);
+        }
+        if (idx < 1 || idx > s.length) {
+          throw new RuntimeError(`Index out of range: character ${idx} of string (length ${s.length})`);
+        }
+        this.stack.push(s.charAt(idx - 1));
+        break;
+      }
+
+      case 'STR_SUBSTRING': {
+        const to = this.pop();
+        const from = this.pop();
+        const s = this.pop();
+        if (typeof s !== 'string') {
+          throw new RuntimeError(`Type mismatch: 'characters A to B of X' requires a string, got ${describe(s)}`);
+        }
+        if (typeof from !== 'number' || typeof to !== 'number') {
+          throw new RuntimeError(`Type mismatch: substring bounds must be numbers`);
+        }
+        if (from > to) {
+          this.stack.push('');
+          break;
+        }
+        if (from < 1 || to > s.length) {
+          throw new RuntimeError(
+            `Index out of range: characters ${from} to ${to} of string (length ${s.length})`,
+          );
+        }
+        this.stack.push(s.substring(from - 1, to));
         break;
       }
 

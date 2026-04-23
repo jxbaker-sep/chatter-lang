@@ -1,0 +1,2 @@
+set name to "Alice"
+say "User " & name & " has " & length of name & " chars"

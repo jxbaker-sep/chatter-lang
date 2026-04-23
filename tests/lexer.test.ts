@@ -113,4 +113,17 @@ describe('Lexer', () => {
       expect(kws.has(w)).toBe(true);
     }
   });
+
+  test('reserves character and characters keywords', () => {
+    const tokens = lex('character 1 of "hi"\ncharacters 1 to 2 of "hi"');
+    const kws = tokens.filter(t => t.type === 'KEYWORD').map(t => t.value);
+    expect(kws).toContain('character');
+    expect(kws).toContain('characters');
+  });
+
+  test('& is emitted as an OP token', () => {
+    const tokens = lex('say "a" & "b"');
+    const ops = tokens.filter(t => t.type === 'OP').map(t => t.value);
+    expect(ops).toEqual(['&']);
+  });
 });

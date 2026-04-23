@@ -1,0 +1,2 @@
+set n to 0 - 3
+say "n=" & n

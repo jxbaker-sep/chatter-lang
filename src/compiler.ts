@@ -7,6 +7,8 @@ import {
   ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, TypeAnnotation, ScalarTypeName,
+  CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
+  SubstringExpression,
 } from './ast';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 
@@ -685,7 +687,7 @@ class Compiler {
       this.compileExpr(stmt.list, out, bindings);
       out.push({ op: 'STORE', name: listTmp });
       out.push({ op: 'LOAD', name: listTmp });
-      out.push({ op: 'LIST_LENGTH' });
+      out.push({ op: 'LENGTH' });
       out.push({ op: 'STORE', name: lenTmp });
       out.push({ op: 'PUSH_INT', value: 1 });
       out.push({ op: 'STORE', name: idxTmp });
@@ -863,22 +865,83 @@ class Compiler {
         out.push({ op: 'LIST_GET' });
         break;
       case 'LastItemExpression': {
-        // LOAD list; LIST_LENGTH; LIST_GET — but we need the list twice.
+        // LOAD list; LENGTH; LIST_GET — but we need the list twice.
         // Use a fresh temp.
         const tmp = this.freshName('last');
         this.compileExpr(expr.target, out, bindings);
         out.push({ op: 'STORE', name: tmp });
         out.push({ op: 'LOAD', name: tmp });
         out.push({ op: 'LOAD', name: tmp });
-        out.push({ op: 'LIST_LENGTH' });
+        out.push({ op: 'LENGTH' });
         out.push({ op: 'LIST_GET' });
         out.push({ op: 'DELETE', name: tmp });
         break;
       }
-      case 'LengthExpression':
+      case 'LengthExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && tt.kind === 'scalar' && tt.name !== 'string') {
+          throw new CompileError(
+            `'length of' requires a list or string, got ${typeToString(tt)}`,
+          );
+        }
         this.compileExpr(expr.target, out, bindings);
-        out.push({ op: 'LIST_LENGTH' });
+        out.push({ op: 'LENGTH' });
         break;
+      }
+      case 'CharacterAccessExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
+          throw new CompileError(
+            `'character N of' requires a string, got ${typeToString(tt)}`,
+          );
+        }
+        this.compileExpr(expr.target, out, bindings);
+        this.compileExpr(expr.index, out, bindings);
+        out.push({ op: 'STR_CHAR_AT' });
+        break;
+      }
+      case 'FirstCharacterExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
+          throw new CompileError(
+            `'first character of' requires a string, got ${typeToString(tt)}`,
+          );
+        }
+        this.compileExpr(expr.target, out, bindings);
+        out.push({ op: 'PUSH_INT', value: 1 });
+        out.push({ op: 'STR_CHAR_AT' });
+        break;
+      }
+      case 'LastCharacterExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
+          throw new CompileError(
+            `'last character of' requires a string, got ${typeToString(tt)}`,
+          );
+        }
+        const tmp = this.freshName('lastch');
+        this.compileExpr(expr.target, out, bindings);
+        out.push({ op: 'STORE', name: tmp });
+        out.push({ op: 'LOAD', name: tmp });
+        out.push({ op: 'LOAD', name: tmp });
+        out.push({ op: 'LENGTH' });
+        out.push({ op: 'STR_CHAR_AT' });
+        out.push({ op: 'DELETE', name: tmp });
+        break;
+      }
+      case 'SubstringExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
+          throw new CompileError(
+            `'characters A to B of' requires a string, got ${typeToString(tt)}`,
+          );
+        }
+        this.compileExpr(expr.target, out, bindings);
+        this.compileExpr(expr.from, out, bindings);
+        this.compileExpr(expr.to, out, bindings);
+        out.push({ op: 'STR_SUBSTRING' });
+        break;
+      }
     }
   }
 
@@ -923,9 +986,35 @@ class Compiler {
     bindings: Bindings,
   ): void {
     if (expr.operator === 'contains') {
+      const lt = this.staticType(expr.left, bindings);
+      if (lt !== null && lt.kind === 'scalar' && lt.name === 'string') {
+        const rt = this.staticType(expr.right, bindings);
+        if (rt !== null && !(rt.kind === 'scalar' && rt.name === 'string')) {
+          throw new CompileError(
+            `Type mismatch: 'contains' on string requires a string on the right, got ${typeToString(rt)}`,
+          );
+        }
+      } else if (lt !== null && lt.kind === 'scalar' && lt.name !== 'string') {
+        throw new CompileError(
+          `'contains' requires a list or string on the left, got ${typeToString(lt)}`,
+        );
+      } else if (lt !== null && lt.kind === 'list') {
+        // Existing list element-type check
+        const rt = this.staticType(expr.right, bindings);
+        if (rt && rt.kind === 'scalar' && rt.name !== lt.element) {
+          throw new CompileError(
+            `Type mismatch: 'contains' value type ${rt.name} does not match list element type ${lt.element}`,
+          );
+        }
+        if (rt && rt.kind === 'list') {
+          throw new CompileError(
+            `Type mismatch: 'contains' value cannot be a list`,
+          );
+        }
+      }
       this.compileExpr(expr.left, out, bindings);
       this.compileExpr(expr.right, out, bindings);
-      out.push({ op: 'LIST_CONTAINS' });
+      out.push({ op: 'CONTAINS' });
       return;
     }
     this.compileExpr(expr.left, out, bindings);
@@ -935,6 +1024,7 @@ class Compiler {
       case '-':  out.push({ op: 'SUB' }); break;
       case '*':  out.push({ op: 'MUL' }); break;
       case '/':  out.push({ op: 'DIV' }); break;
+      case '&':  out.push({ op: 'CONCAT' }); break;
       case 'mod': out.push({ op: 'MOD' }); break;
       case '**': out.push({ op: 'POW' }); break;
       case '==': out.push({ op: 'EQ' }); break;
@@ -959,6 +1049,9 @@ class Compiler {
       case 'UnaryExpression': return { kind: 'scalar', name: 'boolean' };
       case 'BinaryExpression': {
         const op = expr.operator;
+        if (op === '&') {
+          return { kind: 'scalar', name: 'string' };
+        }
         if (op === '+' || op === '-' || op === '*' || op === '/' || op === '**' || op === 'mod') {
           return { kind: 'scalar', name: 'number' };
         }
@@ -993,6 +1086,11 @@ class Compiler {
       }
       case 'LengthExpression':
         return { kind: 'scalar', name: 'number' };
+      case 'CharacterAccessExpression':
+      case 'FirstCharacterExpression':
+      case 'LastCharacterExpression':
+      case 'SubstringExpression':
+        return { kind: 'scalar', name: 'string' };
       default:
         return null;
     }

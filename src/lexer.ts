@@ -30,6 +30,7 @@ const KEYWORDS = new Set([
   'list', 'of', 'readonly', 'empty',
   'item', 'first', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',
+  'character', 'characters',
 ]);
 const TYPES = new Set(['number', 'boolean', 'string']);
 
@@ -111,7 +112,7 @@ export function lex(source: string): Token[] {
         col += 2;
         continue;
       }
-      if ('+-*/'.includes(line[col])) {
+      if ('+-*/&'.includes(line[col])) {
         tokens.push({ type: 'OP', value: line[col], line: lineNum, col: startCol });
         col++;
         continue;

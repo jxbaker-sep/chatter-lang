@@ -10,6 +10,8 @@ import {
   ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, TypeAnnotation, ScalarTypeName,
+  CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
+  SubstringExpression,
 } from './ast';
 
 export class ParseError extends Error {
@@ -31,6 +33,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'list', 'of', 'readonly', 'empty',
   'item', 'first', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',
+  'character', 'characters',
 ]);
 
 export function parse(tokens: Token[]): Program {
@@ -594,14 +597,14 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseEquality(): Expression {
-    let left = parseAdditive();
+    let left = parseConcat();
     while (
       (peek().type === 'KEYWORD' && peek().value === 'is') ||
       (peek().type === 'KEYWORD' && peek().value === 'contains')
     ) {
       if (peek().value === 'contains') {
         advance();
-        const right = parseAdditive();
+        const right = parseConcat();
         left = { type: 'BinaryExpression', operator: 'contains', left, right } as BinaryExpression;
         continue;
       }
@@ -647,8 +650,18 @@ export function parse(tokens: Token[]): Program {
           );
         }
       }
-      const right = parseAdditive();
+      const right = parseConcat();
       left = { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
+    }
+    return left;
+  }
+
+  function parseConcat(): Expression {
+    let left = parseAdditive();
+    while (peek().type === 'OP' && peek().value === '&') {
+      advance();
+      const right = parseAdditive();
+      left = { type: 'BinaryExpression', operator: '&', left, right } as BinaryExpression;
     }
     return left;
   }
@@ -740,6 +753,12 @@ export function parse(tokens: Token[]): Program {
       }
       if (tok.value === 'first') {
         advance();
+        if (peek().type === 'KEYWORD' && peek().value === 'character') {
+          advance();
+          consume('KEYWORD', 'of');
+          const target = parsePrimary();
+          return { type: 'FirstCharacterExpression', target } as FirstCharacterExpression;
+        }
         consume('KEYWORD', 'item');
         consume('KEYWORD', 'of');
         const target = parsePrimary();
@@ -747,6 +766,12 @@ export function parse(tokens: Token[]): Program {
       }
       if (tok.value === 'last') {
         advance();
+        if (peek().type === 'KEYWORD' && peek().value === 'character') {
+          advance();
+          consume('KEYWORD', 'of');
+          const target = parsePrimary();
+          return { type: 'LastCharacterExpression', target } as LastCharacterExpression;
+        }
         consume('KEYWORD', 'item');
         consume('KEYWORD', 'of');
         const target = parsePrimary();
@@ -757,6 +782,22 @@ export function parse(tokens: Token[]): Program {
         consume('KEYWORD', 'of');
         const target = parsePrimary();
         return { type: 'LengthExpression', target } as LengthExpression;
+      }
+      if (tok.value === 'character') {
+        advance();
+        const index = parseExpression();
+        consume('KEYWORD', 'of');
+        const target = parsePrimary();
+        return { type: 'CharacterAccessExpression', index, target } as CharacterAccessExpression;
+      }
+      if (tok.value === 'characters') {
+        advance();
+        const from = parseExpression();
+        consume('KEYWORD', 'to');
+        const to = parseExpression();
+        consume('KEYWORD', 'of');
+        const target = parsePrimary();
+        return { type: 'SubstringExpression', from, to, target } as SubstringExpression;
       }
     }
 

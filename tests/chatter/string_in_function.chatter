@@ -1,0 +1,5 @@
+function greet takes string name returns string is
+    return "Hello, " & name & "!"
+end function
+greet "world"
+say it

@@ -597,4 +597,73 @@ describe('Parser', () => {
       expect(() => parseSource('set l to readonly list of number')).toThrow(/readonly/);
     });
   });
+
+  describe('string operations', () => {
+    test('parses & as BinaryExpression', () => {
+      const ast = parseSource('say "a" & "b"');
+      expect((ast.body[0] as any).expression).toMatchObject({
+        type: 'BinaryExpression',
+        operator: '&',
+        left: { type: 'StringLiteral', value: 'a' },
+        right: { type: 'StringLiteral', value: 'b' },
+      });
+    });
+
+    test('& is left-associative', () => {
+      const ast = parseSource('say "a" & "b" & "c"');
+      const expr = (ast.body[0] as any).expression;
+      expect(expr.operator).toBe('&');
+      expect(expr.left.operator).toBe('&');
+      expect(expr.left.left).toMatchObject({ value: 'a' });
+      expect(expr.left.right).toMatchObject({ value: 'b' });
+      expect(expr.right).toMatchObject({ value: 'c' });
+    });
+
+    test('+ binds tighter than & (precedence)', () => {
+      const ast = parseSource('say "x=" & 1 + 2');
+      const expr = (ast.body[0] as any).expression;
+      expect(expr.operator).toBe('&');
+      expect(expr.right).toMatchObject({ type: 'BinaryExpression', operator: '+' });
+    });
+
+    test('parses character N of S', () => {
+      const ast = parseSource('say character 1 of "hi"');
+      expect((ast.body[0] as any).expression).toMatchObject({
+        type: 'CharacterAccessExpression',
+        index: { type: 'NumberLiteral', value: 1 },
+        target: { type: 'StringLiteral', value: 'hi' },
+      });
+    });
+
+    test('parses characters A to B of S', () => {
+      const ast = parseSource('say characters 1 to 3 of "hello"');
+      expect((ast.body[0] as any).expression).toMatchObject({
+        type: 'SubstringExpression',
+        from: { type: 'NumberLiteral', value: 1 },
+        to: { type: 'NumberLiteral', value: 3 },
+        target: { type: 'StringLiteral', value: 'hello' },
+      });
+    });
+
+    test('parses first character of S', () => {
+      const ast = parseSource('say first character of "hi"');
+      expect((ast.body[0] as any).expression).toMatchObject({
+        type: 'FirstCharacterExpression',
+        target: { type: 'StringLiteral', value: 'hi' },
+      });
+    });
+
+    test('parses last character of S', () => {
+      const ast = parseSource('say last character of "hi"');
+      expect((ast.body[0] as any).expression).toMatchObject({
+        type: 'LastCharacterExpression',
+        target: { type: 'StringLiteral', value: 'hi' },
+      });
+    });
+
+    test('still parses first item of L (lists unaffected)', () => {
+      const ast = parseSource('set l to list of 1\nsay first item of l');
+      expect((ast.body[1] as any).expression.type).toBe('FirstItemExpression');
+    });
+  });
 });
