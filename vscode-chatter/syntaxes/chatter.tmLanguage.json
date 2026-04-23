@@ -1,0 +1,140 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Chatter",
+  "scopeName": "source.chatter",
+  "fileTypes": ["chatter"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#operators-word" },
+    { "include": "#builtins" },
+    { "include": "#operators-symbol" },
+    { "include": "#function-def" },
+    { "include": "#function-call" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [{
+        "name": "comment.line.number-sign.chatter",
+        "match": "#.*$"
+      }]
+    },
+    "strings": {
+      "patterns": [{
+        "name": "string.quoted.double.chatter",
+        "begin": "\"",
+        "end": "\"",
+        "patterns": [{
+          "name": "constant.character.escape.chatter",
+          "match": "\\\\."
+        }]
+      }]
+    },
+    "numbers": {
+      "patterns": [{
+        "name": "constant.numeric.chatter",
+        "match": "\\b[0-9]+\\b"
+      }]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.chatter",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "variable.language.it.chatter",
+          "match": "\\bit\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [{
+        "name": "storage.type.chatter",
+        "match": "\\b(number|string|boolean|list|readonly)\\b"
+      }]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.chatter",
+          "match": "\\b(if|else|repeat|times|while|end|return)\\b"
+        },
+        {
+          "name": "keyword.control.loop.chatter",
+          "match": "\\b(with|from|to|in|by)\\b"
+        },
+        {
+          "name": "storage.type.declaration.chatter",
+          "match": "\\b(function|takes|returns|var|set|change)\\b"
+        }
+      ]
+    },
+    "operators-word": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.chatter",
+          "match": "\\b(and|or|not)\\b"
+        },
+        {
+          "name": "keyword.operator.comparison.chatter",
+          "match": "\\b(is\\s+not|is\\s+less\\s+than\\s+or\\s+equal\\s+to|is\\s+greater\\s+than\\s+or\\s+equal\\s+to|is\\s+less\\s+than|is\\s+greater\\s+than|is\\s+at\\s+least|is\\s+at\\s+most|is|contains|equal)\\b"
+        },
+        {
+          "name": "keyword.operator.word.chatter",
+          "match": "\\b(mod)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.io.chatter",
+          "match": "\\b(say)\\b"
+        },
+        {
+          "name": "support.function.collection.chatter",
+          "match": "\\b(length\\s+of|first\\s+item\\s+of|last\\s+item\\s+of|first\\s+character\\s+of|last\\s+character\\s+of|item|characters|character|of|empty|first|last|length)\\b"
+        },
+        {
+          "name": "support.function.mutation.chatter",
+          "match": "\\b(append|prepend|insert|remove|add|subtract|multiply|divide)\\b"
+        }
+      ]
+    },
+    "operators-symbol": {
+      "patterns": [{
+        "name": "keyword.operator.chatter",
+        "match": "(\\*\\*|&|\\+|\\-|\\*|/|,|\\(|\\))"
+      }]
+    },
+    "function-def": {
+      "patterns": [{
+        "match": "\\b(function)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+        "captures": {
+          "1": { "name": "storage.type.declaration.chatter" },
+          "2": { "name": "entity.name.function.chatter" }
+        }
+      }]
+    },
+    "function-call": {
+      "patterns": [{
+        "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s+(?!is\\b|to\\b)",
+        "captures": {
+          "1": { "name": "entity.name.function.chatter" }
+        }
+      }]
+    },
+    "identifiers": {
+      "patterns": [{
+        "name": "variable.other.chatter",
+        "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+      }]
+    }
+  }
+}

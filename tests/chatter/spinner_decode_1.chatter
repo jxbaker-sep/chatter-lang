@@ -1,0 +1,21 @@
+set rotations to list of number
+append "L68" to rotations
+append "L30" to rotations
+append "R48" to rotations
+append "L5" to rotations
+append "R60" to rotations
+append "L55" to rotations
+append "L1" to rotations
+append "L99" to rotations
+append "R14" to rotations
+append "L82" to rotations
+
+function decode takes string returns numbers is
+    
+end function
+
+var result is 0
+var current_position is 50
+repeat with rotation in rotation
+
+end repeat
