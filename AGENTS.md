@@ -75,7 +75,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - All three variants accept either `end` or `end repeat`.
 
 ### Expressions
-- Arithmetic: `+ - * / ** mod`. Standard precedence: `**` > `*/ mod` > `+-`. `mod` is a keyword, same precedence as `*` and `/`, left-associative. Truncated-division modulo (sign follows dividend). Runtime error on `mod 0`.
+- Arithmetic: `+ - * / ** mod`. Standard precedence: `**` > `*/ mod` > `+-`. `mod` is a keyword, same precedence as `*` and `/`, left-associative. **Floored-division modulo** (sign follows divisor, à la Python/Ruby). Result of `a mod b` (when `b > 0`) is always in `[0, b)`. Runtime error on `mod 0`.
 - Equality: `is`, `is not` — value + type comparison. Type mismatch = runtime error (Path A). Lower precedence than arithmetic, higher than logical. (`==` and `!=` are **not** tokens; they cause a tokenisation error.)
 - Comparison (numbers only, same precedence as `is`/`is not`):
   - `a is less than b` → `<`

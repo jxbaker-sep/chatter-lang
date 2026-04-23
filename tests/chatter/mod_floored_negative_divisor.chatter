@@ -1,0 +1,3 @@
+say 7 mod -3
+say 1 mod -5
+say 0 mod -7

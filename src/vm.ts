@@ -175,7 +175,7 @@ export class VM {
           case 'SUB': result = a - b; break;
           case 'MUL': result = a * b; break;
           case 'DIV': result = Math.trunc(a / b); break;
-          case 'MOD': result = a - Math.trunc(a / b) * b; break;
+          case 'MOD': result = a - Math.floor(a / b) * b; break;
           case 'POW': result = Math.pow(a, b); break;
         }
         if (result < I32_MIN || result > I32_MAX) {
