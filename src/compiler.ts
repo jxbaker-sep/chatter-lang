@@ -673,10 +673,60 @@ class Compiler {
 
       const limit = this.freshName('limit');
 
+      // Validate step (if present) and determine whether a runtime check is needed.
+      let stepIsKnownPositive = false;
+      if (stmt.step !== undefined) {
+        const step = stmt.step;
+        // Literal-positive or literal-non-positive detection.
+        if (step.type === 'NumberLiteral') {
+          if (step.value < 1) {
+            throw new CompileError(
+              `step in 'repeat' must be positive (at least 1), got ${step.value}`,
+            );
+          }
+          stepIsKnownPositive = true;
+        } else if (
+          step.type === 'UnaryExpression' &&
+          step.operator === '-' &&
+          step.operand.type === 'NumberLiteral'
+        ) {
+          throw new CompileError(
+            `step in 'repeat' must be positive (at least 1), got ${-step.operand.value}`,
+          );
+        } else {
+          const st = this.staticType(step, bindings);
+          if (st && !(st.kind === 'scalar' && st.name === 'number')) {
+            throw new CompileError(
+              `step in 'repeat' must be a number, got ${typeToString(st)}`,
+            );
+          }
+        }
+      }
+
       this.compileExpr(stmt.from, out, bindings);
       out.push({ op: 'STORE', name: loopVar });
       this.compileExpr(stmt.to, out, bindings);
       out.push({ op: 'STORE', name: limit });
+
+      let stepTmp: string | null = null;
+      if (stmt.step !== undefined) {
+        stepTmp = this.freshName('step');
+        this.compileExpr(stmt.step, out, bindings);
+        out.push({ op: 'STORE', name: stepTmp });
+        if (!stepIsKnownPositive) {
+          // Runtime check: step >= 1, else raise.
+          out.push({ op: 'LOAD', name: stepTmp });
+          out.push({ op: 'PUSH_INT', value: 1 });
+          out.push({ op: 'LT' });
+          const jifSkipIdx = out.length;
+          out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+          out.push({
+            op: 'ERROR',
+            message: `step in 'repeat' must be positive (at least 1)`,
+          });
+          (out[jifSkipIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+        }
+      }
 
       const topIdx = out.length;
       out.push({ op: 'LOAD', name: loopVar });
@@ -692,13 +742,20 @@ class Compiler {
       bindings.delete(loopVar);
 
       out.push({ op: 'LOAD', name: loopVar });
-      out.push({ op: 'PUSH_INT', value: 1 });
+      if (stepTmp !== null) {
+        out.push({ op: 'LOAD', name: stepTmp });
+      } else {
+        out.push({ op: 'PUSH_INT', value: 1 });
+      }
       out.push({ op: 'ADD' });
       out.push({ op: 'STORE', name: loopVar });
       out.push({ op: 'JUMP', target: topIdx });
       (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
       out.push({ op: 'DELETE', name: loopVar });
       out.push({ op: 'DELETE', name: limit });
+      if (stepTmp !== null) {
+        out.push({ op: 'DELETE', name: stepTmp });
+      }
       return;
     }
 

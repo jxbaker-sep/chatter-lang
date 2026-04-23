@@ -160,7 +160,7 @@ export interface IfStatement {
 
 export type RepeatStatement =
   | { type: 'RepeatStatement'; kind: 'times'; count: Expression; body: Statement[] }
-  | { type: 'RepeatStatement'; kind: 'range'; varName: string; from: Expression; to: Expression; body: Statement[] }
+  | { type: 'RepeatStatement'; kind: 'range'; varName: string; from: Expression; to: Expression; step?: Expression; body: Statement[] }
   | { type: 'RepeatStatement'; kind: 'while'; condition: Expression; body: Statement[] }
   | { type: 'RepeatStatement'; kind: 'list'; varName: string; list: Expression; body: Statement[] };
 

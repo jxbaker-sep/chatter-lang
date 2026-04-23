@@ -259,7 +259,7 @@ Existing golden cases:
 ### Explicitly queued
 - **Path C**: static type checker. Would catch `5 is "hello"` at compile time, validate param types, etc. Currently Path A (runtime checks). Deferred.
 - **Fractional numbers**: planned. `number` is currently i32 only.
-- **Loop extensions (deferred)**: step (`by N`), reverse direction (`down to`), early exit (`exit repeat`, `next repeat`), `repeat until cond`. Base `repeat` loops (times / range / while) are implemented.
+- **Loop extensions (deferred)**: reverse direction (`down to`), early exit (`exit repeat`, `next repeat`), `repeat until cond`. Base `repeat` loops (times / range / while) and the `by STEP` clause on range-form are implemented.
 - **Chatter-native test framework**: write tests in Chatter (`assert x is 10`) once assertions exist.
 - **Maps**: independent built-in key-value type. Mutable. Also need a read-only variant.
 - **Sets**: independent built-in unordered unique-element collection. Mutable + readonly variant.

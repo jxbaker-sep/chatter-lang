@@ -534,12 +534,18 @@ export function parse(tokens: Token[], source?: string): Program {
         const fromExpr = parseExpression();
         consume('KEYWORD', 'to');
         const toExpr = parseExpression();
+        let stepExpr: Expression | undefined;
+        if (peek().type === 'KEYWORD' && peek().value === 'by') {
+          advance();
+          stepExpr = parseExpression();
+        }
         result = {
           type: 'RepeatStatement',
           kind: 'range',
           varName: varTok.value,
           from: fromExpr,
           to: toExpr,
+          ...(stepExpr !== undefined ? { step: stepExpr } : {}),
           body: [],
         };
       }
