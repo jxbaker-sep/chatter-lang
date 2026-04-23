@@ -45,7 +45,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - Nested lists (`list of list of T`) are **not supported** (parse error).
 
 ### Statements
-- `say expr` — prints with newline. **Does NOT update `it`** (for debugging).
+- `say expr (, expr)*` — prints one or more expressions space-separated on one line, terminated by newline. **Does NOT update `it`** (for debugging). Empty `say` or trailing comma = compile error. Single-arg form output is byte-identical to the old single-expression `say`. List literals stay greedy in `say` arg position — use parens to mix a list alongside other items: `say (list of 1, 2), "end"`.
 - `set NAME to expr` — immutable binding. Duplicate `set` = compile error.
 - `var NAME is expr` — **mutable** binding. Initializer required. Type-locked at first assignment to whichever of {number, string, boolean} the value is. Same scoping rules as `set` (function-local; no shadowing of outer bindings; no redeclaration at same level — including mixing `set`/`var`). Does NOT update `it`.
 - `change NAME to expr` — reassigns an existing `var`. Compile error if NAME is not a `var` (e.g. a `set`, param, loop var, or undeclared). Runtime error if the new value's type doesn't match the locked type (message mentions name + expected/got). Does NOT update `it`.
@@ -163,7 +163,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 `ADD`, `SUB`, `MUL`, `DIV`, `POW`,
 `EQ`, `NEQ`, `LT`, `LE`, `GT`, `GE`, `NOT`, `AND`, `OR`,
 `JUMP`, `JUMP_IF_FALSE`,
-`CALL` (name, argCount), `RETURN`, `SAY`,
+`CALL` (name, argCount), `RETURN`, `SAY`, `SAY_MULTI` (count),
 `DROP` — pops and discards stack top; emitted after `CALL` at **void-function call sites** (void fns still emit a trailing `PUSH_INT 0; RETURN` so the stack stays balanced; caller discards it and does NOT update `it`).
 `CHECK_TYPE` (expected, context) — peeks the stack top and throws `RuntimeError("Type mismatch: <context> (expected X, got Y)")` when the type doesn't match. Emitted in typed-function `return EXPR` when the expression's static type is unknown.
 `ERROR` (message) — throws a RuntimeError with the given message; used by the compiler to emit runtime-check branches (e.g., negative `repeat` count).
