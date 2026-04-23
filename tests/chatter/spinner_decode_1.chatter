@@ -42,9 +42,19 @@ function decode takes string rotation returns number is
 
 end function
 
-var result is 0
 var current_position is 50
-repeat with rotation in rotation
+var count is 0
+repeat with rotation in rotations
     decode rotation
-    say it
+    add it to current_position
+    if current_position is at least 100
+        subtract 100 from current_position
+    else if current_position is at most -1
+        add 100 to current_position
+    end
+    if current_position is 0
+        add 1 to count
+    end
 end repeat
+
+say count
