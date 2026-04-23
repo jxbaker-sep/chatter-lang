@@ -31,6 +31,7 @@ const KEYWORDS = new Set([
   'item', 'first', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',
   'character', 'characters',
+  'read', 'file', 'lines',
 ]);
 const TYPES = new Set(['number', 'boolean', 'string']);
 

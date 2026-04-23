@@ -43,6 +43,7 @@ export type Instruction =
   | { op: 'LIST_PREPEND' }    // pop value, pop list, mutate
   | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate
   | { op: 'LIST_REMOVE' }     // pop index, pop list, mutate
+  | { op: 'READ_FILE_LINES' } // pop path string, push list of string
   | { op: 'ERROR'; message: string };
 
 export interface FunctionDef {

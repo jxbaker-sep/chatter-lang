@@ -95,11 +95,11 @@
       "patterns": [
         {
           "name": "support.function.io.chatter",
-          "match": "\\b(say)\\b"
+          "match": "\\b(say|read\\s+file|lines\\s+of\\s+file|read|file)\\b"
         },
         {
           "name": "support.function.collection.chatter",
-          "match": "\\b(length\\s+of|first\\s+item\\s+of|last\\s+item\\s+of|first\\s+character\\s+of|last\\s+character\\s+of|item|characters|character|of|empty|first|last|length)\\b"
+          "match": "\\b(length\\s+of|first\\s+item\\s+of|last\\s+item\\s+of|first\\s+character\\s+of|last\\s+character\\s+of|item|characters|character|of|empty|first|last|length|lines)\\b"
         },
         {
           "name": "support.function.mutation.chatter",

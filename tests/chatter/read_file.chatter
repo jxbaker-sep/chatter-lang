@@ -1,0 +1,24 @@
+set xs to lines of file "tests/chatter/fixtures/greek.txt"
+say length of xs
+repeat with line in xs
+    say line
+end repeat
+
+read file "tests/chatter/fixtures/greek.txt"
+say length of it
+say first item of it
+say last item of it
+
+set empty_lines to lines of file "tests/chatter/fixtures/empty.txt"
+say length of empty_lines
+
+set crlf_lines to lines of file "tests/chatter/fixtures/crlf.txt"
+say length of crlf_lines
+repeat with line in crlf_lines
+    say line
+end repeat
+
+set blanks to lines of file "tests/chatter/fixtures/blanks.txt"
+say length of blanks
+say "[" & item 1 of blanks & "]"
+say "[" & item 4 of blanks & "]"

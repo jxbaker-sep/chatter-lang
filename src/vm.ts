@@ -1,4 +1,5 @@
 import { Instruction, BytecodeProgram } from './bytecode';
+import * as fs from 'fs';
 
 export class RuntimeError extends Error {
   constructor(message: string) {
@@ -567,6 +568,28 @@ export class VM {
           throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`);
         }
         list.items.splice(idx - 1, 1);
+        break;
+      }
+
+      case 'READ_FILE_LINES': {
+        const path = this.pop();
+        if (typeof path !== 'string') {
+          throw new RuntimeError(`Type mismatch: file path must be a string, got ${typeof path}`);
+        }
+        let content: string;
+        try {
+          content = fs.readFileSync(path, 'utf8');
+        } catch (err: any) {
+          const reason = err && err.code ? err.code : (err && err.message ? err.message : String(err));
+          throw new RuntimeError(`could not read file '${path}': ${reason}`);
+        }
+        // Split per spec: \r\n or \n is a separator; trailing newline does not
+        // produce an empty string. Empty file -> empty list.
+        if (content.endsWith('\r\n')) content = content.slice(0, -2);
+        else if (content.endsWith('\n')) content = content.slice(0, -1);
+        const items = content.length === 0 ? [] : content.split(/\r\n|\n/);
+        const list: ChatterList = { kind: 'list', element: 'string', items };
+        this.stack.push(list);
         break;
       }
     }

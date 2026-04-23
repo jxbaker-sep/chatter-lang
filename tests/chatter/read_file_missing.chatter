@@ -1,0 +1,2 @@
+set xs to lines of file "tests/chatter/fixtures/does_not_exist.txt"
+say length of xs

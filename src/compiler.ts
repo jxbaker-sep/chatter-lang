@@ -9,6 +9,7 @@ import {
   RemoveItemStatement, TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
+  ReadFileLinesExpression, ReadFileStatement,
 } from './ast';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 
@@ -153,7 +154,26 @@ class Compiler {
       case 'RemoveItemStatement':
         this.compileRemove(stmt, out, bindings);
         break;
+      case 'ReadFileStatement':
+        this.compileReadFileStatement(stmt, out, bindings);
+        break;
     }
+  }
+
+  private compileReadFileStatement(
+    stmt: ReadFileStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const pt = this.staticType(stmt.path, bindings);
+    if (pt && !(pt.kind === 'scalar' && pt.name === 'string')) {
+      throw new CompileError(
+        `'read file' requires a string path, got ${typeToString(pt)}`,
+      );
+    }
+    this.compileExpr(stmt.path, out, bindings);
+    out.push({ op: 'READ_FILE_LINES' });
+    out.push({ op: 'STORE_IT' });
   }
 
   private compileSay(
@@ -954,6 +974,17 @@ class Compiler {
         out.push({ op: 'STR_SUBSTRING' });
         break;
       }
+      case 'ReadFileLinesExpression': {
+        const pt = this.staticType(expr.path, bindings);
+        if (pt && !(pt.kind === 'scalar' && pt.name === 'string')) {
+          throw new CompileError(
+            `'lines of file' requires a string path, got ${typeToString(pt)}`,
+          );
+        }
+        this.compileExpr(expr.path, out, bindings);
+        out.push({ op: 'READ_FILE_LINES' });
+        break;
+      }
     }
   }
 
@@ -1106,6 +1137,8 @@ class Compiler {
       case 'LastCharacterExpression':
       case 'SubstringExpression':
         return { kind: 'scalar', name: 'string' };
+      case 'ReadFileLinesExpression':
+        return { kind: 'list', element: 'string', readonly: false };
       default:
         return null;
     }

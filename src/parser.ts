@@ -12,6 +12,7 @@ import {
   RemoveItemStatement, TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
+  ReadFileLinesExpression, ReadFileStatement,
 } from './ast';
 
 export class ParseError extends Error {
@@ -97,6 +98,7 @@ export function parse(tokens: Token[]): Program {
         case 'prepend':  return parsePrependStatement();
         case 'insert':   return parseInsertStatement();
         case 'remove':   return parseRemoveStatement();
+        case 'read':     return parseReadFileStatement();
         default:
           throw new ParseError(`Unexpected keyword '${tok.value}' at line ${tok.line}`, tok);
       }
@@ -560,6 +562,16 @@ export function parse(tokens: Token[]): Program {
     return { type: 'RemoveItemStatement', listName: nameTok.value, index };
   }
 
+  // `read file EXPR` — sugar for reading a text file. Assigns the
+  // resulting list of lines to `it`.
+  function parseReadFileStatement(): ReadFileStatement {
+    consume('KEYWORD', 'read');
+    consume('KEYWORD', 'file');
+    const path = parseExpression();
+    consumeNewline();
+    return { type: 'ReadFileStatement', path };
+  }
+
   // --- Expression parsing with precedence ---
 
   function parseExpression(): Expression {
@@ -807,6 +819,14 @@ export function parse(tokens: Token[]): Program {
         consume('KEYWORD', 'of');
         const target = parsePrimary();
         return { type: 'SubstringExpression', from, to, target } as SubstringExpression;
+      }
+      if (tok.value === 'lines') {
+        // `lines of file EXPR` — read text file into a list of strings.
+        advance();
+        consume('KEYWORD', 'of');
+        consume('KEYWORD', 'file');
+        const path = parsePrimary();
+        return { type: 'ReadFileLinesExpression', path } as ReadFileLinesExpression;
       }
     }
 

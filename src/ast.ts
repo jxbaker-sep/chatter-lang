@@ -21,7 +21,8 @@ export type Expression =
   | CharacterAccessExpression
   | FirstCharacterExpression
   | LastCharacterExpression
-  | SubstringExpression;
+  | SubstringExpression
+  | ReadFileLinesExpression;
 
 export type Statement =
   | SayStatement
@@ -38,7 +39,8 @@ export type Statement =
   | AppendStatement
   | PrependStatement
   | InsertStatement
-  | RemoveItemStatement;
+  | RemoveItemStatement
+  | ReadFileStatement;
 
 export interface VarDeclaration {
   type: 'VarDeclaration';
@@ -210,6 +212,16 @@ export interface SubstringExpression {
   from: Expression;
   to: Expression;
   target: Expression;
+}
+
+export interface ReadFileLinesExpression {
+  type: 'ReadFileLinesExpression';
+  path: Expression;
+}
+
+export interface ReadFileStatement {
+  type: 'ReadFileStatement';
+  path: Expression;
 }
 
 export interface AppendStatement {
