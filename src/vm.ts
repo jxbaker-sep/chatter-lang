@@ -269,6 +269,17 @@ export class VM {
       case 'ERROR':
         throw new RuntimeError(instr.message);
 
+      case 'EXPECT': {
+        const v = this.pop();
+        if (typeof v !== 'boolean') {
+          throw new RuntimeError(`expect requires a boolean, got ${describe(v)}`);
+        }
+        if (!v) {
+          throw new RuntimeError(`expect failed: ${instr.source}`);
+        }
+        break;
+      }
+
       case 'DROP': {
         this.pop();
         break;

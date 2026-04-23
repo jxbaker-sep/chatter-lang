@@ -18,7 +18,7 @@ export function run(args: string[]): number {
   try {
     const source = fs.readFileSync(filepath, 'utf8');
     const tokens = lex(source);
-    const ast = parse(tokens);
+    const ast = parse(tokens, source);
     const program = compile(ast);
     const vm = new VM(program);
     vm.run();

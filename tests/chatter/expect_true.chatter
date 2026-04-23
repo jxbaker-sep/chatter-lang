@@ -1,0 +1,4 @@
+expect true
+expect 1 is 1
+expect (list of 1, 2, 3) contains 2
+say "ok"

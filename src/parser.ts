@@ -13,6 +13,7 @@ import {
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
   ReadFileLinesExpression, ReadFileStatement,
+  ExpectStatement,
 } from './ast';
 
 export class ParseError extends Error {
@@ -35,10 +36,17 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'item', 'first', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',
   'character', 'characters',
+  'expect',
 ]);
 
-export function parse(tokens: Token[]): Program {
+export function parse(tokens: Token[], source?: string): Program {
   let pos = 0;
+  const sourceLines: string[] | null = source !== undefined ? source.split('\n') : null;
+
+  function tokenEndCol(t: Token): number {
+    if (t.type === 'STRING') return t.col + t.value.length + 2;
+    return t.col + t.value.length;
+  }
 
   function peek(): Token {
     return tokens[pos];
@@ -99,6 +107,7 @@ export function parse(tokens: Token[]): Program {
         case 'insert':   return parseInsertStatement();
         case 'remove':   return parseRemoveStatement();
         case 'read':     return parseReadFileStatement();
+        case 'expect':   return parseExpectStatement();
         default:
           throw new ParseError(`Unexpected keyword '${tok.value}' at line ${tok.line}`, tok);
       }
@@ -117,6 +126,28 @@ export function parse(tokens: Token[]): Program {
     const expression = parseExpression();
     consumeNewline();
     return { type: 'SayStatement', expression };
+  }
+
+  function parseExpectStatement(): ExpectStatement {
+    consume('KEYWORD', 'expect');
+    const startTok = peek();
+    const expression = parseExpression();
+    const endTok = tokens[pos - 1];
+    let snippet: string;
+    if (sourceLines && startTok.line === endTok.line && startTok.line >= 1 && startTok.line <= sourceLines.length) {
+      const line = sourceLines[startTok.line - 1];
+      snippet = line.substring(startTok.col, tokenEndCol(endTok));
+    } else {
+      const parts: string[] = [];
+      for (let i = tokens.indexOf(startTok); i < pos; i++) {
+        const t = tokens[i];
+        if (t.type === 'NEWLINE' || t.type === 'INDENT' || t.type === 'DEDENT' || t.type === 'EOF') continue;
+        parts.push(t.type === 'STRING' ? `"${t.value}"` : t.value);
+      }
+      snippet = parts.join(' ');
+    }
+    consumeNewline();
+    return { type: 'ExpectStatement', expression, source: snippet };
   }
 
   function parseSetStatement(): SetStatement {

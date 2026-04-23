@@ -38,7 +38,7 @@ function runChatter(source: string): { stdout: string; error: Error | null } {
   };
   try {
     const tokens = lex(source);
-    const ast = parse(tokens);
+    const ast = parse(tokens, source);
     const program = compile(ast);
     const vm = new VM(program);
     vm.run();

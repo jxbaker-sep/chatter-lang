@@ -10,6 +10,7 @@ import {
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
   ReadFileLinesExpression, ReadFileStatement,
+  ExpectStatement,
 } from './ast';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 
@@ -157,7 +158,19 @@ class Compiler {
       case 'ReadFileStatement':
         this.compileReadFileStatement(stmt, out, bindings);
         break;
+      case 'ExpectStatement':
+        this.compileExpect(stmt, out, bindings);
+        break;
     }
+  }
+
+  private compileExpect(
+    stmt: ExpectStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    this.compileExpr(stmt.expression, out, bindings);
+    out.push({ op: 'EXPECT', source: stmt.source });
   }
 
   private compileReadFileStatement(

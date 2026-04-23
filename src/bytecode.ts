@@ -44,6 +44,7 @@ export type Instruction =
   | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate
   | { op: 'LIST_REMOVE' }     // pop index, pop list, mutate
   | { op: 'READ_FILE_LINES' } // pop path string, push list of string
+  | { op: 'EXPECT'; source: string }  // pop value; require boolean and true; runtime error otherwise
   | { op: 'ERROR'; message: string };
 
 export interface FunctionDef {

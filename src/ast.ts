@@ -40,7 +40,8 @@ export type Statement =
   | PrependStatement
   | InsertStatement
   | RemoveItemStatement
-  | ReadFileStatement;
+  | ReadFileStatement
+  | ExpectStatement;
 
 export interface VarDeclaration {
   type: 'VarDeclaration';
@@ -222,6 +223,12 @@ export interface ReadFileLinesExpression {
 export interface ReadFileStatement {
   type: 'ReadFileStatement';
   path: Expression;
+}
+
+export interface ExpectStatement {
+  type: 'ExpectStatement';
+  expression: Expression;
+  source: string;
 }
 
 export interface AppendStatement {
