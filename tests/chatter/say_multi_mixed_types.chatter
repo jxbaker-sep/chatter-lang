@@ -1,0 +1,3 @@
+set n to 5
+set s to "hello"
+say n, s, true

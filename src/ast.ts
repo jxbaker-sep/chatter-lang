@@ -76,7 +76,7 @@ export interface Program {
 
 export interface SayStatement {
   type: 'SayStatement';
-  expression: Expression;
+  expressions: Expression[];  // nonempty invariant
 }
 
 export interface SetStatement {

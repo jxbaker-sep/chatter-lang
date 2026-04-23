@@ -222,6 +222,20 @@ export class VM {
         break;
       }
 
+      case 'SAY_MULTI': {
+        const count = instr.count;
+        const vals: ChatterValue[] = new Array(count);
+        for (let i = count - 1; i >= 0; i--) {
+          const v = this.pop();
+          if (v === undefined) {
+            throw new RuntimeError('Stack underflow in SAY_MULTI');
+          }
+          vals[i] = v;
+        }
+        console.log(vals.map(formatValue).join(' '));
+        break;
+      }
+
       case 'EQ': {
         const b = this.pop();
         const a = this.pop();

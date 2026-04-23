@@ -123,9 +123,22 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseSayStatement(): SayStatement {
     consume('KEYWORD', 'say');
-    const expression = parseExpression();
+    if (peek().type === 'NEWLINE' || peek().type === 'EOF') {
+      throw new ParseError('say requires at least one expression', peek());
+    }
+    const expressions: Expression[] = [parseExpression()];
+    while (peek().type === 'COMMA') {
+      consume('COMMA');
+      if (peek().type === 'NEWLINE' || peek().type === 'EOF') {
+        throw new ParseError(
+          "Expected expression after ',' in say statement",
+          peek(),
+        );
+      }
+      expressions.push(parseExpression());
+    }
     consumeNewline();
-    return { type: 'SayStatement', expression };
+    return { type: 'SayStatement', expressions };
   }
 
   function parseExpectStatement(): ExpectStatement {

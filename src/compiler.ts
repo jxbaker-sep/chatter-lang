@@ -194,8 +194,15 @@ class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
-    this.compileExpr(stmt.expression, out, bindings);
-    out.push({ op: 'SAY' });
+    if (stmt.expressions.length === 1) {
+      this.compileExpr(stmt.expressions[0], out, bindings);
+      out.push({ op: 'SAY' });
+      return;
+    }
+    for (const expr of stmt.expressions) {
+      this.compileExpr(expr, out, bindings);
+    }
+    out.push({ op: 'SAY_MULTI', count: stmt.expressions.length });
   }
 
   private checkNotReadonlySmuggle(value: Expression, bindings: Bindings, ctx: string): void {

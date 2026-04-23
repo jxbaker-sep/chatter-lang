@@ -1,0 +1,9 @@
+set x to 5
+function double takes number a returns number is
+    return a * 2
+end
+double x
+# it is now 10
+say "before", it
+# it should still be 10, not "before"
+say it, "after"
