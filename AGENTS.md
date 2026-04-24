@@ -329,3 +329,4 @@ Existing golden cases:
 - Better error messages (line/col + source snippet).
 - REPL.
 - More example programs (FizzBuzz, Fibonacci — need loops first).
+- **GitHub syntax highlighting for `.chatter` files.** Quick win: `.gitattributes` override like `*.chatter linguist-language=Ruby` (imperfect but instant). Proper path: PR to github-linguist/linguist with a TextMate grammar (the `vscode-chatter/` extension may already have one to reuse); requires ~200 public `.chatter` files to clear the popularity bar.
