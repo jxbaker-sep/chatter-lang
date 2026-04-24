@@ -1,0 +1,6 @@
+use d from "d"
+
+export function fromB is
+    say "B calling:"
+    d
+end function

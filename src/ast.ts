@@ -51,6 +51,7 @@ export type Statement = (
   | RemoveItemStatement
   | ReadFileStatement
   | ExpectStatement
+  | UseStatement
 ) & Located;
 
 export interface VarDeclaration {
@@ -107,6 +108,15 @@ export interface FunctionDeclaration {
   params: FunctionParam[];
   returnType: TypeAnnotation | null;  // null = void
   body: Statement[];
+  exported: boolean;
+}
+
+export interface UseStatement {
+  type: 'UseStatement';
+  names: string[];
+  path: string;            // as written by user, no .chatter appended
+  nameLocs?: Array<{ line: number; col: number; length: number }>;
+  pathLoc?: { line: number; col: number; length: number };
 }
 
 export interface CallStatement {

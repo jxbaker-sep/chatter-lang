@@ -1,0 +1,6 @@
+say "loading"
+set prefix to "hello, "
+
+export function greet is
+    say prefix & "world"
+end function

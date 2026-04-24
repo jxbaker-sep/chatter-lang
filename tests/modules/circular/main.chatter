@@ -1,0 +1,7 @@
+use b from "b"
+
+export function a is
+    say "a"
+end function
+
+b

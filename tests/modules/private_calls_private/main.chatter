@@ -1,0 +1,2 @@
+use publicFunc from "lib"
+publicFunc

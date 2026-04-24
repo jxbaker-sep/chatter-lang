@@ -1,0 +1,11 @@
+export function a is
+    say "A"
+end function
+
+export function b takes number n is
+    say n
+end function
+
+export function c takes number x plus number y is
+    say x + y
+end function

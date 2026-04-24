@@ -1,0 +1,5 @@
+use a from "main"
+
+export function b is
+    a
+end function

@@ -1,0 +1,7 @@
+use foo from "lib"
+
+function foo is
+    say "local"
+end function
+
+foo

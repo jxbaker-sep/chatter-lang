@@ -1,7 +1,5 @@
 import * as fs from 'fs';
-import { lex } from './lexer';
-import { parse } from './parser';
-import { compile } from './compiler';
+import { loadProgram } from './moduleLoader';
 import { VM } from './vm';
 import { formatError } from './errors';
 
@@ -19,9 +17,7 @@ export function run(args: string[]): number {
   let source = '';
   try {
     source = fs.readFileSync(filepath, 'utf8');
-    const tokens = lex(source);
-    const ast = parse(tokens, source);
-    const program = compile(ast);
+    const program = loadProgram(filepath);
     const vm = new VM(program);
     vm.run();
     return 0;

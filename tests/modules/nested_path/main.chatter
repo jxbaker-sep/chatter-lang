@@ -1,0 +1,2 @@
+use foo from "./sub/bar"
+foo 7

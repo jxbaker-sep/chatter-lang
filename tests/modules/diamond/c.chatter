@@ -1,0 +1,6 @@
+use d from "d"
+
+export function fromC is
+    say "C calling:"
+    d
+end function

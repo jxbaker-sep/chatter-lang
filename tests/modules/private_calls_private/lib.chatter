@@ -1,0 +1,9 @@
+function helper takes number n returns number is
+    return n + 1
+end function
+
+export function publicFunc is
+    helper 41
+    say it
+end function
+

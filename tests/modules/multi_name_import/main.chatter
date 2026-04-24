@@ -1,0 +1,4 @@
+use a, b, c from "lib"
+a
+b 10
+c 2 plus 3

@@ -1,0 +1,2 @@
+use privateFunc from "lib"
+privateFunc

@@ -14,7 +14,7 @@ import {
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
   ReadFileLinesExpression, ReadFileStatement,
-  ExpectStatement,
+  ExpectStatement, UseStatement,
 } from './ast';
 
 function locOfToken(t: Token): SourceLocation {
@@ -42,6 +42,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'append', 'prepend', 'insert', 'in', 'remove',
   'character', 'characters',
   'expect',
+  'use', 'export',
 ]);
 
 export function parse(tokens: Token[], source?: string): Program {
@@ -84,9 +85,20 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseProgram(): Program {
     const body: Statement[] = [];
+    let seenNonUse = false;
     while (peek().type !== 'EOF') {
       if (peek().type === 'NEWLINE') { advance(); continue; }
-      body.push(parseStatement());
+      const tok = peek();
+      const isUse = tok.type === 'KEYWORD' && tok.value === 'use';
+      if (isUse && seenNonUse) {
+        throw new ParseError(
+          `'use' statements must appear before any other statement`,
+          tok,
+        );
+      }
+      const stmt = parseStatement();
+      if (stmt.type !== 'UseStatement') seenNonUse = true;
+      body.push(stmt);
     }
     return { type: 'Program', body };
   }
@@ -117,7 +129,9 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'subtract': return parseSubtractStatement();
         case 'multiply': return parseMultiplyStatement();
         case 'divide':   return parseDivideStatement();
-        case 'function': return parseFunctionDeclaration();
+        case 'function': return parseFunctionDeclaration(false);
+        case 'export':   return parseExportStatement();
+        case 'use':      return parseUseStatement();
         case 'return':   return parseReturnStatement();
         case 'if':       return parseIfStatement();
         case 'repeat':   return parseRepeatStatement();
@@ -303,7 +317,7 @@ export function parse(tokens: Token[], source?: string): Program {
     );
   }
 
-  function parseFunctionDeclaration(): FunctionDeclaration {
+  function parseFunctionDeclaration(exported: boolean): FunctionDeclaration {
     consume('KEYWORD', 'function');
     const nameTok = consume('IDENT');
 
@@ -413,7 +427,61 @@ export function parse(tokens: Token[], source?: string): Program {
     }
     consumeNewline();
 
-    return { type: 'FunctionDeclaration', name: nameTok.value, params, returnType, body };
+    return { type: 'FunctionDeclaration', name: nameTok.value, params, returnType, body, exported };
+  }
+
+  function parseExportStatement(): FunctionDeclaration {
+    const exportTok = consume('KEYWORD', 'export');
+    if (peek().type !== 'KEYWORD' || peek().value !== 'function') {
+      throw new ParseError(
+        `'export' must be followed by 'function'`,
+        peek(),
+      );
+    }
+    const fn = parseFunctionDeclaration(true);
+    (fn as any).line = exportTok.line;
+    (fn as any).col = exportTok.col;
+    (fn as any).length = Math.max(1, exportTok.value.length);
+    return fn;
+  }
+
+  function parseUseStatement(): UseStatement {
+    const useTok = consume('KEYWORD', 'use');
+    const names: string[] = [];
+    const nameLocs: Array<{ line: number; col: number; length: number }> = [];
+    const firstName = consume('IDENT');
+    names.push(firstName.value);
+    nameLocs.push({ line: firstName.line, col: firstName.col, length: firstName.value.length });
+    while (peek().type === 'COMMA') {
+      consume('COMMA');
+      const n = consume('IDENT');
+      names.push(n.value);
+      nameLocs.push({ line: n.line, col: n.col, length: n.value.length });
+    }
+    const seen = new Set<string>();
+    for (let i = 0; i < names.length; i++) {
+      if (seen.has(names[i])) {
+        throw new ChatterError(
+          `duplicate name '${names[i]}' in use statement`,
+          { line: nameLocs[i].line, col: nameLocs[i].col, length: nameLocs[i].length },
+        );
+      }
+      seen.add(names[i]);
+    }
+    consume('KEYWORD', 'from');
+    const pathTok = consume('STRING');
+    consumeNewline();
+    const node: UseStatement = {
+      type: 'UseStatement',
+      names,
+      path: pathTok.value,
+      nameLocs,
+      pathLoc: { line: pathTok.line, col: pathTok.col, length: pathTok.value.length + 2 },
+    };
+    (node as any).line = useTok.line;
+    (node as any).col = useTok.col;
+    (node as any).length = Math.max(1, useTok.value.length);
+    return node;
   }
 
   function parseReturnStatement(): ReturnStatement {

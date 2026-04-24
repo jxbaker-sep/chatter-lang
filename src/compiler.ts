@@ -59,16 +59,38 @@ interface BindingInfo {
 
 type Bindings = Map<string, BindingInfo>;
 
-class Compiler {
+export interface ImportedFunction {
+  mangled: string;
+  signature: Array<{ name: string; label: string | null; type: ChatterType }>;
+  returnType: ChatterType | null;
+  paramNames: string[];
+}
+
+export interface CompileOptions {
+  moduleId?: string;
+  imports?: Map<string, ImportedFunction>;
+}
+
+export interface CompiledModule {
+  functions: Map<string, FunctionDef>;      // keyed by mangled names
+  topLevel: Instruction[];                  // module top-level instructions
+  exports: Map<string, ImportedFunction>;   // local name -> info (for loader)
+}
+
+export class Compiler {
   private functions = new Map<string, FunctionDef>();
   private functionSignatures = new Map<string, Array<{ name: string; label: string | null; type: ChatterType }>>();
   private functionReturnTypes = new Map<string, ChatterType | null>();  // null = void
+  private functionMangled = new Map<string, string>();   // local name -> mangled
   private outerBindings = new Set<string>();
   private topLevelBindings: Bindings | null = null;
   private tempCounter = 0;
   private currentFuncReturnType: ChatterType | null | undefined = undefined;  // undefined = top-level
   private currentFuncName: string | null = null;
   private locStack: (SourceLocation | undefined)[] = [];
+  private moduleId: string | null = null;
+  private imports: Map<string, ImportedFunction> = new Map();
+  private localFunctions = new Map<string, FunctionDeclaration>();
 
   private get currentLoc(): SourceLocation | undefined {
     return this.locStack[this.locStack.length - 1];
@@ -90,13 +112,49 @@ class Compiler {
   }
 
   private freshName(tag: string): string {
-    return `_rep_${tag}_${this.tempCounter++}`;
+    const prefix = this.moduleId ? `_rep_${this.moduleId}_` : '_rep_';
+    return `${prefix}${tag}_${this.tempCounter++}`;
+  }
+
+  private mangleBinding(name: string): string {
+    if (this.moduleId && this.outerBindings.has(name)) {
+      return `${this.moduleId}::${name}`;
+    }
+    return name;
+  }
+
+  private mangleFunction(name: string): string {
+    const imp = this.imports.get(name);
+    if (imp) return imp.mangled;
+    const local = this.functionMangled.get(name);
+    if (local) return local;
+    return name;
   }
 
   compile(program: Program): BytecodeProgram {
-    // First pass: collect function signatures, return types, and outer bindings
+    const m = this.compileModule(program, {});
+    return { functions: m.functions, main: m.topLevel };
+  }
+
+  compileModule(program: Program, opts: CompileOptions): CompiledModule {
+    this.moduleId = opts.moduleId ?? null;
+    this.imports = opts.imports ?? new Map();
+
+    // Seed signatures / returnTypes from imports (they're callable by local name)
+    for (const [localName, info] of this.imports) {
+      this.functionSignatures.set(localName, info.signature);
+      this.functionReturnTypes.set(localName, info.returnType);
+    }
+
+    // First pass: collect local function signatures, return types, outer bindings
     for (const stmt of program.body) {
       if (stmt.type === 'FunctionDeclaration') {
+        if (this.imports.has(stmt.name)) {
+          throw new CompileError(
+            `name '${stmt.name}' is already defined`,
+            locOf(stmt),
+          );
+        }
         this.functionSignatures.set(
           stmt.name,
           stmt.params.map(p => ({ name: p.name, label: p.label, type: fromAnnotation(p.paramType) })),
@@ -105,21 +163,52 @@ class Compiler {
           stmt.name,
           stmt.returnType === null ? null : fromAnnotation(stmt.returnType),
         );
+        const mangled = this.moduleId ? `${this.moduleId}::${stmt.name}` : stmt.name;
+        this.functionMangled.set(stmt.name, mangled);
+        this.localFunctions.set(stmt.name, stmt);
       }
       if (stmt.type === 'SetStatement' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
       }
     }
 
-    const main: Instruction[] = [];
+    const topLevel: Instruction[] = [];
     const bindings: Bindings = new Map();
     this.topLevelBindings = bindings;
 
     for (const stmt of program.body) {
-      this.compileStatement(stmt, main, bindings);
+      if (stmt.type === 'UseStatement') continue;  // loader handled these
+      this.compileStatement(stmt, topLevel, bindings);
     }
 
-    return { functions: this.functions, main };
+    // Post-process: apply mangling to binding names (outer) and function-call names
+    const rewriteInstrs = (instrs: Instruction[]) => {
+      for (const i of instrs) {
+        if (i.op === 'LOAD' || i.op === 'STORE' || i.op === 'STORE_VAR' || i.op === 'DELETE') {
+          i.name = this.mangleBinding(i.name);
+        } else if (i.op === 'CALL') {
+          i.name = this.mangleFunction(i.name);
+        }
+      }
+    };
+    rewriteInstrs(topLevel);
+    for (const fdef of this.functions.values()) {
+      rewriteInstrs(fdef.instructions);
+    }
+
+    // Build exports table
+    const exports = new Map<string, ImportedFunction>();
+    for (const [localName, decl] of this.localFunctions) {
+      if (!decl.exported) continue;
+      exports.set(localName, {
+        mangled: this.functionMangled.get(localName)!,
+        signature: this.functionSignatures.get(localName)!,
+        returnType: this.functionReturnTypes.get(localName)!,
+        paramNames: decl.params.map(p => p.name),
+      });
+    }
+
+    return { functions: this.functions, topLevel, exports };
   }
 
   private compileStatement(
@@ -199,6 +288,9 @@ class Compiler {
         break;
       case 'ExpectStatement':
         this.compileExpect(stmt, out, bindings);
+        break;
+      case 'UseStatement':
+        // Module system handled at loader level; nothing to emit here.
         break;
     }
   }
@@ -507,8 +599,9 @@ class Compiler {
     }
 
     const instructions: Instruction[] = [];
-    const funcDef: FunctionDef = { name: stmt.name, params, instructions };
-    this.functions.set(stmt.name, funcDef);
+    const mangledName = this.functionMangled.get(stmt.name) ?? stmt.name;
+    const funcDef: FunctionDef = { name: mangledName, params, instructions };
+    this.functions.set(mangledName, funcDef);
 
     const funcBindings: Bindings = new Map();
     for (const p of stmt.params) {

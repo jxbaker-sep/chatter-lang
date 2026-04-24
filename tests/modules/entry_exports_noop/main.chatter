@@ -1,0 +1,5 @@
+export function selfFoo is
+    say "still works"
+end function
+
+selfFoo

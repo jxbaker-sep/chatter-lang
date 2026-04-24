@@ -1,0 +1,3 @@
+export function square takes number a returns number is
+    return a * a
+end function

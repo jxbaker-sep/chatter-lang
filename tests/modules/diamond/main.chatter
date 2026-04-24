@@ -1,0 +1,4 @@
+use fromB from "b"
+use fromC from "c"
+fromB
+fromC

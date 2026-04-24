@@ -1,0 +1,7 @@
+function privateFunc is
+    say "secret"
+end function
+
+export function publicFunc is
+    say "public"
+end function

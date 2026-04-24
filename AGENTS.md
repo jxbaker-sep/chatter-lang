@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-443 tests, all passing.
+460 tests, all passing.
 
 ## Language spec (current)
 
@@ -107,6 +107,41 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 
 ### Keywords reserved for file I/O
 `read`, `file`, `lines`. See "File I/O" below.
+
+### Keywords reserved for modules
+`use`, `from`, `export`. See "Modules (v1)" below. (`from` is also reused by the `subtract X from Y` form.)
+
+### Modules (v1)
+One file = one module. The file path (normalized absolute) identifies the module; the entry file passed to the `chatter` CLI is module #1 and may `use` and/or `export` just like any other module.
+
+**Import**: `use NAME (, NAME)* from "PATH"` at the top of the file (before any other statement). After any non-`use`, non-blank, non-comment statement appears, further `use` statements are a compile error.
+- `PATH` is always relative to the importing file's directory. Leading `./` and `../` are allowed.
+- `.chatter` is implicitly appended — the user writes `from "math"`, the loader reads `math.chatter`.
+- Path matching is case-sensitive.
+- Missing file → compile error `cannot find module "PATH"` (uses the exact string the user wrote).
+
+**Export**: `export` is an optional modifier on `function` declarations only (v1 does not export `set`/`var`/expressions). A non-exported function is private: usable within its own module, invisible to importers.
+
+**Binding rules**:
+- Imported names live in the importing module's top-level scope alongside local functions.
+- `use X, X from "m"` (duplicate in one use) → compile error.
+- Importing a name that collides with a local function or another imported name → compile error `name 'X' is already defined`.
+- Importing a name the target module does not export → compile error `module "PATH" does not export 'X'` (same message whether the function doesn't exist at all or just isn't exported).
+
+**Top-level side effects**: a module's non-function, non-`use` statements execute exactly once the first time the module is imported. Ordering is dependency post-order: dependencies' top-level code runs before any importer's. Subsequent imports are cached (no re-run).
+
+**Circular imports**: detected at compile time. Error message is `circular import: A → B → A` showing the user-written path of each hop.
+
+**`it` semantics**: top-level `it` is per-module-scope conceptually (each module's init runs as its own top-level). Imported functions still follow the existing per-frame `it` rule when called.
+
+**Internals (non-user-visible)**:
+- Each module is assigned a sequential id `m0`, `m1`, … (`m0` = entry).
+- Function names are mangled to `<moduleId>::<name>` inside the emitted bytecode; imported names resolve to the defining module's mangled form. The VM only ever sees mangled names; compile and runtime errors still mention the user-facing unqualified name.
+- Top-level `set`/`var` bindings are also mangled by module to prevent cross-module collision while still allowing imported-function closures to reach their home-module bindings via the stack-walking `LOAD` rule.
+- The combined `main` is the concatenation of every non-entry module's top-level instructions (in DFS post-order) followed by the entry's top-level. `JUMP`/`JUMP_IF_FALSE` targets are rewritten by the loader when blocks are concatenated. No new VM opcodes were needed.
+- Loader lives in `src/moduleLoader.ts`; entry point `loadProgram(entryFilePath) → BytecodeProgram`. `CLI` calls `loadProgram`.
+
+**Not in v1 (deferred)**: `use X as Y` renaming, exporting `set`/`var`, package-style paths (no `./` or `../`), re-exports, dynamic imports, circular imports with partial-module semantics.
 
 ### File I/O (read-only, v1)
 - **`lines of file EXPR`** — expression form. `EXPR` must be `string` (compile error otherwise). Returns a fresh **mutable** `list of string`. Line-splitting: any `\n` or `\r\n` is a separator; exactly one trailing newline is stripped (so `"a\nb\n"` → `["a", "b"]`). Empty file → empty list. Leading/internal blank lines are preserved as empty strings.

@@ -1,0 +1,5 @@
+say "loading D"
+
+export function d is
+    say "D"
+end function

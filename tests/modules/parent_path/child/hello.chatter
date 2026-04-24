@@ -1,0 +1,5 @@
+use label from "../names"
+
+export function greet is
+    label
+end function

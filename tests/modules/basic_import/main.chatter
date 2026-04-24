@@ -1,0 +1,3 @@
+use square from "math"
+square 5
+say it

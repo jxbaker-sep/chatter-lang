@@ -1,0 +1,2 @@
+use greet from "./child/hello"
+greet

@@ -1,0 +1,2 @@
+use doesNotExist from "lib"
+doesNotExist
