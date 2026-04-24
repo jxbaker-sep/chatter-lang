@@ -3,7 +3,7 @@ function choose takes number n returns number is
         return 10
     else
         return 20
-    end
+    end if
 end function
 
 choose 0

@@ -4,7 +4,7 @@ end function
 
 function quad takes number a returns number is
     return a * 4
-end
+end function
 
 set x to 5
 if x is 5
@@ -15,7 +15,7 @@ if x is 4
     say "four"
 else
     say "not four"
-end
+end if
 
 triple 2
 say it

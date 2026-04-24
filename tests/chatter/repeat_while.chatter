@@ -5,6 +5,6 @@ end repeat
 set x to 5
 repeat while x is not 5
     say "never again"
-end
+end repeat
 
 say "done"

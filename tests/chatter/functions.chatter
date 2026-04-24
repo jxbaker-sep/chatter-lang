@@ -1,10 +1,10 @@
 function double takes number a returns number is
     return a * 2
-end
+end function
 
 function raise takes number a to number to returns number is
     return a ** to
-end
+end function
 
 set foo to 5
 set bar to 6

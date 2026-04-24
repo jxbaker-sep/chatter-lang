@@ -4,6 +4,6 @@ end repeat
 
 repeat 0 times
     say "never"
-end
+end repeat
 
 say "done"

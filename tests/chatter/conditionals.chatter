@@ -5,13 +5,13 @@ if a
     say true
 else
     say false
-end
+end if
 
 if not b
     say false
 else
     say true
-end
+end if
 
 set some_number to 6
 
@@ -19,21 +19,21 @@ if some_number is 5
     say some_number
 else
     say "Success!"
-end
+end if
 
 if some_number is not 5
     say some_number
 else
     say "Failure!"
-end
+end if
 
 if a and not b
     say "both match"
-end
+end if
 
 if a or b
     say "at least one"
-end
+end if
 
 if some_number is 5
     say "five"
@@ -43,13 +43,13 @@ else if some_number is 7
     say "seven"
 else
     say "other"
-end
+end if
 
 if some_number is 5
     say "five"
 else if some_number is 100
     say "hundred"
-end
+end if
 
 # nested if inside if
 set x to 3
@@ -59,10 +59,10 @@ if x is 3
         say "both match"
     else
         say "only x"
-    end
+    end if
 else
     say "no x"
-end
+end if
 
 # if inside function body
 function describe takes number n returns string is
@@ -72,8 +72,8 @@ function describe takes number n returns string is
         return "one"
     else
         return "many"
-    end
-end
+    end if
+end function
 
 describe 0
 say it
@@ -87,11 +87,11 @@ set p to 5
 set q to 6
 if p is 5 and q is 6
     say "both"
-end
+end if
 
 if p is 5 and (q is 0 or q is 6)
     say "ok"
-end
+end if
 
 # boolean param
 function negate takes boolean v returns boolean is
@@ -99,8 +99,8 @@ function negate takes boolean v returns boolean is
         return false
     else
         return true
-    end
-end
+    end if
+end function
 
 negate true
 say it
@@ -113,8 +113,8 @@ function greet takes string name returns string is
         return "hello world"
     else
         return "hi there"
-    end
-end
+    end if
+end function
 
 greet "world"
 say it

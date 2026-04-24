@@ -30,7 +30,7 @@ describe('Compiler', () => {
   });
 
   test('compiles function declaration with correct params and instructions', () => {
-    const bc = compileSource('function double takes number a returns number is\n    return a * 2\nend');
+    const bc = compileSource('function double takes number a returns number is\n    return a * 2\nend function');
     expect(bc.functions.has('double')).toBe(true);
     const fn = bc.functions.get('double')!;
     expect(fn.params).toEqual(['a']);
@@ -41,7 +41,7 @@ describe('Compiler', () => {
   });
 
   test('compiles call with positional arg', () => {
-    const src = 'function double takes number a returns number is\n    return a * 2\nend\ndouble 5';
+    const src = 'function double takes number a returns number is\n    return a * 2\nend function\ndouble 5';
     const bc = compileSource(src);
     const pushIdx = bc.main.findIndex(i => i.op === 'PUSH_INT' && (i as any).value === 5);
     expect(pushIdx).toBeGreaterThanOrEqual(0);
@@ -49,7 +49,7 @@ describe('Compiler', () => {
   });
 
   test('emits STORE_IT after a call statement', () => {
-    const src = 'function double takes number a returns number is\n    return a * 2\nend\ndouble 5';
+    const src = 'function double takes number a returns number is\n    return a * 2\nend function\ndouble 5';
     const bc = compileSource(src);
     const callIdx = bc.main.findIndex(i => i.op === 'CALL');
     expect(bc.main[callIdx + 1]).toMatchObject({ op: 'STORE_IT' });
@@ -59,7 +59,7 @@ describe('Compiler', () => {
     const src = [
       'function raise takes number a to number to returns number is',
       '    return a ** to',
-      'end',
+      'end function',
       'raise 5 to 3',
     ].join('\n');
     const bc = compileSource(src);
@@ -75,7 +75,7 @@ describe('Compiler', () => {
     const src = [
       'function sum3 takes number a with number b with number c returns number is',
       '    return a + b + c',
-      'end',
+      'end function',
       'sum3 1 with 2 with 3',
     ].join('\n');
     const bc = compileSource(src);
@@ -91,7 +91,7 @@ describe('Compiler', () => {
     const src = [
       'function pair takes number a with number b returns number is',
       '    return a + b',
-      'end',
+      'end function',
       'pair 1 with 2 with 3',
     ].join('\n');
     expect(() => compileSource(src)).toThrow(/label 'with'/);
@@ -101,7 +101,7 @@ describe('Compiler', () => {
     const src = [
       'function raise takes number a to number to returns number is',
       '    return a ** to',
-      'end',
+      'end function',
       'raise 2 by 3',
     ].join('\n');
     // `by` is a reserved stop keyword, so this actually fails at parse time.
@@ -112,14 +112,14 @@ describe('Compiler', () => {
     const src = [
       'function raise takes number a to number to returns number is',
       '    return a ** to',
-      'end',
+      'end function',
       'raise 2',
     ].join('\n');
     expect(() => compileSource(src)).toThrow(/Missing argument/);
   });
 
   test('compiles exponentiation to POW', () => {
-    const src = 'function pow takes number a b number b returns number is\n    return a ** b\nend';
+    const src = 'function pow takes number a b number b returns number is\n    return a ** b\nend function';
     const bc = compileSource(src);
     expect(bc.functions.get('pow')!.instructions).toContainEqual({ op: 'POW' });
   });
@@ -130,7 +130,7 @@ describe('Compiler', () => {
       '    double a',
       '    double it',
       '    return it',
-      'end',
+      'end function',
     ].join('\n');
     // quadruple calls an unknown function 'double', but compiler still emits LOAD_IT
     const bc = compileSource(src);
@@ -143,7 +143,7 @@ describe('Compiler', () => {
   });
 
   test('throws CompileError when param shadows outer binding', () => {
-    const src = 'set foo to 5\nfunction f takes number foo is\n    return foo\nend';
+    const src = 'set foo to 5\nfunction f takes number foo is\n    return foo\nend function';
     expect(() => compileSource(src)).toThrow(CompileError);
   });
 
@@ -279,19 +279,19 @@ describe('Compiler', () => {
 
   describe('comparison operators', () => {
     test('is less than emits LT', () => {
-      const bc = compileSource('if 1 is less than 2\n    say 1\nend');
+      const bc = compileSource('if 1 is less than 2\n    say 1\nend if');
       expect(bc.main.some(i => i.op === 'LT')).toBe(true);
     });
     test('is at most emits LE', () => {
-      const bc = compileSource('if 1 is at most 2\n    say 1\nend');
+      const bc = compileSource('if 1 is at most 2\n    say 1\nend if');
       expect(bc.main.some(i => i.op === 'LE')).toBe(true);
     });
     test('is greater than emits GT', () => {
-      const bc = compileSource('if 1 is greater than 2\n    say 1\nend');
+      const bc = compileSource('if 1 is greater than 2\n    say 1\nend if');
       expect(bc.main.some(i => i.op === 'GT')).toBe(true);
     });
     test('is at least emits GE', () => {
-      const bc = compileSource('if 1 is at least 2\n    say 1\nend');
+      const bc = compileSource('if 1 is at least 2\n    say 1\nend if');
       expect(bc.main.some(i => i.op === 'GE')).toBe(true);
     });
   });
@@ -364,11 +364,11 @@ describe('Compiler', () => {
         'function f returns number is',
         '    var x is 1',
         '    return x',
-        'end',
+        'end function',
         'function g returns number is',
         '    var x is 2',
         '    return x',
-        'end',
+        'end function',
       ].join('\n');
       expect(() => compileSource(src)).not.toThrow();
     });
@@ -379,7 +379,7 @@ describe('Compiler', () => {
         'function f returns number is',
         '    var x is 2',
         '    return x',
-        'end',
+        'end function',
       ].join('\n');
       expect(() => compileSource(src)).toThrow(/shadow/);
     });
@@ -388,7 +388,7 @@ describe('Compiler', () => {
       const src = [
         'repeat with i from 1 to 3',
         '    change i to 99',
-        'end',
+        'end repeat',
       ].join('\n');
       expect(() => compileSource(src)).toThrow(CompileError);
     });
@@ -398,7 +398,7 @@ describe('Compiler', () => {
         'function f takes number a returns number is',
         '    change a to 99',
         '    return a',
-        'end',
+        'end function',
       ].join('\n');
       expect(() => compileSource(src)).toThrow(CompileError);
     });
@@ -409,11 +409,11 @@ describe('Compiler', () => {
         'function f returns number is',
         '    var x is 1',
         '    return x',
-        'end',
+        'end function',
         'function g returns number is',
         '    change x to 5',
         '    return x',
-        'end',
+        'end function',
       ].join('\n');
       expect(() => compileSource(src)).toThrow(CompileError);
     });
@@ -421,14 +421,14 @@ describe('Compiler', () => {
 
   describe('return types', () => {
     test('void function: implicit PUSH_INT 0 + RETURN at end', () => {
-      const bc = compileSource('function greet is\n    say "hi"\nend');
+      const bc = compileSource('function greet is\n    say "hi"\nend function');
       const fn = bc.functions.get('greet')!;
       const tail = fn.instructions.slice(-2);
       expect(tail).toEqual([{ op: 'PUSH_INT', value: 0 }, { op: 'RETURN' }]);
     });
 
     test('void function: call site emits DROP (not STORE_IT)', () => {
-      const src = 'function greet is\n    say "hi"\nend\ngreet';
+      const src = 'function greet is\n    say "hi"\nend function\ngreet';
       const bc = compileSource(src);
       const callIdx = bc.main.findIndex(i => i.op === 'CALL');
       expect(bc.main[callIdx + 1]).toMatchObject({ op: 'DROP' });
@@ -436,7 +436,7 @@ describe('Compiler', () => {
     });
 
     test('typed function: no implicit trailing PUSH_INT 0 when body terminates', () => {
-      const bc = compileSource('function f returns number is\n    return 42\nend');
+      const bc = compileSource('function f returns number is\n    return 42\nend function');
       const fn = bc.functions.get('f')!;
       // Last instruction should be RETURN, not an implicit extra return
       expect(fn.instructions[fn.instructions.length - 1]).toEqual({ op: 'RETURN' });
@@ -445,26 +445,26 @@ describe('Compiler', () => {
     });
 
     test('typed function: call site emits STORE_IT', () => {
-      const src = 'function double takes number n returns number is\n    return n * 2\nend\ndouble 3';
+      const src = 'function double takes number n returns number is\n    return n * 2\nend function\ndouble 3';
       const bc = compileSource(src);
       const callIdx = bc.main.findIndex(i => i.op === 'CALL');
       expect(bc.main[callIdx + 1]).toMatchObject({ op: 'STORE_IT' });
     });
 
     test('void function + return EXPR → compile error', () => {
-      expect(() => compileSource('function f is\n    return 5\nend')).toThrow(
+      expect(() => compileSource('function f is\n    return 5\nend function')).toThrow(
         /void function 'f' cannot return a value/,
       );
     });
 
     test('typed function + bare return → compile error', () => {
-      expect(() => compileSource('function f returns number is\n    return\nend')).toThrow(
+      expect(() => compileSource('function f returns number is\n    return\nend function')).toThrow(
         /must return a number/,
       );
     });
 
     test('typed function with fall-through → missing return', () => {
-      expect(() => compileSource('function f returns number is\n    say "hi"\nend')).toThrow(
+      expect(() => compileSource('function f returns number is\n    say "hi"\nend function')).toThrow(
         /missing return/,
       );
     });
@@ -474,8 +474,8 @@ describe('Compiler', () => {
         'function f takes number n returns number is',
         '    if n is 0',
         '        return 1',
-        '    end',
-        'end',
+        '    end if',
+        'end function',
       ].join('\n');
       expect(() => compileSource(src)).toThrow(/missing return/);
     });
@@ -487,15 +487,15 @@ describe('Compiler', () => {
         '        return 1',
         '    else',
         '        return 2',
-        '    end',
-        'end',
+        '    end if',
+        'end function',
       ].join('\n');
       expect(() => compileSource(src)).not.toThrow();
     });
 
     test('typed function: static-type mismatch (returns number but literal string) → compile error', () => {
       expect(() =>
-        compileSource('function f returns number is\n    return "hi"\nend'),
+        compileSource('function f returns number is\n    return "hi"\nend function'),
       ).toThrow(/Type mismatch/);
     });
 
@@ -504,11 +504,11 @@ describe('Compiler', () => {
       const src = [
         'function g returns string is',
         '    return "hi"',
-        'end',
+        'end function',
         'function f returns number is',
         '    g',
         '    return it',
-        'end',
+        'end function',
       ].join('\n');
       const bc = compileSource(src);
       const fn = bc.functions.get('f')!;
@@ -516,14 +516,14 @@ describe('Compiler', () => {
     });
 
     test('void function used as value in set → compile error', () => {
-      const src = 'function greet is\n    say "hi"\nend\nset x to greet';
+      const src = 'function greet is\n    say "hi"\nend function\nset x to greet';
       expect(() => compileSource(src)).toThrow(
         /void function 'greet' cannot be used as a value/,
       );
     });
 
     test('void function used in arithmetic → compile error', () => {
-      const src = 'function greet is\n    say "hi"\nend\nsay greet + 1';
+      const src = 'function greet is\n    say "hi"\nend function\nsay greet + 1';
       expect(() => compileSource(src)).toThrow(/void function 'greet'/);
     });
   });
@@ -548,27 +548,27 @@ describe('Compiler', () => {
     });
 
     test('append inside function with readonly param → compile error', () => {
-      const src = 'function f takes readonly list of number xs is\n    append 1 to xs\nend';
+      const src = 'function f takes readonly list of number xs is\n    append 1 to xs\nend function';
       expect(() => compileSource(src)).toThrow(/readonly list reference/);
     });
 
     test('change item with readonly param → compile error', () => {
-      const src = 'function f takes readonly list of number xs is\n    change item 1 of xs to 9\nend';
+      const src = 'function f takes readonly list of number xs is\n    change item 1 of xs to 9\nend function';
       expect(() => compileSource(src)).toThrow(/readonly/);
     });
 
     test('set x to readonly param → compile error (no smuggling)', () => {
-      const src = 'function f takes readonly list of number xs is\n    set other to xs\n    say length of other\nend';
+      const src = 'function f takes readonly list of number xs is\n    set other to xs\n    say length of other\nend function';
       expect(() => compileSource(src)).toThrow(/readonly-list reference/);
     });
 
     test('var other is readonly param → compile error', () => {
-      const src = 'function f takes readonly list of number xs is\n    var other is xs\nend';
+      const src = 'function f takes readonly list of number xs is\n    var other is xs\nend function';
       expect(() => compileSource(src)).toThrow(/readonly-list reference/);
     });
 
     test('widening: mutable arg → readonly param OK', () => {
-      const src = 'function f takes readonly list of number xs returns number is\n    return length of xs\nend\nset l to list of 1, 2\nf l\nsay it';
+      const src = 'function f takes readonly list of number xs returns number is\n    return length of xs\nend function\nset l to list of 1, 2\nf l\nsay it';
       expect(() => compileSource(src)).not.toThrow();
     });
 
@@ -576,21 +576,21 @@ describe('Compiler', () => {
       const src = [
         'function inner takes list of number xs is',
         '    append 1 to xs',
-        'end',
+        'end function',
         'function outer takes readonly list of number xs is',
         '    inner xs',
-        'end',
+        'end function',
       ].join('\n');
       expect(() => compileSource(src)).toThrow(/Cannot pass readonly-list reference/);
     });
 
     test('pass scalar to list param → compile error', () => {
-      const src = 'function f takes list of number xs is\n    say length of xs\nend\nf 5';
+      const src = 'function f takes list of number xs is\n    say length of xs\nend function\nf 5';
       expect(() => compileSource(src)).toThrow(/Type mismatch/);
     });
 
     test('return readonly list reference from function → compile error', () => {
-      const src = 'function f takes readonly list of number xs returns list of number is\n    return xs\nend';
+      const src = 'function f takes readonly list of number xs returns list of number is\n    return xs\nend function';
       expect(() => compileSource(src)).toThrow(/readonly/);
     });
 
@@ -662,7 +662,7 @@ describe('Compiler', () => {
 
     test('& always returns string (staticType via use in function return)', () => {
       // If string return type enforcement works, compiling this should succeed.
-      const src = 'function f returns string is\n    return "x=" & 1 + 2\nend';
+      const src = 'function f returns string is\n    return "x=" & 1 + 2\nend function';
       expect(() => compileSource(src)).not.toThrow();
     });
   });

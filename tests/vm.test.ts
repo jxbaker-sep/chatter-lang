@@ -136,7 +136,7 @@ describe('VM', () => {
       const src = [
         'function double takes number a returns number is',
         '    return a * 2',
-        'end',
+        'end function',
         'double 5',
         'say it',
       ].join('\n');
@@ -147,14 +147,14 @@ describe('VM', () => {
       const src = [
         'function double takes number a returns number is',
         '    return a * 2',
-        'end',
+        'end function',
         'double 5',
         // it = 10 in outer scope',
         'function quadruple takes number a returns number is',
         '    double a',
         '    double it',
         '    return it',
-        'end',
+        'end function',
         'quadruple 3',
         // outer it should now be 12 (result of quadruple(3)), not inner it
         'say it',
@@ -177,12 +177,12 @@ describe('VM', () => {
       const src = [
         'function double takes number a returns number is',
         '    return a * 2',
-        'end',
+        'end function',
         'function quadruple takes number a returns number is',
         '    double a',
         '    double it',
         '    return it',
-        'end',
+        'end function',
         'double 5',
         // outer it = 10
         'set baz to it',
@@ -202,7 +202,7 @@ describe('VM', () => {
       const src = [
         'function double takes number a returns number is',
         '    return a * 2',
-        'end',
+        'end function',
         'double 7',
         'say it',
       ].join('\n');
@@ -213,7 +213,7 @@ describe('VM', () => {
       const src = [
         'function raise takes number a to number to returns number is',
         '    return a ** to',
-        'end',
+        'end function',
         'raise 2 to 8',
         'say it',
       ].join('\n');
@@ -224,7 +224,7 @@ describe('VM', () => {
       const src = [
         'function sub3 takes number a with number b with number c returns number is',
         '    return a - b - c',
-        'end',
+        'end function',
         'sub3 100 with 10 with 1',
         'say it',
       ].join('\n');
@@ -236,7 +236,7 @@ describe('VM', () => {
       const src = [
         'function greet returns number is',
         '    return 7',
-        'end',
+        'end function',
         'greet',
         'say it',
       ].join('\n');
@@ -247,12 +247,12 @@ describe('VM', () => {
       const src = [
         'function double takes number a returns number is',
         '    return a * 2',
-        'end',
+        'end function',
         'function quadruple takes number a returns number is',
         '    double a',
         '    double it',
         '    return it',
-        'end',
+        'end function',
         'quadruple 5',
         'say it',
       ].join('\n');
@@ -352,18 +352,18 @@ describe('VM', () => {
 
     test('JUMP_IF_FALSE routes control flow when false', () => {
       // if false → say "no", else say "yes"
-      expect(runSource('if false\n    say "no"\nelse\n    say "yes"\nend')).toEqual(['yes']);
+      expect(runSource('if false\n    say "no"\nelse\n    say "yes"\nend if')).toEqual(['yes']);
     });
 
     test('JUMP (via else skip) routes past else branch when cond is true', () => {
-      expect(runSource('if true\n    say "yes"\nelse\n    say "no"\nend')).toEqual(['yes']);
+      expect(runSource('if true\n    say "yes"\nelse\n    say "no"\nend if')).toEqual(['yes']);
     });
 
     test('say does NOT update it', () => {
       const src = [
         'function double takes number a returns number is',
         '    return a * 2',
-        'end',
+        'end function',
         'double 5',
         'say "hello"',
         'say it',
@@ -465,7 +465,7 @@ describe('VM', () => {
   });
 
   describe('Comparison operators', () => {
-    const truthy = (src: string) => runSource(`if ${src}\n    say "yes"\nelse\n    say "no"\nend`);
+    const truthy = (src: string) => runSource(`if ${src}\n    say "yes"\nelse\n    say "no"\nend if`);
 
     test('GT: 5 > 3 true, 3 > 5 false', () => {
       expect(truthy('5 is greater than 3')).toEqual(['yes']);
@@ -486,10 +486,10 @@ describe('VM', () => {
       expect(truthy('6 is at most 5')).toEqual(['no']);
     });
     test('type mismatch throws RuntimeError', () => {
-      expectRuntimeError('if 5 is greater than "x"\n    say 1\nend');
-      expectRuntimeError('if 5 is at least "x"\n    say 1\nend');
-      expectRuntimeError('if 5 is less than "x"\n    say 1\nend');
-      expectRuntimeError('if 5 is at most "x"\n    say 1\nend');
+      expectRuntimeError('if 5 is greater than "x"\n    say 1\nend if');
+      expectRuntimeError('if 5 is at least "x"\n    say 1\nend if');
+      expectRuntimeError('if 5 is less than "x"\n    say 1\nend if');
+      expectRuntimeError('if 5 is at most "x"\n    say 1\nend if');
     });
   });
 
@@ -520,7 +520,7 @@ describe('VM', () => {
         '    var x is 1',
         '    add 1 to x',
         '    return x',
-        'end',
+        'end function',
         'f',
         'say it',
         'f',
@@ -533,7 +533,7 @@ describe('VM', () => {
       const src = [
         'function f returns number is',
         '    return 7',
-        'end',
+        'end function',
         'f',
         'var x is 99',
         'change x to 100',
@@ -552,7 +552,7 @@ describe('VM', () => {
         '        multiply result by i',
         '    end repeat',
         '    return result',
-        'end',
+        'end function',
         'fact 5',
         'say it',
       ].join('\n');
@@ -565,10 +565,10 @@ describe('VM', () => {
       const src = [
         'function double takes number n returns number is',
         '    return n * 2',
-        'end',
+        'end function',
         'function greet is',
         '    say "hi"',
-        'end',
+        'end function',
         'double 5',
         'greet',
         'say it',
@@ -580,7 +580,7 @@ describe('VM', () => {
       const src = [
         'function double takes number n returns number is',
         '    return n * 2',
-        'end',
+        'end function',
         'double 7',
         'say it',
       ].join('\n');
@@ -594,8 +594,8 @@ describe('VM', () => {
         '        return 10',
         '    else',
         '        return 20',
-        '    end',
-        'end',
+        '    end if',
+        'end function',
         'choose 0',
         'say it',
         'choose 5',
@@ -608,11 +608,11 @@ describe('VM', () => {
       const src = [
         'function greeting returns string is',
         '    return "hi"',
-        'end',
+        'end function',
         'function f returns number is',
         '    greeting',
         '    return it',
-        'end',
+        'end function',
         'f',
       ].join('\n');
       expect(() => runSource(src)).toThrow(/Type mismatch/);
@@ -625,8 +625,8 @@ describe('VM', () => {
         '        return true',
         '    else',
         '        return false',
-        '    end',
-        'end',
+        '    end if',
+        'end function',
         'isZero 0',
         'say it',
         'isZero 5',
@@ -642,8 +642,8 @@ describe('VM', () => {
         '        return "zero"',
         '    else',
         '        return "other"',
-        '    end',
-        'end',
+        '    end if',
+        'end function',
         'label 0',
         'say it',
       ].join('\n');
@@ -684,7 +684,7 @@ describe('VM', () => {
       const src = [
         'function push takes list of number xs is',
         '    append 42 to xs',
-        'end',
+        'end function',
         'set l to list of 1, 2',
         'push l',
         'say length of l',
@@ -800,7 +800,7 @@ describe('VM', () => {
         const src = [
           'function bad takes string s is',
           '    say length of s',  // OK — s is string
-          'end',
+          'end function',
           'bad "hi"',
         ].join('\n');
         runSource(src);

@@ -1,12 +1,12 @@
 function double takes number a returns number is
     return a * 2
-end
+end function
 
 function quadruple takes number a returns number is
     double a
     double it
     return it
-end
+end function
 
 set x to 5
 quadruple x

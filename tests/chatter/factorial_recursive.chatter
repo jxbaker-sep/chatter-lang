@@ -1,7 +1,7 @@
 function factorial takes number n returns number is
     if n is less than or equal to 1
         return 1
-    end
+    end if
     factorial n - 1
     return n * it
 end function

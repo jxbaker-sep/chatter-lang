@@ -1,6 +1,6 @@
 function seven returns number is
   return 7
-end
+end function
 seven
 say it
 expect true

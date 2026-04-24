@@ -554,10 +554,7 @@ export function parse(tokens: Token[], source?: string): Program {
 
     consume('DEDENT');
     consume('KEYWORD', 'end');
-    // Optional `end function` qualifier
-    if (peek().type === 'KEYWORD' && peek().value === 'function') {
-      advance();
-    }
+    consume('KEYWORD', 'function');
     consumeNewline();
 
     return { type: 'FunctionDeclaration', name: nameTok.value, params, returnType, body, exported };
@@ -727,10 +724,7 @@ export function parse(tokens: Token[], source?: string): Program {
     }
 
     consume('KEYWORD', 'end');
-    // Optional `end if` qualifier
-    if (peek().type === 'KEYWORD' && peek().value === 'if') {
-      advance();
-    }
+    consume('KEYWORD', 'if');
     consumeNewline();
 
     return { type: 'IfStatement', branches, elseBody };
@@ -807,9 +801,7 @@ export function parse(tokens: Token[], source?: string): Program {
     const body = parseBlock();
     consume('DEDENT');
     consume('KEYWORD', 'end');
-    if (peek().type === 'KEYWORD' && peek().value === 'repeat') {
-      advance();
-    }
+    consume('KEYWORD', 'repeat');
     consumeNewline();
 
     result.body = body;

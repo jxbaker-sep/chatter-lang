@@ -39,19 +39,19 @@ describe('Lexer', () => {
   });
 
   test('** is emitted as a single OP token', () => {
-    const tokens = lex('function f(number a, number b) is\n    return a ** b\nend');
+    const tokens = lex('function f(number a, number b) is\n    return a ** b\nend function');
     const ops = tokens.filter(t => t.type === 'OP').map(t => t.value);
     expect(ops).toEqual(['**']);
   });
 
   test('all arithmetic operators tokenised correctly', () => {
-    const tokens = lex('function f(number x) is\n    return x + x - x * x / x\nend');
+    const tokens = lex('function f(number x) is\n    return x + x - x * x / x\nend function');
     const ops = tokens.filter(t => t.type === 'OP').map(t => t.value);
     expect(ops).toEqual(['+', '-', '*', '/']);
   });
 
   test('parameter named `to` (keyword) is emitted as KEYWORD', () => {
-    const tokens = lex('function raise(number a, number to) is\n    return a ** to\nend');
+    const tokens = lex('function raise(number a, number to) is\n    return a ** to\nend function');
     const toTokens = tokens.filter(t => t.value === 'to');
     expect(toTokens.length).toBeGreaterThanOrEqual(2);
     expect(toTokens.every(t => t.type === 'KEYWORD')).toBe(true);
@@ -79,17 +79,17 @@ describe('Lexer', () => {
     expect(kws).toContain('repeat');
     expect(kws).toContain('times');
     expect(kws).toContain('end');
-    const tokens2 = lex('repeat with i from 1 to 5\n    say i\nend');
+    const tokens2 = lex('repeat with i from 1 to 5\n    say i\nend repeat');
     const kws2 = tokens2.filter(t => t.type === 'KEYWORD').map(t => t.value);
     expect(kws2).toContain('with');
     expect(kws2).toContain('from');
     expect(kws2).toContain('to');
-    const tokens3 = lex('repeat while false\n    say 1\nend');
+    const tokens3 = lex('repeat while false\n    say 1\nend repeat');
     expect(tokens3.filter(t => t.type === 'KEYWORD').map(t => t.value)).toContain('while');
   });
 
   test('comparison words tokenize as KEYWORDs', () => {
-    const tokens = lex('if a is less than b and c is at least d and e is greater than f and g is at most h\n    say 1\nend');
+    const tokens = lex('if a is less than b and c is at least d and e is greater than f and g is at most h\n    say 1\nend if');
     const kws = new Set(tokens.filter(t => t.type === 'KEYWORD').map(t => t.value));
     for (const w of ['less', 'greater', 'than', 'at', 'least', 'most']) {
       expect(kws.has(w)).toBe(true);

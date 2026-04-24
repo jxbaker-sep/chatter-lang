@@ -28,7 +28,7 @@ describe('Parser', () => {
   });
 
   test('parses function declaration with single param', () => {
-    const ast = parseSource('function double takes number a is\n    return a * 2\nend');
+    const ast = parseSource('function double takes number a is\n    return a * 2\nend function');
     expect(ast.body[0]).toMatchObject({
       type: 'FunctionDeclaration',
       name: 'double',
@@ -46,7 +46,7 @@ describe('Parser', () => {
   });
 
   test('parses function declaration with zero params (no `takes`)', () => {
-    const ast = parseSource('function greet is\n    say "hi"\nend');
+    const ast = parseSource('function greet is\n    say "hi"\nend function');
     expect(ast.body[0]).toMatchObject({
       type: 'FunctionDeclaration',
       name: 'greet',
@@ -55,7 +55,7 @@ describe('Parser', () => {
   });
 
   test('parses function declaration with keyword label/body name (`to`)', () => {
-    const src = 'function raise takes number a to number to is\n    return a ** to\nend';
+    const src = 'function raise takes number a to number to is\n    return a ** to\nend function';
     const ast = parseSource(src);
     const decl = ast.body[0] as FunctionDeclaration;
     expect(decl.params).toEqual([
@@ -71,7 +71,7 @@ describe('Parser', () => {
   });
 
   test('parses function decl with distinct separator label and body name', () => {
-    const src = 'function raise takes number base to number exponent is\n    return base ** exponent\nend';
+    const src = 'function raise takes number base to number exponent is\n    return base ** exponent\nend function';
     const ast = parseSource(src);
     const decl = ast.body[0] as FunctionDeclaration;
     expect(decl.params).toEqual([
@@ -81,7 +81,7 @@ describe('Parser', () => {
   });
 
   test('parses function decl with duplicate labels (with ... with ...)', () => {
-    const src = 'function sum3 takes number a with number b with number c is\n    return a + b + c\nend';
+    const src = 'function sum3 takes number a with number b with number c is\n    return a + b + c\nend function';
     const ast = parseSource(src);
     const decl = ast.body[0] as FunctionDeclaration;
     expect(decl.params).toEqual([
@@ -92,19 +92,19 @@ describe('Parser', () => {
   });
 
   test('rejects legacy paren form with a helpful error', () => {
-    expect(() => parseSource('function f(number a) is\n    return a\nend'))
+    expect(() => parseSource('function f(number a) is\n    return a\nend function'))
       .toThrow(/takes/);
   });
 
   test('rejects duplicate body names', () => {
     expect(() =>
-      parseSource('function bad takes number a with number a is\n    return a\nend'),
+      parseSource('function bad takes number a with number a is\n    return a\nend function'),
     ).toThrow(/[Dd]uplicate parameter/);
   });
 
   test('rejects stop-keyword as a separator label', () => {
     expect(() =>
-      parseSource('function bad takes number a end number b is\n    return a\nend'),
+      parseSource('function bad takes number a end number b is\n    return a\nend function'),
     ).toThrow(/reserved keyword/);
   });
 
@@ -239,7 +239,7 @@ describe('Parser', () => {
         '    say "two"',
         'else',
         '    say "other"',
-        'end',
+        'end if',
       ].join('\n');
       const ast = parseSource(src);
       const ifStmt = ast.body[0] as any;
@@ -257,7 +257,7 @@ describe('Parser', () => {
     });
 
     test('if without else has elseBody === null', () => {
-      const ast = parseSource('if a\n    say 1\nend');
+      const ast = parseSource('if a\n    say 1\nend if');
       const ifStmt = ast.body[0] as any;
       expect(ifStmt.elseBody).toBeNull();
       expect(ifStmt.branches).toHaveLength(1);
@@ -273,22 +273,34 @@ describe('Parser', () => {
       });
     });
 
-    test('optional `end if` accepted on if-statement', () => {
+    test('`end if` required on if-statement', () => {
       const ast = parseSource('if a\n    say 1\nend if');
       expect(ast.body[0]).toMatchObject({ type: 'IfStatement' });
     });
 
-    test('optional `end function` accepted on function decl', () => {
+    test('`end function` required on function decl', () => {
       const ast = parseSource('function f takes number a is\n    return a\nend function');
       expect(ast.body[0]).toMatchObject({ type: 'FunctionDeclaration', name: 'f' });
     });
 
+    test('bare `end` on if-statement is a parse error', () => {
+      expect(() => parseSource('if a\n    say 1\nend')).toThrow(/Expected KEYWORD 'if'/);
+    });
+
+    test('bare `end` on function decl is a parse error', () => {
+      expect(() => parseSource('function f is\n    say 1\nend')).toThrow(/Expected KEYWORD 'function'/);
+    });
+
+    test('wrong qualifier (`end function` on if) is a parse error', () => {
+      expect(() => parseSource('if a\n    say 1\nend function')).toThrow(/Expected 'if'/);
+    });
+
     test('`==` is no longer tokenised as an operator (tokenisation error)', () => {
-      expect(() => parseSource('if a == b\n    say 1\nend')).toThrow();
+      expect(() => parseSource('if a == b\n    say 1\nend if')).toThrow();
     });
 
     test('`elif` is no longer a keyword (parse error)', () => {
-      expect(() => parseSource('if a\n    say 1\nelif b\n    say 2\nend')).toThrow();
+      expect(() => parseSource('if a\n    say 1\nelif b\n    say 2\nend if')).toThrow();
     });
   });
 
@@ -325,9 +337,8 @@ describe('Parser', () => {
       });
     });
 
-    test('`end` alone (without `repeat`) is valid', () => {
-      const ast = parseSource('repeat 2 times\n    say "x"\nend');
-      expect(ast.body[0]).toMatchObject({ type: 'RepeatStatement', kind: 'times' });
+    test('bare `end` on repeat is a parse error', () => {
+      expect(() => parseSource('repeat 2 times\n    say "x"\nend')).toThrow(/Expected KEYWORD 'repeat'/);
     });
 
     test('`end repeat` is valid', () => {
@@ -336,7 +347,7 @@ describe('Parser', () => {
     });
 
     test('range expression boundaries can be expressions', () => {
-      const ast = parseSource('repeat with i from 1 + 1 to 2 * 5\n    say i\nend');
+      const ast = parseSource('repeat with i from 1 + 1 to 2 * 5\n    say i\nend repeat');
       expect(ast.body[0]).toMatchObject({
         type: 'RepeatStatement',
         kind: 'range',
@@ -415,7 +426,7 @@ describe('Parser', () => {
     }
 
     test('is less than → <', () => {
-      expect(getCond('if a is less than b\n    say 1\nend')).toMatchObject({
+      expect(getCond('if a is less than b\n    say 1\nend if')).toMatchObject({
         type: 'BinaryExpression', operator: '<',
         left: { type: 'IdentifierExpression', name: 'a' },
         right: { type: 'IdentifierExpression', name: 'b' },
@@ -423,29 +434,29 @@ describe('Parser', () => {
     });
 
     test('is greater than → >', () => {
-      expect(getCond('if a is greater than b\n    say 1\nend')).toMatchObject({
+      expect(getCond('if a is greater than b\n    say 1\nend if')).toMatchObject({
         type: 'BinaryExpression', operator: '>',
       });
     });
 
     test('is at most → <=', () => {
-      expect(getCond('if a is at most b\n    say 1\nend')).toMatchObject({
+      expect(getCond('if a is at most b\n    say 1\nend if')).toMatchObject({
         type: 'BinaryExpression', operator: '<=',
       });
     });
 
     test('is at least → >=', () => {
-      expect(getCond('if a is at least b\n    say 1\nend')).toMatchObject({
+      expect(getCond('if a is at least b\n    say 1\nend if')).toMatchObject({
         type: 'BinaryExpression', operator: '>=',
       });
     });
 
     test('is at foo without least/most is a ParseError mentioning least', () => {
-      expect(() => parseSource('if a is at 5\n    say 1\nend')).toThrow(/least/);
+      expect(() => parseSource('if a is at 5\n    say 1\nend if')).toThrow(/least/);
     });
 
     test('arithmetic binds tighter than comparison', () => {
-      const cond = getCond('if a + 1 is at least 5\n    say 1\nend');
+      const cond = getCond('if a + 1 is at least 5\n    say 1\nend if');
       expect(cond.operator).toBe('>=');
       expect(cond.left).toMatchObject({ type: 'BinaryExpression', operator: '+' });
     });
@@ -453,7 +464,7 @@ describe('Parser', () => {
 
   describe('return types', () => {
     test('function decl without returns has returnType null', () => {
-      const ast = parseSource('function greet is\n    say "hi"\nend');
+      const ast = parseSource('function greet is\n    say "hi"\nend function');
       expect(ast.body[0]).toMatchObject({
         type: 'FunctionDeclaration',
         name: 'greet',
@@ -462,7 +473,7 @@ describe('Parser', () => {
     });
 
     test('function decl with returns number', () => {
-      const ast = parseSource('function double takes number n returns number is\n    return n * 2\nend');
+      const ast = parseSource('function double takes number n returns number is\n    return n * 2\nend function');
       expect(ast.body[0]).toMatchObject({
         type: 'FunctionDeclaration',
         name: 'double',
@@ -471,7 +482,7 @@ describe('Parser', () => {
     });
 
     test('function decl with returns string and zero args', () => {
-      const ast = parseSource('function hello returns string is\n    return "hi"\nend');
+      const ast = parseSource('function hello returns string is\n    return "hi"\nend function');
       expect(ast.body[0]).toMatchObject({
         type: 'FunctionDeclaration',
         returnType: { kind: 'scalar', name: 'string' },
@@ -479,18 +490,18 @@ describe('Parser', () => {
     });
 
     test('function decl with returns boolean', () => {
-      const ast = parseSource('function yep returns boolean is\n    return true\nend');
+      const ast = parseSource('function yep returns boolean is\n    return true\nend function');
       expect(ast.body[0]).toMatchObject({ returnType: { kind: 'scalar', name: 'boolean' } });
     });
 
     test('bare return parses with null value', () => {
-      const ast = parseSource('function f is\n    return\nend');
+      const ast = parseSource('function f is\n    return\nend function');
       const decl = ast.body[0] as FunctionDeclaration;
       expect(decl.body[0]).toMatchObject({ type: 'ReturnStatement', value: null });
     });
 
     test('return with expression parses with non-null value', () => {
-      const ast = parseSource('function f returns number is\n    return 1 + 2\nend');
+      const ast = parseSource('function f returns number is\n    return 1 + 2\nend function');
       const decl = ast.body[0] as FunctionDeclaration;
       const r = decl.body[0] as ReturnStatement;
       expect(r.value).not.toBeNull();
@@ -499,7 +510,7 @@ describe('Parser', () => {
 
     test('returns clause after multi-param takes list', () => {
       const ast = parseSource(
-        'function raise takes number base to number exponent returns number is\n    return base ** exponent\nend',
+        'function raise takes number base to number exponent returns number is\n    return base ** exponent\nend function',
       );
       expect(ast.body[0]).toMatchObject({
         returnType: { kind: 'scalar', name: 'number' },
@@ -542,7 +553,7 @@ describe('Parser', () => {
     });
 
     test('rejects nested list in type annotation', () => {
-      expect(() => parseSource('function f takes list of list of number xs is\n    say 1\nend')).toThrow(/nested lists not supported/);
+      expect(() => parseSource('function f takes list of list of number xs is\n    say 1\nend function')).toThrow(/nested lists not supported/);
     });
 
     test('parses item N of L', () => {
@@ -587,7 +598,7 @@ describe('Parser', () => {
     });
 
     test('parses list of TYPE and readonly list of TYPE param annotations', () => {
-      const ast = parseSource('function f takes list of number xs other readonly list of string ys is\n    say 1\nend');
+      const ast = parseSource('function f takes list of number xs other readonly list of string ys is\n    say 1\nend function');
       const fn = ast.body[0] as FunctionDeclaration;
       expect(fn.params[0].paramType).toEqual({ kind: 'list', element: 'number', readonly: false });
       expect(fn.params[1].paramType).toEqual({ kind: 'list', element: 'string', readonly: true });
