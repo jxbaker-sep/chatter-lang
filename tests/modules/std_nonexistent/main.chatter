@@ -1,0 +1,2 @@
+use foo from "std:does_not_exist"
+foo

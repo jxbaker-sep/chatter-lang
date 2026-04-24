@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-488 tests, all passing.
+493 tests, all passing.
 
 ## Language spec (current)
 
@@ -140,6 +140,13 @@ One file = one module. The file path (normalized absolute) identifies the module
 - Top-level `set`/`var` bindings are also mangled by module to prevent cross-module collision while still allowing imported-function closures to reach their home-module bindings via the stack-walking `LOAD` rule.
 - The combined `main` is the concatenation of every non-entry module's top-level instructions (in DFS post-order) followed by the entry's top-level. `JUMP`/`JUMP_IF_FALSE` targets are rewritten by the loader when blocks are concatenated. No new VM opcodes were needed.
 - Loader lives in `src/moduleLoader.ts`; entry point `loadProgram(entryFilePath) → BytecodeProgram`. `CLI` calls `loadProgram`.
+
+**Standard library imports (`std:` prefix)**: `use NAMES from "std:MODULENAME"` loads a bundled stdlib module.
+- `MODULENAME` is a bare module name — no slashes, no `..`, no `.chatter` extension. Violations → compile error `invalid stdlib import "std:..."` (with a per-rule reason).
+- The default stdlib directory is resolved as `path.resolve(__dirname, '..', 'stdlib')` relative to `src/moduleLoader.ts`. In dev that's `<repo>/stdlib/`; when installed as a package, `stdlib/` ships as a sibling of `dist/` (listed in `package.json` `files`). Missing module file → standard `cannot find module "std:NAME"` error.
+- `loadProgram(entryPath, { stdlibDir })` accepts an override for tests.
+- Stdlib modules participate in the same module graph (cycle detection, export checks, mangling). Relative `use` from inside a stdlib module resolves against the stdlib file's own directory. Stdlib modules are keyed in the loader's registry by the synthetic string `std:<NAME>` rather than their absolute filesystem path; because `std:` cannot appear in an absolute path, collisions with a coincidentally-named user file are impossible.
+- Placeholder module lives at `stdlib/placeholder.chatter` as proof-of-life; real modules (starting with `strings.chatter`) are authored separately.
 
 **Not in v1 (deferred)**: `use X as Y` renaming, exporting `set`/`var`, package-style paths (no `./` or `../`), re-exports, dynamic imports, circular imports with partial-module semantics.
 

@@ -1,0 +1,1 @@
+ERROR: invalid stdlib import "std:strings/foo": stdlib module name 'strings/foo' must not contain path separators

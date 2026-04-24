@@ -1,0 +1,3 @@
+use greeting from "std:placeholder"
+greeting
+say it

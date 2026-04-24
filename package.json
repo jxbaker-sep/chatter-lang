@@ -2,6 +2,11 @@
   "name": "chatter",
   "version": "1.0.0",
   "main": "dist/index.js",
+  "files": [
+    "dist",
+    "stdlib",
+    "README.md"
+  ],
   "bin": {
     "chatter": "dist/index.js"
   },

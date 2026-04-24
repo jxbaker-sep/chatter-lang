@@ -1,0 +1,2 @@
+use foo from "std:strings/foo"
+foo

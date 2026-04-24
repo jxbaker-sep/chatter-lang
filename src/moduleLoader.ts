@@ -9,17 +9,67 @@ import { SourceLocation } from './errors';
 
 interface ModuleInfo {
   absPath: string;
+  // Registry key: for user modules this is the absolute filesystem path; for
+  // stdlib modules it is the synthetic string `std:<NAME>`. These two
+  // namespaces can never collide because `std:` is not a valid absolute path.
+  registryKey: string;
   moduleId: string;
   source: string;
   ast: Program;
   compiled?: CompiledModule;
+  isStdlib: boolean;
 }
 
-function resolveUsePath(userPath: string, fromDir: string): string {
-  // Always append .chatter
+const STD_PREFIX = 'std:';
+
+export interface LoadProgramOptions {
+  /** Override the directory used to resolve `std:` imports (for tests). */
+  stdlibDir?: string;
+}
+
+function defaultStdlibDir(): string {
+  // Resolved relative to this source file. In dev this points to
+  // <repo>/stdlib; once compiled to dist/, it points to <repo>/stdlib because
+  // the stdlib/ directory is shipped as a sibling of dist/.
+  return path.resolve(__dirname, '..', 'stdlib');
+}
+
+interface ResolvedUse {
+  absPath: string;
+  registryKey: string;
+  isStdlib: boolean;
+}
+
+function validateStdName(name: string): string | null {
+  if (name.length === 0) return 'stdlib module name is empty';
+  if (name.includes('/') || name.includes('\\')) {
+    return `stdlib module name '${name}' must not contain path separators`;
+  }
+  if (name.includes('..')) {
+    return `stdlib module name '${name}' must not contain '..'`;
+  }
+  if (name.endsWith('.chatter')) {
+    return `stdlib module name '${name}' must not include the .chatter extension`;
+  }
+  return null;
+}
+
+function resolveUse(userPath: string, fromDir: string, stdlibDir: string): ResolvedUse {
+  if (userPath.startsWith(STD_PREFIX)) {
+    const name = userPath.slice(STD_PREFIX.length);
+    const err = validateStdName(name);
+    if (err) {
+      throw new CompileError(`invalid stdlib import "${userPath}": ${err}`);
+    }
+    return {
+      absPath: path.join(stdlibDir, name + '.chatter'),
+      registryKey: `std:${name}`,
+      isStdlib: true,
+    };
+  }
   const withExt = userPath.endsWith('.chatter') ? userPath : userPath + '.chatter';
   const resolved = path.resolve(fromDir, withExt);
-  return resolved;
+  return { absPath: resolved, registryKey: resolved, isStdlib: false };
 }
 
 function useLocation(u: UseStatement): SourceLocation | undefined {
@@ -39,24 +89,31 @@ function nameLocation(u: UseStatement, idx: number): SourceLocation | undefined 
   return useLocation(u);
 }
 
-export function loadProgram(entryFilePath: string): BytecodeProgram {
+export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}): BytecodeProgram {
+  const stdlibDir = opts.stdlibDir ?? defaultStdlibDir();
   const entryAbs = path.resolve(entryFilePath);
-  const registry = new Map<string, ModuleInfo>();   // absPath -> info
-  const pathToWritten = new Map<string, string>();  // absPath -> original user-written path (for errors)
+  const registry = new Map<string, ModuleInfo>();   // registryKey -> info
+  const pathToWritten = new Map<string, string>();  // registryKey -> original user-written path (for errors)
   pathToWritten.set(entryAbs, entryFilePath);
   let nextId = 0;
 
   // DFS: returns ordered list (post-order) of ModuleInfo.
   const orderPostOrder: ModuleInfo[] = [];
-  const loading = new Map<string, string>();  // absPath -> userDisplayPath (stack entry)
-  const loadingStack: Array<{ absPath: string; display: string }> = [];
+  const loading = new Map<string, string>();  // registryKey -> userDisplayPath (stack entry)
+  const loadingStack: Array<{ registryKey: string; display: string }> = [];
 
-  function visit(absPath: string, displayPath: string, useStmtLoc?: SourceLocation): ModuleInfo {
-    if (registry.has(absPath)) {
-      const existing = registry.get(absPath)!;
-      if (loading.has(absPath)) {
+  function visit(
+    absPath: string,
+    registryKey: string,
+    isStdlib: boolean,
+    displayPath: string,
+    useStmtLoc?: SourceLocation,
+  ): ModuleInfo {
+    if (registry.has(registryKey)) {
+      const existing = registry.get(registryKey)!;
+      if (loading.has(registryKey)) {
         // Cycle: build path from cycle start to current + back
-        const cycleStartIdx = loadingStack.findIndex(e => e.absPath === absPath);
+        const cycleStartIdx = loadingStack.findIndex(e => e.registryKey === registryKey);
         const cyclePath = loadingStack.slice(cycleStartIdx).map(e => e.display);
         cyclePath.push(displayPath);
         throw new CompileError(
@@ -85,22 +142,30 @@ export function loadProgram(entryFilePath: string): BytecodeProgram {
     }
 
     const moduleId = `m${nextId++}`;
-    const info: ModuleInfo = { absPath, moduleId, source, ast };
-    registry.set(absPath, info);
-    loading.set(absPath, displayPath);
-    loadingStack.push({ absPath, display: displayPath });
+    const info: ModuleInfo = { absPath, registryKey, moduleId, source, ast, isStdlib };
+    registry.set(registryKey, info);
+    loading.set(registryKey, displayPath);
+    loadingStack.push({ registryKey, display: displayPath });
 
     // Visit dependencies (use statements) first.
     const fromDir = path.dirname(absPath);
     const depModules = new Map<string, ModuleInfo>();  // userPath -> depInfo
     for (const stmt of ast.body) {
       if (stmt.type !== 'UseStatement') continue;
-      const depAbs = resolveUsePath(stmt.path, fromDir);
-      pathToWritten.set(depAbs, stmt.path);
       const stmtLoc = useLocation(stmt);
-      // Cycle check inline: if depAbs is on the loading stack, build cycle.
-      if (loading.has(depAbs)) {
-        const cycleStartIdx = loadingStack.findIndex(e => e.absPath === depAbs);
+      let resolved: ResolvedUse;
+      try {
+        resolved = resolveUse(stmt.path, fromDir, stdlibDir);
+      } catch (e) {
+        if (e instanceof CompileError && !e.location) {
+          throw new CompileError(e.message, stmtLoc);
+        }
+        throw e;
+      }
+      pathToWritten.set(resolved.registryKey, stmt.path);
+      // Cycle check inline: if dep is on the loading stack, build cycle.
+      if (loading.has(resolved.registryKey)) {
+        const cycleStartIdx = loadingStack.findIndex(e => e.registryKey === resolved.registryKey);
         const cyclePath = loadingStack.slice(cycleStartIdx).map(e => e.display);
         cyclePath.push(stmt.path);
         throw new CompileError(
@@ -108,7 +173,7 @@ export function loadProgram(entryFilePath: string): BytecodeProgram {
           stmtLoc,
         );
       }
-      const depInfo = visit(depAbs, stmt.path, stmtLoc);
+      const depInfo = visit(resolved.absPath, resolved.registryKey, resolved.isStdlib, stmt.path, stmtLoc);
       depModules.set(stmt.path, depInfo);
     }
 
@@ -141,13 +206,13 @@ export function loadProgram(entryFilePath: string): BytecodeProgram {
     const compiled = compiler.compileModule(ast, { moduleId, imports });
     info.compiled = compiled;
 
-    loading.delete(absPath);
+    loading.delete(registryKey);
     loadingStack.pop();
     orderPostOrder.push(info);
     return info;
   }
 
-  const entryInfo = visit(entryAbs, entryFilePath);
+  const entryInfo = visit(entryAbs, entryAbs, false, entryFilePath);
 
   // Build combined program.
   const functions = new Map<string, FunctionDef>();
@@ -174,7 +239,7 @@ export function loadProgram(entryFilePath: string): BytecodeProgram {
     }
   };
   for (const m of orderPostOrder) {
-    if (m.absPath === entryInfo.absPath) continue;
+    if (m.absPath === entryInfo.absPath && m.registryKey === entryInfo.registryKey) continue;
     concatShifted(m.compiled!.topLevel);
   }
   concatShifted(entryInfo.compiled!.topLevel);
