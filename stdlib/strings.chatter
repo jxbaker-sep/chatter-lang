@@ -4,9 +4,26 @@
 # Stubs live here until the real implementations are written by hand.
 
 # parse: convert a string of digits (with optional leading '-') into a number.
-# Accepts "42", "-7", "0".
+# Accepts "42", "-7", "0", "-0".
+# Range: -2147483647 .. 2147483647. INT_MIN (-2147483648) is NOT supported.
 # Runtime error on anything else: empty, whitespace, '+' sign, decimal, non-digit chars, lone '-'.
-export function parse takes string s returns number is
-  # TODO: implement by hand
-  return 0
+export function parse takes string input returns number is
+  var result is 0
+  set zero to code of "0"
+  var start is 1
+  var sign is 1
+  expect length of input is at least 1, "expected a number but got an empty string"
+  if character 1 of input is "-"
+    change start to 2
+    change sign to -1
+  end if
+  expect start is at most length of input, "expected a number but got " & input
+  repeat with i from start to length of input
+    multiply result by 10
+    set c to character i of input
+    expect c to be a digit, "expected a number but got " & input
+    set digit_value to code of c - zero
+    add digit_value to result
+  end repeat
+  return result * sign
 end function
