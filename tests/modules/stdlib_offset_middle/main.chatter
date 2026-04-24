@@ -1,0 +1,4 @@
+use offset from "std:strings"
+
+offset "cat" in "scatter"
+say it

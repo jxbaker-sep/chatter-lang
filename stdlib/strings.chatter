@@ -33,6 +33,33 @@ end function
 # "" -> ""
 # "   " -> ""
 export function trim takes string input returns string is
+  if input is empty
+    return ""  # avoid out-of-bounds access
+  end if
+  var forward is 1
+  var backward is length of input
+  repeat while character forward of input is whitespace
+    add 1 to forward
+    if forward is greater than length of input
+      return ""  # all whitespace
+    end if
+  end repeat
+
+  repeat while character backward of input is whitespace
+    subtract 1 from backward
+    # No out of bounds check needed here because if backward goes to 0, then forward must be greater than length of input, which would have already returned "".
+  end repeat
+
+  return characters forward to backward of input
+end function
+
+# offset: 1-indexed position of the first occurrence of needle in haystack.
+# Returns 0 if needle does not occur in haystack.
+# "lo" in "hello" -> 4
+# "z"  in "hello" -> 0
+# "hi" in ""      -> 0
+# ""   in "hello" -> runtime error (empty needle)
+export function offset takes string needle in string haystack returns number is
   # TODO: implement by hand
-  return input
+  return 0
 end function

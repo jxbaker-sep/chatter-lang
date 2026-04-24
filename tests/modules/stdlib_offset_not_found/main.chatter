@@ -1,0 +1,4 @@
+use offset from "std:strings"
+
+offset "z" in "hello"
+say it

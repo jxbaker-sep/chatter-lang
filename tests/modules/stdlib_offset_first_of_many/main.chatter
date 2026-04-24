@@ -1,0 +1,5 @@
+use offset from "std:strings"
+
+# "ab" appears at positions 1, 4, 7 -- should return 1
+offset "ab" in "abcabxab"
+say it

@@ -1,0 +1,5 @@
+use offset from "std:strings"
+
+# "aab" -- the first "aa" fails to match "aab", must back off and retry at index 2
+offset "aab" in "aaab"
+say it

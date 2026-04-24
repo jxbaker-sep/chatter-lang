@@ -1,0 +1,4 @@
+use offset from "std:strings"
+
+offset "hi" in ""
+say it
