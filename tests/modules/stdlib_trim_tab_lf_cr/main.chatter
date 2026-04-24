@@ -1,0 +1,7 @@
+use trim from "std:strings"
+
+# leading tab, trailing CR+LF
+set s to "hi
+"
+trim s
+say "[" & it & "]"

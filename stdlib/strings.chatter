@@ -27,3 +27,12 @@ export function parse takes string input returns number is
   end repeat
   return result * sign
 end function
+
+# trim: strip leading and trailing ASCII whitespace (space, tab, LF, CR).
+# "  hi  " -> "hi"
+# "" -> ""
+# "   " -> ""
+export function trim takes string input returns string is
+  # TODO: implement by hand
+  return input
+end function

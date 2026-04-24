@@ -1,0 +1,4 @@
+use trim from "std:strings"
+
+trim "   hello"
+say it
