@@ -1,0 +1,13 @@
+function abs takes number n returns number is
+    if n is less than 0
+        return n * -1
+    end if
+    return n
+end function
+
+abs -5
+say it
+abs -0
+say it
+abs 7
+say it

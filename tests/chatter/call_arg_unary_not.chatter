@@ -1,0 +1,7 @@
+function invert takes boolean b returns boolean is
+    return not b
+end function
+
+var flag is true
+invert not flag
+say it

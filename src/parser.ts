@@ -45,6 +45,28 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'use', 'export',
 ]);
 
+// Keywords that legally begin an expression (see parsePrimary / parseLogicalNot).
+const EXPRESSION_START_KEYWORDS = new Set([
+  'true', 'false',
+  'not',
+  'first', 'last',
+  'length',
+  'item',
+  'character', 'characters',
+  'empty',
+  'list',
+  'lines',
+]);
+
+function canStartExpression(tok: Token): boolean {
+  if (tok.type === 'NUMBER' || tok.type === 'STRING' || tok.type === 'IDENT' || tok.type === 'LPAREN') {
+    return true;
+  }
+  if (tok.type === 'OP' && tok.value === '-') return true;
+  if (tok.type === 'KEYWORD' && EXPRESSION_START_KEYWORDS.has(tok.value)) return true;
+  return false;
+}
+
 export function parse(tokens: Token[], source?: string): Program {
   let pos = 0;
   const sourceLines: string[] | null = source !== undefined ? source.split('\n') : null;
@@ -499,17 +521,8 @@ export function parse(tokens: Token[], source?: string): Program {
     const nameTok = consume('IDENT');
     const args: Array<{ name: string | null; value: Expression }> = [];
 
-    // First positional arg (optional): NUMBER, STRING, IDENT, or parenthesised expr.
-    // Boolean literals (true/false) are also allowed as positional args.
-    const first = peek();
-    const isBoolKw = first.type === 'KEYWORD' && (first.value === 'true' || first.value === 'false');
-    if (
-      first.type === 'NUMBER' ||
-      first.type === 'STRING' ||
-      first.type === 'IDENT' ||
-      first.type === 'LPAREN' ||
-      isBoolKw
-    ) {
+    // First positional arg (optional): anything that can start an expression.
+    if (canStartExpression(peek())) {
       args.push({ name: null, value: parseExpression() });
     }
 
