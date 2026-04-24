@@ -1,0 +1,4 @@
+use split from "std:strings"
+
+split "" on ","
+say it

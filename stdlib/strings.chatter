@@ -61,10 +61,50 @@ end function
 # ""   in "hello" -> runtime error (empty needle)
 export function offset takes string needle in string haystack returns number is
   expect needle is not empty, "offset: needle cannot be empty"
+  find needle in haystack from 1
+  return it
+end function
+
+# split: break input into a list of strings at each occurrence of separator.
+# Separator may be multi-character. Empty slices are preserved.
+# "a,b,c" on ","  -> ["a", "b", "c"]
+# ""      on ","  -> [""]
+# ",a,,b," on "," -> ["", "a", "", "b", ""]
+# "hello" on ","  -> ["hello"]
+# "aXXb"  on "XX" -> ["a", "b"]
+# input   on ""   -> runtime error (empty separator)
+export function split takes string input on string separator returns list of string is
+  expect separator is not empty, "split: separator cannot be empty"
+  set result to empty list of string
+  var tail is 1
+  repeat while true
+    find separator in input from tail
+    set match to it
+    if match is 0
+      append characters tail to end of input to result
+      exit repeat
+    end if
+    append characters tail to match - 1 of input to result
+    change tail to match + length of separator
+  end repeat
+  return result
+end function
+
+# find: like offset, but starts searching at position `start` (1-indexed).
+# Returns absolute 1-indexed position in haystack, or 0 if not found.
+# "lo"  in "hello hello" from 1  -> 4
+# "lo"  in "hello hello" from 5  -> 10
+# "x"   in "hi"          from 1  -> 0
+# "x"   in "hi"          from 5  -> 0  (start past end -> not found)
+# "hi"  in "hello"       from 0  -> runtime error (start must be >= 1)
+# ""    in "hello"       from 1  -> runtime error (empty needle)
+export function find takes string needle in string haystack from number start returns number is
+  expect needle is not empty, "find: needle cannot be empty"
+  expect start to be at least 1, "find: start must be at least 1"
   if length of needle is greater than length of haystack
     return 0
   end if
-  repeat with i from 1 to length of haystack - length of needle + 1
+  repeat with i from start to length of haystack - length of needle + 1
     if character i of haystack is character 1 of needle
       var found is true
       repeat with j from 2 to length of needle

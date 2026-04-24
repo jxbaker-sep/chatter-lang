@@ -1,0 +1,4 @@
+use find from "std:strings"
+
+find "" in "hello" from 1
+say it

@@ -1,0 +1,4 @@
+use find from "std:strings"
+
+find "x" in "hi" from 0 - 3
+say it

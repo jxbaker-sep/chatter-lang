@@ -1,0 +1,4 @@
+use find from "std:strings"
+
+find "he" in "hehehe" from 2
+say it
