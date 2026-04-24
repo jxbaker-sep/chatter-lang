@@ -715,6 +715,20 @@ export class VM {
         this.stack.push(result);
         break;
       }
+
+      case 'IS_EMPTY': {
+        const v = this.pop();
+        if (typeof v === 'string') {
+          this.stack.push(v.length === 0);
+          break;
+        }
+        if (isList(v)) {
+          this.stack.push(v.items.length === 0);
+          break;
+        }
+        throw new RuntimeError(
+          `Type mismatch: 'is empty' requires a string or list, got ${describe(v)}`, instr.loc);
+      }
     }
   }
 

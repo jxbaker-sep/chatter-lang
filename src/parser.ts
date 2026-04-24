@@ -218,9 +218,16 @@ export function parse(tokens: Token[], source?: string): Program {
         advance(); // consume `to`
         advance(); // consume `not`
         advance(); // consume `be`
-        // `to not be Y` → `left != right`
-        const right = parseConcat();
-        expression = { type: 'BinaryExpression', operator: '!=', left: expression, right } as BinaryExpression;
+        // `to not be empty` → `not (left is empty)`
+        if (peek().type === 'KEYWORD' && peek().value === 'empty') {
+          advance();
+          const empty = { type: 'IsEmptyExpression', target: expression } as any;
+          expression = { type: 'UnaryExpression', operator: 'not', operand: empty } as UnaryExpression;
+        } else {
+          // `to not be Y` → `left != right`
+          const right = parseConcat();
+          expression = { type: 'BinaryExpression', operator: '!=', left: expression, right } as BinaryExpression;
+        }
       }
     }
 
@@ -264,6 +271,14 @@ export function parse(tokens: Token[], source?: string): Program {
   // Called with the `to` and `be` already consumed (for the positive forms).
   // The `to not be` form is handled here too, re-routed before consuming `be`.
   function parseToBeTail(left: Expression, _negated: boolean): Expression {
+    // `to be empty` — emptiness predicate (polymorphic over strings and lists).
+    {
+      const n0 = peek();
+      if (n0.type === 'KEYWORD' && n0.value === 'empty') {
+        advance();
+        return { type: 'IsEmptyExpression', target: left } as any;
+      }
+    }
     // Char-class predicates: `a digit`, `a letter`, `whitespace`
     {
       const n0 = peek();
@@ -867,6 +882,27 @@ export function parse(tokens: Token[], source?: string): Program {
         continue;
       }
       advance(); // consume `is`
+      // `is empty` / `is not empty` — polymorphic emptiness predicate over
+      // strings and lists. `empty` is a reserved keyword (from `empty list of`),
+      // so this is disambiguated contextually: after `is` / `is not` it is the
+      // emptiness predicate, not a list literal.
+      {
+        const n0 = peek();
+        if (n0.type === 'KEYWORD' && n0.value === 'empty') {
+          advance();
+          left = { type: 'IsEmptyExpression', target: left } as any;
+          continue;
+        }
+        if (n0.type === 'KEYWORD' && n0.value === 'not') {
+          const n1 = tokens[pos + 1];
+          if (n1?.type === 'KEYWORD' && n1.value === 'empty') {
+            advance(); advance();
+            const empty = { type: 'IsEmptyExpression', target: left } as any;
+            left = { type: 'UnaryExpression', operator: 'not', operand: empty } as UnaryExpression;
+            continue;
+          }
+        }
+      }
       // Char-class predicates: `is a digit`, `is a letter`, `is whitespace`.
       // `a`, `digit`, `letter`, `whitespace` are plain identifiers (not reserved keywords);
       // we parse them contextually.

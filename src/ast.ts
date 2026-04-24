@@ -33,6 +33,7 @@ export type Expression = (
   | CodeOfExpression
   | CharacterFromCodeExpression
   | IsCharClassExpression
+  | IsEmptyExpression
   | EndIndexSentinel
 ) & Located;
 
@@ -264,6 +265,11 @@ export interface IsCharClassExpression {
   type: 'IsCharClassExpression';
   target: Expression;
   charClass: CharClassName;
+}
+
+export interface IsEmptyExpression {
+  type: 'IsEmptyExpression';
+  target: Expression;
 }
 
 export interface ReadFileStatement {

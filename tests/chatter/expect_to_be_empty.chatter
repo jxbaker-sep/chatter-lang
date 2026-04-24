@@ -1,0 +1,5 @@
+expect "" to be empty
+expect "hi" to not be empty
+expect (empty list of number) to be empty
+expect list of 1 to not be empty
+say "ok"

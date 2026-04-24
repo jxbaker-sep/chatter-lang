@@ -1,0 +1,10 @@
+set s to ""
+if s is empty
+  say "yes"
+else
+  say "no"
+end if
+set t to "hi"
+if t is not empty
+  say "hi is not empty"
+end if

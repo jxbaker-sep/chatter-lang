@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-512 tests passing (plus 11 intentionally-failing stdlib_parse_* tests tracked separately). Total: 534 (512 + 11 + 11 `end` sentinel golden tests).
+550 tests passing (plus 6 intentionally-failing stdlib_trim_* tests tracked separately). Total: 556.
 
 ## Language spec (current)
 
@@ -81,6 +81,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
       - `expect X to not be Y` ≡ `expect X is not Y`
       - `expect X to be less than Y` / `to be greater than Y` / `to be at least Y` / `to be at most Y`
       - `expect X to be a digit` / `to be a letter` / `to be whitespace`
+      - `expect X to be empty` / `to not be empty` (polymorphic over strings and lists)
       - `be` is NOT a reserved keyword; parsed contextually after `to` (or `to not`). `to` is already reserved.
   - Predicate must evaluate to boolean at runtime (`expect requires a boolean, got X` otherwise).
   - On failure without a message: throws `expect failed: <source-echo>` where `<source-echo>` is the original source text of the predicate (including the `to be` wording if that form was used).
@@ -177,6 +178,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 ### Strings (v1: tiers 1+2, plus char primitives)
 - **Concat** `&` — binary OP, **lower precedence than `+`/`-`** (own level between equality and additive), left-assoc. Both sides coerced to string (`String(n)` for numbers, `"true"`/`"false"` for booleans, `say`-style `[...]` formatter for lists). Always returns string. Never a type error. Example: `"x=" & 1 + 2` → `"x=3"` because `+` binds tighter than `&`.
 - **`length of S`** — polymorphic with list; returns character count.
+- **`S is empty`** / **`S is not empty`** — polymorphic with list; true iff `length of S` equals 0 (respectively > 0). Compile error when `S` is statically known to be non-string and non-list; runtime error ("'is empty' requires a string or list, got X") when the static type is unknown and the value is neither. Does NOT update `it`.
 - **`S contains T`** — polymorphic with list; both sides must be strings (enforced statically when LHS type is known-string; runtime error otherwise). `""` contains `""` → true.
 - **`character N of S`** — 1-indexed char access; OOB/non-string/non-number → runtime error. `N` may use the `end` index sentinel (see below).
 - **`characters A to B of S`** — inclusive substring. `A > B` → `""`. `A < 1` or `B > length` → runtime error. Both `A` and `B` may use the `end` index sentinel (see below).
@@ -211,6 +213,7 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
   - `first item of L` — sugar for `item 1 of L`; empty → runtime error.
   - `last item of L` — sugar for `item (length) of L`; empty → runtime error.
   - `length of L` — returns number.
+  - `L is empty` / `L is not empty` — polymorphic with string; same semantics (and same compile/runtime checks) as the string form.
   - `L contains V` — binary predicate at equality precedence (same level as `is`); left-associative.
   - `of` on the right-hand side binds tight — `item 3 of L + 1` means `(item 3 of L) + 1`.
 - **Mutation statements** (all forbid readonly targets; emit compile error for non-list / non-existent bindings):
@@ -271,6 +274,7 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
 - `CHAR_CODE` — pop string, push Unicode code point (number). Errors: non-string, empty, or more than one code point (`code of requires a single character, got "..."`).
 - `CHAR_FROM_CODE` — pop number, push one-code-point string via `String.fromCodePoint`. Errors: non-number, non-integer, `< 0` or `> 0x10FFFF`, or in surrogate range `0xD800..0xDFFF`.
 - `IS_DIGIT` / `IS_LETTER` / `IS_WHITESPACE` — pop string, push boolean. Ranges are ASCII-only: `0-9`, `A-Za-z`, and `{space, tab, LF, CR}` respectively. Errors: non-string, empty, or multi-code-point (same check as `CHAR_CODE`).
+- `IS_EMPTY` — pop string or list, push boolean (`length === 0`). Runtime error on any other type (`Type mismatch: 'is empty' requires a string or list, got X`).
 
 `ChatterValue = number | string | boolean | ChatterList`, where `ChatterList = { kind:'list'; element; items: ChatterValue[] }`. Readonly-ness is **never** stored at runtime — it's purely a compile-time property.
 

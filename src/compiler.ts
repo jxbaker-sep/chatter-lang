@@ -1362,6 +1362,19 @@ export class Compiler {
         }
         break;
       }
+      case 'IsEmptyExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null
+            && !(tt.kind === 'scalar' && tt.name === 'string')
+            && tt.kind !== 'list') {
+          throw new CompileError(
+            `'is empty' requires a string or list, got ${typeToString(tt)}`,
+          this.currentLoc);
+        }
+        this.compileExpr(expr.target, out, bindings);
+        this.emit(out, { op: 'IS_EMPTY' });
+        break;
+      }
     }
   }
 
@@ -1523,6 +1536,8 @@ export class Compiler {
       case 'CharacterFromCodeExpression':
         return { kind: 'scalar', name: 'string' };
       case 'IsCharClassExpression':
+        return { kind: 'scalar', name: 'boolean' };
+      case 'IsEmptyExpression':
         return { kind: 'scalar', name: 'boolean' };
       default:
         return null;

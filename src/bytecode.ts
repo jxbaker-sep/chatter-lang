@@ -51,6 +51,7 @@ export type InstructionKind =
   | { op: 'CHAR_CODE' }       // pop string (single code point), push code point number
   | { op: 'CHAR_FROM_CODE' }  // pop number (0..0x10FFFF, no surrogates), push 1-code-point string
   | { op: 'IS_DIGIT' }        // pop string, push boolean
+  | { op: 'IS_EMPTY' }        // pop string or list, push boolean (true iff length 0)
   | { op: 'IS_LETTER' }       // pop string, push boolean
   | { op: 'IS_WHITESPACE' }   // pop string, push boolean
   | { op: 'EXPECT'; source: string }

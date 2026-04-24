@@ -1,0 +1,6 @@
+var xs is list of 1, 2, 3
+repeat while xs is not empty
+  remove item 1 from xs
+end repeat
+say length of xs
+say xs is empty

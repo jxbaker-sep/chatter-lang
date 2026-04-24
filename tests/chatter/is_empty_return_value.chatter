@@ -1,0 +1,7 @@
+function blank takes string s returns boolean is
+  return s is empty
+end function
+blank ""
+say it
+blank "x"
+say it
