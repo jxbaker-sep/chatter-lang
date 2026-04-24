@@ -1,0 +1,12 @@
+# Chatter standard library: strings
+#
+# String manipulation functions written in Chatter itself.
+# Stubs live here until the real implementations are written by hand.
+
+# parse: convert a string of digits (with optional leading '-') into a number.
+# Accepts "42", "-7", "0".
+# Runtime error on anything else: empty, whitespace, '+' sign, decimal, non-digit chars, lone '-'.
+export function parse takes string s returns number is
+  # TODO: implement by hand
+  return 0
+end function
