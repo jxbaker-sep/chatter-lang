@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-493 tests, all passing.
+512 tests passing (plus 11 intentionally-failing stdlib_parse_* tests tracked separately).
 
 ## Language spec (current)
 
@@ -73,6 +73,23 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `repeat with i from A to B ... end [repeat]` — inclusive range loop. `i` is block-scoped (mutable across iterations, invisible after loop). `i` cannot shadow outer bindings (compile error). `set i to ...` inside body also a compile error (duplicate binding). If A > B, zero iterations.
 - `repeat while cond ... end [repeat]` — pre-test while loop. `cond` must be a boolean (runtime error otherwise). Note: without mutable state, rarely useful for now.
 - All three variants accept either `end` or `end repeat`.
+- `expect PREDICATE [, MSG_EXPR]` — assertion statement.
+  - `PREDICATE` forms:
+    - Any boolean expression: `expect c is a digit`, `expect n > 0 and n < 10` (via existing ops), `expect list contains 5`, etc.
+    - `to be` sugar (standalone statement only — not an expression), equivalent to the matching `is`-form:
+      - `expect X to be Y` ≡ `expect X is Y`
+      - `expect X to not be Y` ≡ `expect X is not Y`
+      - `expect X to be less than Y` / `to be greater than Y` / `to be at least Y` / `to be at most Y`
+      - `expect X to be a digit` / `to be a letter` / `to be whitespace`
+      - `be` is NOT a reserved keyword; parsed contextually after `to` (or `to not`). `to` is already reserved.
+  - Predicate must evaluate to boolean at runtime (`expect requires a boolean, got X` otherwise).
+  - On failure without a message: throws `expect failed: <source-echo>` where `<source-echo>` is the original source text of the predicate (including the `to be` wording if that form was used).
+  - **Optional message clause** `, MSG_EXPR`:
+    - Comma is literal and required when present.
+    - `MSG_EXPR` must evaluate to a string. Statically-known non-string → compile error (`expect message must be a string, got X`). Runtime non-string → `expect message must be a string, got X` runtime error.
+    - **Lazy evaluation**: the message is evaluated ONLY when the predicate fails. On success it is not evaluated at all (so `expect true, character 100 of "hi"` never raises).
+    - On failure with a message, the error is `expect failed: <msg>` — the author-provided string REPLACES the source-echo. The `expect failed:` prefix is unchanged.
+  - `expect` does NOT update `it`.
 
 ### Expressions
 - Arithmetic: `+ - * / ** mod`. Standard precedence: `**` > `*/ mod` > `+-`. `mod` is a keyword, same precedence as `*` and `/`, left-associative. **Floored-division modulo** (sign follows divisor, à la Python/Ruby). Result of `a mod b` (when `b > 0`) is always in `[0, b)`. Runtime error on `mod 0`.
@@ -218,6 +235,9 @@ One file = one module. The file path (normalized absolute) identifies the module
 `DROP` — pops and discards stack top; emitted after `CALL` at **void-function call sites** (void fns still emit a trailing `PUSH_INT 0; RETURN` so the stack stays balanced; caller discards it and does NOT update `it`).
 `CHECK_TYPE` (expected, context) — peeks the stack top and throws `RuntimeError("Type mismatch: <context> (expected X, got Y)")` when the type doesn't match. Emitted in typed-function `return EXPR` when the expression's static type is unknown.
 `ERROR` (message) — throws a RuntimeError with the given message; used by the compiler to emit runtime-check branches (e.g., negative `repeat` count).
+`EXPECT` (source) — pops a value; if not boolean, throws "expect requires a boolean, got X"; if false, throws "expect failed: <source>". Used for the bare-form `expect PREDICATE` with no message clause.
+`EXPECT_BOOL_CHECK` — peeks the stack top; throws "expect requires a boolean, got X" if not boolean. Stack unchanged. Used as a type guard for the message-form of expect before `JUMP_IF_FALSE` branches on the value.
+`EXPECT_FAIL_WITH_MSG` — pops a string; throws "expect failed: <string>". Throws "expect message must be a string, got X" if not a string. Emitted only on the failure branch of `expect PREDICATE, MSG_EXPR`.
 `DELETE` — removes a local from the current frame; used to scope loop variables.
 `LT` / `LE` / `GT` / `GE` — numeric comparison; RuntimeError on non-numbers.
 `STORE_VAR` — type-locked store for mutable `var` bindings. On first store in a frame it records the value's type (number/string/boolean/`list:<element>`); on subsequent stores (from `change` or the arithmetic sugar) it checks the value's type matches the locked type and throws a RuntimeError if not. Each call frame has its own varTypes map, so recursive calls re-lock per invocation.

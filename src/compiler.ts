@@ -300,8 +300,42 @@ export class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
+    if (!stmt.message) {
+      this.compileExpr(stmt.expression, out, bindings);
+      this.emit(out, { op: 'EXPECT', source: stmt.source });
+      return;
+    }
+
+    // Statically reject non-string messages.
+    const mt = this.staticType(stmt.message, bindings);
+    if (mt && !(mt.kind === 'scalar' && mt.name === 'string')) {
+      throw new CompileError(
+        `expect message must be a string, got ${typeToString(mt)}`,
+        this.currentLoc,
+      );
+    }
+
+    // Emitted shape (message evaluated lazily, only on failure):
+    //   <eval predicate>
+    //   EXPECT_BOOL_CHECK         ; throws "expect requires a boolean, got X" if non-bool; peeks
+    //   JUMP_IF_FALSE L_fail      ; pops; branch if false
+    //   JUMP L_end
+    // L_fail:
+    //   <eval message>            ; pushes string (runtime type check below)
+    //   EXPECT_FAIL_WITH_MSG      ; pops string, throws "expect failed: <msg>"
+    // L_end:
     this.compileExpr(stmt.expression, out, bindings);
-    this.emit(out, { op: 'EXPECT', source: stmt.source });
+    this.emit(out, { op: 'EXPECT_BOOL_CHECK' });
+    const jmpFail = out.length;
+    this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
+    const jmpEnd = out.length;
+    this.emit(out, { op: 'JUMP', target: -1 });
+    const failLabel = out.length;
+    this.compileExpr(stmt.message, out, bindings);
+    this.emit(out, { op: 'EXPECT_FAIL_WITH_MSG' });
+    const endLabel = out.length;
+    (out[jmpFail] as any).target = failLabel;
+    (out[jmpEnd] as any).target = endLabel;
   }
 
   private compileReadFileStatement(

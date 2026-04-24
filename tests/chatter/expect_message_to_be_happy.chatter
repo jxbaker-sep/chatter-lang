@@ -1,0 +1,2 @@
+expect 5 to be at least 0, "should not fire"
+say "ok"

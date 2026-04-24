@@ -54,6 +54,8 @@ export type InstructionKind =
   | { op: 'IS_LETTER' }       // pop string, push boolean
   | { op: 'IS_WHITESPACE' }   // pop string, push boolean
   | { op: 'EXPECT'; source: string }
+  | { op: 'EXPECT_BOOL_CHECK' }       // peeks top; throws "expect requires a boolean, got X" if not boolean
+  | { op: 'EXPECT_FAIL_WITH_MSG' }    // pops string message; throws "expect failed: <msg>"
   | { op: 'ERROR'; message: string };
 
 export type Instruction = InstructionKind & { loc?: SourceLocation };

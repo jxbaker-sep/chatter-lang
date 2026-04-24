@@ -199,7 +199,29 @@ export function parse(tokens: Token[], source?: string): Program {
   function parseExpectStatement(): ExpectStatement {
     consume('KEYWORD', 'expect');
     const startTok = peek();
-    const expression = parseExpression();
+    let expression = parseExpression();
+
+    // Optional `to be ...` / `to not be ...` sugar that builds the same AST
+    // as the `is`-form. `be` is NOT a reserved keyword; parsed contextually
+    // after `to` (or after `to not`).
+    if (peek().type === 'KEYWORD' && peek().value === 'to') {
+      const t1 = tokens[pos + 1];
+      const t2 = tokens[pos + 2];
+      if (t1?.type === 'IDENT' && t1.value === 'be') {
+        advance(); // consume `to`
+        advance(); // consume `be`
+        expression = parseToBeTail(expression, /*negated*/ false);
+      } else if (t1?.type === 'KEYWORD' && t1.value === 'not'
+          && t2?.type === 'IDENT' && t2.value === 'be') {
+        advance(); // consume `to`
+        advance(); // consume `not`
+        advance(); // consume `be`
+        // `to not be Y` → `left != right`
+        const right = parseConcat();
+        expression = { type: 'BinaryExpression', operator: '!=', left: expression, right } as BinaryExpression;
+      }
+    }
+
     const endTok = tokens[pos - 1];
     let snippet: string;
     if (sourceLines && startTok.line === endTok.line && startTok.line >= 1 && startTok.line <= sourceLines.length) {
@@ -214,8 +236,77 @@ export function parse(tokens: Token[], source?: string): Program {
       }
       snippet = parts.join(' ');
     }
+
+    // Optional `, MSG_EXPR` trailing message clause.
+    let message: Expression | undefined;
+    if (peek().type === 'COMMA') {
+      advance();
+      message = parseExpression();
+    }
+
     consumeNewline();
-    return { type: 'ExpectStatement', expression, source: snippet };
+    return { type: 'ExpectStatement', expression, source: snippet, message };
+  }
+
+  // Parse the tail after `to be`, returning a comparison/char-class AST node
+  // against `left`. Supports:
+  //   to be Y                         (==)
+  //   to not be Y                     (!=)   -- note: `not` appears before `be`
+  //   to be less than Y               (<)
+  //   to be greater than Y            (>)
+  //   to be at least Y                (>=)
+  //   to be at most Y                 (<=)
+  //   to be a digit / a letter
+  //   to be whitespace
+  //
+  // Called with the `to` and `be` already consumed (for the positive forms).
+  // The `to not be` form is handled here too, re-routed before consuming `be`.
+  function parseToBeTail(left: Expression, _negated: boolean): Expression {
+    // Char-class predicates: `a digit`, `a letter`, `whitespace`
+    {
+      const n0 = peek();
+      const n1 = tokens[pos + 1];
+      if (n0.type === 'IDENT' && n0.value === 'a'
+          && n1?.type === 'IDENT' && (n1.value === 'digit' || n1.value === 'letter')) {
+        advance(); advance();
+        const klass = n1.value as 'digit' | 'letter';
+        return { type: 'IsCharClassExpression', target: left, charClass: klass } as any;
+      }
+      if (n0.type === 'IDENT' && n0.value === 'whitespace') {
+        advance();
+        return { type: 'IsCharClassExpression', target: left, charClass: 'whitespace' } as any;
+      }
+    }
+
+    // Comparison modifiers (parallel to the `is`-form handling in parseEquality).
+    let op: '==' | '!=' | '<' | '<=' | '>' | '>=' = '==';
+    const next = peek();
+    if (next.type === 'KEYWORD' && next.value === 'less') {
+      advance();
+      consume('KEYWORD', 'than');
+      op = '<';
+    } else if (next.type === 'KEYWORD' && next.value === 'greater') {
+      advance();
+      consume('KEYWORD', 'than');
+      op = '>';
+    } else if (next.type === 'KEYWORD' && next.value === 'at') {
+      advance();
+      const after = peek();
+      if (after.type === 'KEYWORD' && after.value === 'least') {
+        advance();
+        op = '>=';
+      } else if (after.type === 'KEYWORD' && after.value === 'most') {
+        advance();
+        op = '<=';
+      } else {
+        throw new ParseError(
+          `Expected 'least' or 'most' after 'to be at', got ${after.type} '${after.value}'`,
+          after,
+        );
+      }
+    }
+    const right = parseConcat();
+    return { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
   }
 
   function parseSetStatement(): SetStatement {

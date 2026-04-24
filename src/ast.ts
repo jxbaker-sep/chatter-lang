@@ -270,6 +270,7 @@ export interface ExpectStatement {
   type: 'ExpectStatement';
   expression: Expression;
   source: string;
+  message?: Expression;
 }
 
 export interface AppendStatement {

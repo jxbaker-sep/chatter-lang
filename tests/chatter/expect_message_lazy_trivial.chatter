@@ -1,0 +1,2 @@
+expect true, "never fires"
+say "ok"

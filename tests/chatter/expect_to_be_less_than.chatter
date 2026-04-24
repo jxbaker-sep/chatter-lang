@@ -1,0 +1,2 @@
+expect 3 to be less than 5
+say "ok"

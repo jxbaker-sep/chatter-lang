@@ -305,6 +305,25 @@ export class VM {
         break;
       }
 
+      case 'EXPECT_BOOL_CHECK': {
+        if (this.stack.length === 0) {
+          throw new RuntimeError('Stack underflow in EXPECT_BOOL_CHECK', instr.loc);
+        }
+        const v = this.stack[this.stack.length - 1];
+        if (typeof v !== 'boolean') {
+          throw new RuntimeError(`expect requires a boolean, got ${describe(v)}`, instr.loc);
+        }
+        break;
+      }
+
+      case 'EXPECT_FAIL_WITH_MSG': {
+        const m = this.pop();
+        if (typeof m !== 'string') {
+          throw new RuntimeError(`expect message must be a string, got ${describe(m)}`, instr.loc);
+        }
+        throw new RuntimeError(`expect failed: ${m}`, instr.loc);
+      }
+
       case 'DROP': {
         this.pop();
         break;

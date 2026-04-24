@@ -1,0 +1,2 @@
+expect 5 to be 5
+say "ok"

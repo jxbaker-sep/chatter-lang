@@ -1,0 +1,2 @@
+set c to "x"
+expect c is a digit, "expected digit, got " & c
