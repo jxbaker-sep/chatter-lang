@@ -30,6 +30,9 @@ export type Expression = (
   | LastCharacterExpression
   | SubstringExpression
   | ReadFileLinesExpression
+  | CodeOfExpression
+  | CharacterFromCodeExpression
+  | IsCharClassExpression
 ) & Located;
 
 export type Statement = (
@@ -238,6 +241,24 @@ export interface SubstringExpression {
 export interface ReadFileLinesExpression {
   type: 'ReadFileLinesExpression';
   path: Expression;
+}
+
+export interface CodeOfExpression {
+  type: 'CodeOfExpression';
+  target: Expression;
+}
+
+export interface CharacterFromCodeExpression {
+  type: 'CharacterFromCodeExpression';
+  code: Expression;
+}
+
+export type CharClassName = 'digit' | 'letter' | 'whitespace';
+
+export interface IsCharClassExpression {
+  type: 'IsCharClassExpression';
+  target: Expression;
+  charClass: CharClassName;
 }
 
 export interface ReadFileStatement {

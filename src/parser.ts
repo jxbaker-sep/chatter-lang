@@ -774,6 +774,27 @@ export function parse(tokens: Token[], source?: string): Program {
         continue;
       }
       advance(); // consume `is`
+      // Char-class predicates: `is a digit`, `is a letter`, `is whitespace`.
+      // `a`, `digit`, `letter`, `whitespace` are plain identifiers (not reserved keywords);
+      // we parse them contextually.
+      {
+        const n0 = peek();
+        const n1 = tokens[pos + 1];
+        // `is a digit` / `is a letter`
+        if (n0.type === 'IDENT' && n0.value === 'a'
+            && n1?.type === 'IDENT' && (n1.value === 'digit' || n1.value === 'letter')) {
+          advance(); advance();
+          const klass = n1.value as 'digit' | 'letter';
+          left = { type: 'IsCharClassExpression', target: left, charClass: klass } as any;
+          continue;
+        }
+        // `is whitespace`
+        if (n0.type === 'IDENT' && n0.value === 'whitespace') {
+          advance();
+          left = { type: 'IsCharClassExpression', target: left, charClass: 'whitespace' } as any;
+          continue;
+        }
+      }
       let op: '==' | '!=' | '<' | '<=' | '>' | '>=' = '==';
       const next = peek();
       if (next.type === 'KEYWORD' && next.value === 'not') {
@@ -958,7 +979,15 @@ export function parse(tokens: Token[], source?: string): Program {
         return { type: 'LengthExpression', target } as LengthExpression;
       }
       if (tok.value === 'character') {
+        // Two forms:
+        //   `character N of S`     → CharacterAccessExpression (existing)
+        //   `character of N`       → CharacterFromCodeExpression (new, code point → string)
         advance();
+        if (peek().type === 'KEYWORD' && peek().value === 'of') {
+          advance();
+          const code = parsePrimary();
+          return { type: 'CharacterFromCodeExpression', code } as any;
+        }
         const index = parseExpression();
         consume('KEYWORD', 'of');
         const target = parsePrimary();
@@ -994,6 +1023,15 @@ export function parse(tokens: Token[], source?: string): Program {
     }
 
     if (tok.type === 'IDENT') {
+      // Contextual `code of EXPR` — new expression primitive (code point of a single-char string).
+      // `code` is NOT a reserved keyword: only fires when followed by `of`, so user variables
+      // named `code` still work.
+      if (tok.value === 'code' && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
+        advance(); // consume 'code'
+        advance(); // consume 'of'
+        const target = parsePrimary();
+        return { type: 'CodeOfExpression', target } as any;
+      }
       advance();
       if (tok.value === 'it') {
         return { type: 'ItExpression' } as ItExpression;

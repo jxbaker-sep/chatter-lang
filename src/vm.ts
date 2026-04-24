@@ -26,6 +26,16 @@ function describe(v: ChatterValue): string {
   return typeof v;
 }
 
+// Return the single Unicode code point if `s` contains exactly one code point;
+// otherwise null. Handles 4-byte code points (surrogate pairs) correctly.
+function singleCodePoint(s: string): number | null {
+  if (s.length === 0) return null;
+  const cp = s.codePointAt(0)!;
+  const width = cp > 0xFFFF ? 2 : 1;
+  if (s.length !== width) return null;
+  return cp;
+}
+
 function formatScalar(v: number | string | boolean): string {
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   if (typeof v === 'number') return String(v);
@@ -616,6 +626,74 @@ export class VM {
         const items = content.length === 0 ? [] : content.split(/\r\n|\n/);
         const list: ChatterList = { kind: 'list', element: 'string', items };
         this.stack.push(list);
+        break;
+      }
+
+      case 'CHAR_CODE': {
+        const s = this.pop();
+        if (typeof s !== 'string') {
+          throw new RuntimeError(
+            `Type mismatch: 'code of' requires a string, got ${describe(s)}`, instr.loc);
+        }
+        const cp = singleCodePoint(s);
+        if (cp === null) {
+          throw new RuntimeError(
+            `code of requires a single character, got ${JSON.stringify(s)}`, instr.loc);
+        }
+        this.stack.push(cp);
+        break;
+      }
+
+      case 'CHAR_FROM_CODE': {
+        const n = this.pop();
+        if (typeof n !== 'number') {
+          throw new RuntimeError(
+            `Type mismatch: 'character of' requires a number, got ${describe(n)}`, instr.loc);
+        }
+        if (!Number.isInteger(n)) {
+          throw new RuntimeError(
+            `character of requires an integer code point, got ${n}`, instr.loc);
+        }
+        if (n < 0 || n > 0x10FFFF) {
+          throw new RuntimeError(
+            `character of requires 0..0x10FFFF, got ${n}`, instr.loc);
+        }
+        if (n >= 0xD800 && n <= 0xDFFF) {
+          throw new RuntimeError(
+            `character of surrogate halves (0xD800..0xDFFF) are not valid code points, got ${n}`, instr.loc);
+        }
+        this.stack.push(String.fromCodePoint(n));
+        break;
+      }
+
+      case 'IS_DIGIT':
+      case 'IS_LETTER':
+      case 'IS_WHITESPACE': {
+        const s = this.pop();
+        if (typeof s !== 'string') {
+          const label = instr.op === 'IS_DIGIT' ? 'is a digit'
+                      : instr.op === 'IS_LETTER' ? 'is a letter'
+                      : 'is whitespace';
+          throw new RuntimeError(
+            `Type mismatch: '${label}' requires a string, got ${describe(s)}`, instr.loc);
+        }
+        const cp = singleCodePoint(s);
+        if (cp === null) {
+          const label = instr.op === 'IS_DIGIT' ? 'is a digit'
+                      : instr.op === 'IS_LETTER' ? 'is a letter'
+                      : 'is whitespace';
+          throw new RuntimeError(
+            `'${label}' requires a single character, got ${JSON.stringify(s)}`, instr.loc);
+        }
+        let result: boolean;
+        if (instr.op === 'IS_DIGIT') {
+          result = cp >= 0x30 && cp <= 0x39;
+        } else if (instr.op === 'IS_LETTER') {
+          result = (cp >= 0x41 && cp <= 0x5A) || (cp >= 0x61 && cp <= 0x7A);
+        } else {
+          result = cp === 0x20 || cp === 0x09 || cp === 0x0A || cp === 0x0D;
+        }
+        this.stack.push(result);
         break;
       }
     }

@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-460 tests, all passing.
+488 tests, all passing.
 
 ## Language spec (current)
 
@@ -150,13 +150,22 @@ One file = one module. The file path (normalized absolute) identifies the module
 - **Errors**: file not found, permission denied, etc. surface as runtime error `"could not read file '<path>': <code-or-message>"`.
 - **Writing files** is future work.
 
-### Strings (v1: tiers 1+2)
+### Strings (v1: tiers 1+2, plus char primitives)
 - **Concat** `&` — binary OP, **lower precedence than `+`/`-`** (own level between equality and additive), left-assoc. Both sides coerced to string (`String(n)` for numbers, `"true"`/`"false"` for booleans, `say`-style `[...]` formatter for lists). Always returns string. Never a type error. Example: `"x=" & 1 + 2` → `"x=3"` because `+` binds tighter than `&`.
 - **`length of S`** — polymorphic with list; returns character count.
 - **`S contains T`** — polymorphic with list; both sides must be strings (enforced statically when LHS type is known-string; runtime error otherwise). `""` contains `""` → true.
 - **`character N of S`** — 1-indexed char access; OOB/non-string/non-number → runtime error.
 - **`characters A to B of S`** — inclusive substring. `A > B` → `""`. `A < 1` or `B > length` → runtime error.
 - **`first character of S`** / **`last character of S`** — sugar (parse to dedicated AST nodes). Empty string → runtime error. `last` uses a compiler temp to avoid double-evaluating the target (parallel with `last item of`).
+- **Character primitives (Phase 1)**:
+  - **`code of S`** — expression form. Returns the Unicode code point (0..0x10FFFF) of a single-code-point string. Runtime error on empty or multi-code-point strings. `code` is **not** a reserved keyword — parsed contextually when followed by `of`; any existing user variable named `code` still works (e.g. `set code to 5` / `say code`). Compile error when `S` is statically non-string. Does NOT update `it`.
+  - **`character of N`** — expression form (parallel to the existing `character N of S`; disambiguated by `of` coming immediately after `character`). Returns a one-code-point string built from code point `N`. Runtime error on non-integer, negative, `> 0x10FFFF`, or surrogate halves `0xD800..0xDFFF`. Compile error when `N` is statically non-number. Does NOT update `it`.
+  - **Char-class predicates** (infix at `is` precedence):
+    - `S is a digit` — true iff `S` is a single-code-point string whose code point is in `'0'..'9'` (0x30..0x39).
+    - `S is a letter` — true iff single-code-point string in `'A'..'Z'` or `'a'..'z'`.
+    - `S is whitespace` — true iff single-code-point string equal to space (0x20), tab (0x09), LF (0x0A), or CR (0x0D).
+    - Runtime error on empty or multi-code-point `S`; compile error when statically non-string.
+    - `a`, `digit`, `letter`, `whitespace` are **not** reserved; parsed contextually after `is` / `is a`. These are boolean expressions and do not update `it`.
 - **Static checks**: `character/characters/first character/last character of X` with statically-known non-string `X` → compile error. `contains` with string LHS + non-string RHS (static) → compile error.
 - **`&` is the only new OP token.** Lexer change: `+-*/&`.
 
@@ -221,6 +230,9 @@ One file = one module. The file path (normalized absolute) identifies the module
 - `LIST_INSERT` — pop value, pop index, pop list, splice-in at 1-indexed position (valid range 1..length+1).
 - `LIST_REMOVE` — pop index, pop list, splice-out at 1-indexed position.
 - `READ_FILE_LINES` — pop path string, read file (CWD-relative, utf-8), split on `\n` / `\r\n`, strip exactly one trailing newline, push a fresh mutable `list of string`. Empty file → `[]`. Errors: non-string path, any `fs.readFileSync` failure (`could not read file '<path>': <code>`).
+- `CHAR_CODE` — pop string, push Unicode code point (number). Errors: non-string, empty, or more than one code point (`code of requires a single character, got "..."`).
+- `CHAR_FROM_CODE` — pop number, push one-code-point string via `String.fromCodePoint`. Errors: non-number, non-integer, `< 0` or `> 0x10FFFF`, or in surrogate range `0xD800..0xDFFF`.
+- `IS_DIGIT` / `IS_LETTER` / `IS_WHITESPACE` — pop string, push boolean. Ranges are ASCII-only: `0-9`, `A-Za-z`, and `{space, tab, LF, CR}` respectively. Errors: non-string, empty, or multi-code-point (same check as `CHAR_CODE`).
 
 `ChatterValue = number | string | boolean | ChatterList`, where `ChatterList = { kind:'list'; element; items: ChatterValue[] }`. Readonly-ness is **never** stored at runtime — it's purely a compile-time property.
 

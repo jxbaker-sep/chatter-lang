@@ -1207,6 +1207,44 @@ export class Compiler {
         this.emit(out, { op: 'READ_FILE_LINES' });
         break;
       }
+      case 'CodeOfExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
+          throw new CompileError(
+            `'code of' requires a string, got ${typeToString(tt)}`,
+          this.currentLoc);
+        }
+        this.compileExpr(expr.target, out, bindings);
+        this.emit(out, { op: 'CHAR_CODE' });
+        break;
+      }
+      case 'CharacterFromCodeExpression': {
+        const tt = this.staticType(expr.code, bindings);
+        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'number')) {
+          throw new CompileError(
+            `'character of' requires a number, got ${typeToString(tt)}`,
+          this.currentLoc);
+        }
+        this.compileExpr(expr.code, out, bindings);
+        this.emit(out, { op: 'CHAR_FROM_CODE' });
+        break;
+      }
+      case 'IsCharClassExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
+          const article = expr.charClass === 'whitespace' ? '' : 'a ';
+          throw new CompileError(
+            `'is ${article}${expr.charClass}' requires a string, got ${typeToString(tt)}`,
+          this.currentLoc);
+        }
+        this.compileExpr(expr.target, out, bindings);
+        switch (expr.charClass) {
+          case 'digit':      this.emit(out, { op: 'IS_DIGIT' }); break;
+          case 'letter':     this.emit(out, { op: 'IS_LETTER' }); break;
+          case 'whitespace': this.emit(out, { op: 'IS_WHITESPACE' }); break;
+        }
+        break;
+      }
     }
   }
 
@@ -1361,6 +1399,12 @@ export class Compiler {
         return { kind: 'scalar', name: 'string' };
       case 'ReadFileLinesExpression':
         return { kind: 'list', element: 'string', readonly: false };
+      case 'CodeOfExpression':
+        return { kind: 'scalar', name: 'number' };
+      case 'CharacterFromCodeExpression':
+        return { kind: 'scalar', name: 'string' };
+      case 'IsCharClassExpression':
+        return { kind: 'scalar', name: 'boolean' };
       default:
         return null;
     }

@@ -48,6 +48,11 @@ export type InstructionKind =
   | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate
   | { op: 'LIST_REMOVE' }     // pop index, pop list, mutate
   | { op: 'READ_FILE_LINES' } // pop path string, push list of string
+  | { op: 'CHAR_CODE' }       // pop string (single code point), push code point number
+  | { op: 'CHAR_FROM_CODE' }  // pop number (0..0x10FFFF, no surrogates), push 1-code-point string
+  | { op: 'IS_DIGIT' }        // pop string, push boolean
+  | { op: 'IS_LETTER' }       // pop string, push boolean
+  | { op: 'IS_WHITESPACE' }   // pop string, push boolean
   | { op: 'EXPECT'; source: string }
   | { op: 'ERROR'; message: string };
 
