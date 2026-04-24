@@ -1,0 +1,13 @@
+var outer is 0
+var inner_total is 0
+repeat with i from 1 to 3
+  change outer to i
+  repeat with j from 1 to 10
+    if j is 4
+      exit repeat
+    end if
+    add 1 to inner_total
+  end repeat
+end repeat
+say outer
+say inner_total

@@ -12,6 +12,7 @@ import {
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement,
+  ExitRepeatStatement, NextRepeatStatement,
 } from './ast';
 import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
 import { ChatterError, SourceLocation } from './errors';
@@ -111,6 +112,13 @@ export class Compiler {
   private imports: Map<string, ImportedFunction> = new Map();
   private localFunctions = new Map<string, FunctionDeclaration>();
   private endLenTmpStack: string[] = [];
+
+  // Loop control stack: each entry records pending JUMP instruction indices
+  // that must be patched to the loop's continue / exit targets.
+  private loopStack: Array<{
+    continueJumps: number[];
+    exitJumps: number[];
+  }> = [];
 
   private get currentLoc(): SourceLocation | undefined {
     return this.locStack[this.locStack.length - 1];
@@ -312,6 +320,32 @@ export class Compiler {
       case 'UseStatement':
         // Module system handled at loader level; nothing to emit here.
         break;
+      case 'ExitRepeatStatement': {
+        if (this.loopStack.length === 0) {
+          throw new CompileError(
+            `'exit repeat' outside of a repeat loop`,
+            this.currentLoc,
+          );
+        }
+        const frame = this.loopStack[this.loopStack.length - 1];
+        const idx = out.length;
+        this.emit(out, { op: 'JUMP', target: -1 });
+        frame.exitJumps.push(idx);
+        break;
+      }
+      case 'NextRepeatStatement': {
+        if (this.loopStack.length === 0) {
+          throw new CompileError(
+            `'next repeat' outside of a repeat loop`,
+            this.currentLoc,
+          );
+        }
+        const frame = this.loopStack[this.loopStack.length - 1];
+        const idx = out.length;
+        this.emit(out, { op: 'JUMP', target: -1 });
+        frame.continueJumps.push(idx);
+        break;
+      }
     }
   }
 
@@ -838,16 +872,27 @@ export class Compiler {
       const jifEndIdx = out.length;
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
+      const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
+      this.loopStack.push(frame);
       for (const s of stmt.body) {
         this.compileStatement(s, out, bindings);
       }
+      this.loopStack.pop();
 
+      const continueIdx = out.length;
       this.emit(out, { op: 'LOAD', name: counter });
       this.emit(out, { op: 'PUSH_INT', value: 1 });
       this.emit(out, { op: 'ADD' });
       this.emit(out, { op: 'STORE', name: counter });
       this.emit(out, { op: 'JUMP', target: topIdx });
-      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+      const exitIdx = out.length;
+      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = exitIdx;
+      for (const j of frame.continueJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = continueIdx;
+      }
+      for (const j of frame.exitJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = exitIdx;
+      }
       return;
     }
 
@@ -922,11 +967,15 @@ export class Compiler {
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
       bindings.set(loopVar, { kind: 'loop', type: { kind: 'scalar', name: 'number' } });
+      const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
+      this.loopStack.push(frame);
       for (const s of stmt.body) {
         this.compileStatement(s, out, bindings);
       }
+      this.loopStack.pop();
       bindings.delete(loopVar);
 
+      const continueIdx = out.length;
       this.emit(out, { op: 'LOAD', name: loopVar });
       if (stepTmp !== null) {
         this.emit(out, { op: 'LOAD', name: stepTmp });
@@ -936,7 +985,14 @@ export class Compiler {
       this.emit(out, { op: 'ADD' });
       this.emit(out, { op: 'STORE', name: loopVar });
       this.emit(out, { op: 'JUMP', target: topIdx });
-      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+      const exitIdx = out.length;
+      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = exitIdx;
+      for (const j of frame.continueJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = continueIdx;
+      }
+      for (const j of frame.exitJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = exitIdx;
+      }
       this.emit(out, { op: 'DELETE', name: loopVar });
       this.emit(out, { op: 'DELETE', name: limit });
       if (stepTmp !== null) {
@@ -989,17 +1045,28 @@ export class Compiler {
       this.emit(out, { op: 'STORE', name: loopVar });
 
       bindings.set(loopVar, { kind: 'loop', type: elemType });
+      const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
+      this.loopStack.push(frame);
       for (const s of stmt.body) {
         this.compileStatement(s, out, bindings);
       }
+      this.loopStack.pop();
       bindings.delete(loopVar);
 
+      const continueIdx = out.length;
       this.emit(out, { op: 'LOAD', name: idxTmp });
       this.emit(out, { op: 'PUSH_INT', value: 1 });
       this.emit(out, { op: 'ADD' });
       this.emit(out, { op: 'STORE', name: idxTmp });
       this.emit(out, { op: 'JUMP', target: topIdx });
-      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+      const exitIdx = out.length;
+      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = exitIdx;
+      for (const j of frame.continueJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = continueIdx;
+      }
+      for (const j of frame.exitJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = exitIdx;
+      }
       this.emit(out, { op: 'DELETE', name: loopVar });
       this.emit(out, { op: 'DELETE', name: listTmp });
       this.emit(out, { op: 'DELETE', name: idxTmp });
@@ -1012,11 +1079,24 @@ export class Compiler {
     this.compileExpr(stmt.condition, out, bindings);
     const jifEndIdx = out.length;
     this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
+    const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
+    this.loopStack.push(frame);
     for (const s of stmt.body) {
       this.compileStatement(s, out, bindings);
     }
+    this.loopStack.pop();
+    const continueIdx = out.length;
     this.emit(out, { op: 'JUMP', target: topIdx });
-    (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+    const exitIdx = out.length;
+    (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = exitIdx;
+    for (const j of frame.continueJumps) {
+      (out[j] as { op: 'JUMP'; target: number }).target = topIdx;
+    }
+    for (const j of frame.exitJumps) {
+      (out[j] as { op: 'JUMP'; target: number }).target = exitIdx;
+    }
+    // continueIdx is emitted for symmetry but unused beyond the JUMP above.
+    void continueIdx;
   }
 
   private compileReturn(

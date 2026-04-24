@@ -1,0 +1,4 @@
+function oops is
+  exit repeat
+end function
+oops

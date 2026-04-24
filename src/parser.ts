@@ -16,6 +16,7 @@ import {
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement, UseStatement,
+  ExitRepeatStatement, NextRepeatStatement,
 } from './ast';
 
 function locOfToken(t: Token): SourceLocation {
@@ -35,7 +36,7 @@ export class ParseError extends ChatterError {
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
   'true', 'false', 'is', 'say', 'set', 'function', 'takes', 'returns', 'return',
-  'repeat', 'times', 'while',
+  'repeat', 'times', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
   'list', 'of', 'readonly', 'empty',
@@ -165,6 +166,8 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'remove':   return parseRemoveStatement();
         case 'read':     return parseReadFileStatement();
         case 'expect':   return parseExpectStatement();
+        case 'exit':     return parseExitRepeatStatement();
+        case 'next':     return parseNextRepeatStatement();
         default:
           throw new ParseError(`Unexpected keyword '${tok.value}'`, tok);
       }
@@ -623,6 +626,38 @@ export function parse(tokens: Token[], source?: string): Program {
     const value = parseExpression();
     consumeNewline();
     return { type: 'ReturnStatement', value };
+  }
+
+  function parseExitRepeatStatement(): ExitRepeatStatement {
+    const exitTok = consume('KEYWORD', 'exit');
+    const nextTok = peek();
+    if (nextTok.type !== 'KEYWORD' || nextTok.value !== 'repeat') {
+      throw new ParseError(
+        `expected 'repeat' after 'exit', got ${nextTok.type} '${nextTok.value}'`,
+        nextTok,
+      );
+    }
+    advance();
+    consumeNewline();
+    const stmt: ExitRepeatStatement = { type: 'ExitRepeatStatement' };
+    withLoc(stmt, exitTok);
+    return stmt;
+  }
+
+  function parseNextRepeatStatement(): NextRepeatStatement {
+    const nextKwTok = consume('KEYWORD', 'next');
+    const after = peek();
+    if (after.type !== 'KEYWORD' || after.value !== 'repeat') {
+      throw new ParseError(
+        `expected 'repeat' after 'next', got ${after.type} '${after.value}'`,
+        after,
+      );
+    }
+    advance();
+    consumeNewline();
+    const stmt: NextRepeatStatement = { type: 'NextRepeatStatement' };
+    withLoc(stmt, nextKwTok);
+    return stmt;
   }
 
   function parseCallStatement(): CallStatement {

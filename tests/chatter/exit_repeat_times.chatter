@@ -1,0 +1,8 @@
+var n is 0
+repeat 10 times
+  add 1 to n
+  if n is 3
+    exit repeat
+  end if
+end repeat
+say n

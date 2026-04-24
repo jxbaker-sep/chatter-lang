@@ -1,0 +1,10 @@
+var kept is 0
+var counter is 0
+repeat 6 times
+  add 1 to counter
+  if counter mod 2 is 1
+    next repeat
+  end if
+  add 1 to kept
+end repeat
+say kept

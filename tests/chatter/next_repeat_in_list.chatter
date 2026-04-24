@@ -1,0 +1,8 @@
+var total is 0
+repeat with x in list of 1, 2, 3, 4, 5, 6
+  if x mod 3 is not 0
+    next repeat
+  end if
+  add x to total
+end repeat
+say total

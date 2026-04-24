@@ -1,0 +1,13 @@
+set s to "   hello"
+var i is 1
+var found is 0
+repeat while i is at most length of s
+  if character i of s is whitespace
+    add 1 to i
+    next repeat
+  end if
+  change found to i
+  exit repeat
+end repeat
+say found
+say character found of s

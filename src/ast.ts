@@ -61,7 +61,17 @@ export type Statement = (
   | ReadFileStatement
   | ExpectStatement
   | UseStatement
+  | ExitRepeatStatement
+  | NextRepeatStatement
 ) & Located;
+
+export interface ExitRepeatStatement {
+  type: 'ExitRepeatStatement';
+}
+
+export interface NextRepeatStatement {
+  type: 'NextRepeatStatement';
+}
 
 export interface VarDeclaration {
   type: 'VarDeclaration';

@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-550 tests passing (plus 6 intentionally-failing stdlib_trim_* tests tracked separately). Total: 556.
+571 tests passing (plus 1 intentionally-failing stdlib_trim_tab_lf_cr test tracked separately). Total: 572.
 
 ## Language spec (current)
 
@@ -73,6 +73,8 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `repeat with i from A to B ... end [repeat]` — inclusive range loop. `i` is block-scoped (mutable across iterations, invisible after loop). `i` cannot shadow outer bindings (compile error). `set i to ...` inside body also a compile error (duplicate binding). If A > B, zero iterations.
 - `repeat while cond ... end [repeat]` — pre-test while loop. `cond` must be a boolean (runtime error otherwise). Note: without mutable state, rarely useful for now.
 - All three variants accept either `end` or `end repeat`.
+- `exit repeat` — immediately terminates the innermost enclosing `repeat` loop, transferring control to the statement immediately after `end repeat`. Compile error if used outside any `repeat` (including inside an `if` that is not inside a repeat, and inside a function body outside a loop). Valid inside `if` / `else` blocks nested inside a repeat. Always targets the innermost repeat. Works in all four loop forms.
+- `next repeat` — skips to the next iteration of the innermost enclosing `repeat` loop. For `N times` / `with i from A to B` / `with x in LIST`: runs the loop's increment (counter / `i` by step / index) then re-checks the bound. For `while COND`: jumps straight back to re-evaluate the condition. Same scope rules as `exit repeat`. Bare `exit` / `next` without `repeat` is a parse error.
 - `expect PREDICATE [, MSG_EXPR]` — assertion statement.
   - `PREDICATE` forms:
     - Any boolean expression: `expect c is a digit`, `expect n > 0 and n < 10` (via existing ops), `expect list contains 5`, etc.
@@ -116,6 +118,9 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 
 ### Keywords reserved for mutable vars
 `var`, `change`, `add`, `subtract`, `multiply`, `divide`, `by`
+
+### Keywords reserved for loop control
+`exit`, `next` (each only meaningful in the two-word sequences `exit repeat` / `next repeat`; bare `exit` / `next` is a parse error).
 
 ### Keywords reserved for lists
 `list`, `of`, `readonly`, `empty`, `item`, `first`, `last`, `length`, `contains`, `append`, `prepend`, `insert`, `in`, `remove`
@@ -348,7 +353,7 @@ Existing golden cases:
 ### Explicitly queued
 - **Path C**: static type checker. Would catch `5 is "hello"` at compile time, validate param types, etc. Currently Path A (runtime checks). Deferred.
 - **Fractional numbers**: planned. `number` is currently i32 only.
-- **Loop extensions (deferred)**: reverse direction (`down to`), early exit (`exit repeat`, `next repeat`), `repeat until cond`. Base `repeat` loops (times / range / while) and the `by STEP` clause on range-form are implemented.
+- **Loop extensions (deferred)**: reverse direction (`down to`), `repeat until cond`. Base `repeat` loops (times / range / while / with-in) and the `by STEP` clause on range-form are implemented; early exit (`exit repeat` / `next repeat`) is implemented.
 - **Chatter-native test framework**: write tests in Chatter (`assert x is 10`) once assertions exist.
 - **Maps**: independent built-in key-value type. Mutable. Also need a read-only variant.
 - **Sets**: independent built-in unordered unique-element collection. Mutable + readonly variant.
