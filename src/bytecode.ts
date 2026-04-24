@@ -1,4 +1,7 @@
-export type Instruction =
+import { SourceLocation } from './errors';
+
+export type InstructionKind =
+
   | { op: 'PUSH_INT'; value: number }
   | { op: 'PUSH_STR'; value: string }
   | { op: 'PUSH_BOOL'; value: boolean }
@@ -45,8 +48,10 @@ export type Instruction =
   | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate
   | { op: 'LIST_REMOVE' }     // pop index, pop list, mutate
   | { op: 'READ_FILE_LINES' } // pop path string, push list of string
-  | { op: 'EXPECT'; source: string }  // pop value; require boolean and true; runtime error otherwise
+  | { op: 'EXPECT'; source: string }
   | { op: 'ERROR'; message: string };
+
+export type Instruction = InstructionKind & { loc?: SourceLocation };
 
 export interface FunctionDef {
   name: string;

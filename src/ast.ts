@@ -4,7 +4,14 @@ export type TypeAnnotation =
   | { kind: 'scalar'; name: ScalarTypeName }
   | { kind: 'list'; element: ScalarTypeName; readonly: boolean };
 
-export type Expression =
+export interface Located {
+  line?: number;
+  col?: number;
+  length?: number;
+}
+
+export type Expression = (
+
   | BinaryExpression
   | UnaryExpression
   | IdentifierExpression
@@ -22,9 +29,11 @@ export type Expression =
   | FirstCharacterExpression
   | LastCharacterExpression
   | SubstringExpression
-  | ReadFileLinesExpression;
+  | ReadFileLinesExpression
+) & Located;
 
-export type Statement =
+export type Statement = (
+
   | SayStatement
   | SetStatement
   | VarDeclaration
@@ -41,7 +50,8 @@ export type Statement =
   | InsertStatement
   | RemoveItemStatement
   | ReadFileStatement
-  | ExpectStatement;
+  | ExpectStatement
+) & Located;
 
 export interface VarDeclaration {
   type: 'VarDeclaration';

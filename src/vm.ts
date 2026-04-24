@@ -1,9 +1,10 @@
 import { Instruction, BytecodeProgram } from './bytecode';
 import * as fs from 'fs';
+import { ChatterError, SourceLocation } from './errors';
 
-export class RuntimeError extends Error {
-  constructor(message: string) {
-    super(message);
+export class RuntimeError extends ChatterError {
+  constructor(message: string, location?: SourceLocation) {
+    super(message, location);
     this.name = 'RuntimeError';
   }
 }
@@ -112,7 +113,7 @@ export class VM {
             return;
           }
         }
-        throw new RuntimeError(`Undefined variable: '${instr.name}'`);
+        throw new RuntimeError(`Undefined variable: '${instr.name}'`, instr.loc);
       }
 
       case 'STORE': {
@@ -129,7 +130,7 @@ export class VM {
         } else if (existing !== valType) {
           throw new RuntimeError(
             `Type mismatch: cannot change '${instr.name}' (expected ${existing}, got ${valType})`,
-          );
+          instr.loc);
         }
         frame.locals.set(instr.name, val);
         break;
@@ -142,7 +143,7 @@ export class VM {
 
       case 'LOAD_IT': {
         if (frame.it === null) {
-          throw new RuntimeError("'it' is not set in current scope");
+          throw new RuntimeError("'it' is not set in current scope", instr.loc);
         }
         this.stack.push(frame.it);
         break;
@@ -164,10 +165,10 @@ export class VM {
         if (typeof a !== 'number' || typeof b !== 'number') {
           throw new RuntimeError(
             `Type mismatch: arithmetic requires numbers, got ${typeof a} and ${typeof b}`,
-          );
+          instr.loc);
         }
         if ((instr.op === 'DIV' || instr.op === 'MOD') && b === 0) {
-          throw new RuntimeError(instr.op === 'MOD' ? 'Modulo by zero' : 'Division by zero');
+          throw new RuntimeError(instr.op === 'MOD' ? 'Modulo by zero' : 'Division by zero', instr.loc);
         }
         let result: number;
         switch (instr.op) {
@@ -179,7 +180,7 @@ export class VM {
           case 'POW': result = Math.pow(a, b); break;
         }
         if (result < I32_MIN || result > I32_MAX) {
-          throw new RuntimeError(`Integer overflow: result ${result} exceeds i32 range`);
+          throw new RuntimeError(`Integer overflow: result ${result} exceeds i32 range`, instr.loc);
         }
         this.stack.push(result);
         break;
@@ -188,7 +189,7 @@ export class VM {
       case 'CALL': {
         const funcDef = this.program.functions.get(instr.name);
         if (!funcDef) {
-          throw new RuntimeError(`Undefined function: '${instr.name}'`);
+          throw new RuntimeError(`Undefined function: '${instr.name}'`, instr.loc);
         }
         // Pop args in reverse order so args[0] corresponds to params[0].
         const args: ChatterValue[] = new Array(instr.argCount);
@@ -216,7 +217,7 @@ export class VM {
       case 'SAY': {
         const val = this.pop();
         if (val === undefined) {
-          throw new RuntimeError('Stack underflow in SAY');
+          throw new RuntimeError('Stack underflow in SAY', instr.loc);
         }
         console.log(formatValue(val));
         break;
@@ -228,7 +229,7 @@ export class VM {
         for (let i = count - 1; i >= 0; i--) {
           const v = this.pop();
           if (v === undefined) {
-            throw new RuntimeError('Stack underflow in SAY_MULTI');
+            throw new RuntimeError('Stack underflow in SAY_MULTI', instr.loc);
           }
           vals[i] = v;
         }
@@ -242,7 +243,7 @@ export class VM {
         if (typeof a !== typeof b) {
           throw new RuntimeError(
             `Type mismatch: cannot compare ${typeof a} and ${typeof b}`,
-          );
+          instr.loc);
         }
         this.stack.push(a === b);
         break;
@@ -254,7 +255,7 @@ export class VM {
         if (typeof a !== typeof b) {
           throw new RuntimeError(
             `Type mismatch: cannot compare ${typeof a} and ${typeof b}`,
-          );
+          instr.loc);
         }
         this.stack.push(a !== b);
         break;
@@ -267,7 +268,7 @@ export class VM {
         const b = this.pop();
         const a = this.pop();
         if (typeof a !== 'number' || typeof b !== 'number') {
-          throw new RuntimeError('Type mismatch: comparison requires numbers');
+          throw new RuntimeError('Type mismatch: comparison requires numbers', instr.loc);
         }
         let r: boolean;
         switch (instr.op) {
@@ -281,15 +282,15 @@ export class VM {
       }
 
       case 'ERROR':
-        throw new RuntimeError(instr.message);
+        throw new RuntimeError(instr.message, instr.loc);
 
       case 'EXPECT': {
         const v = this.pop();
         if (typeof v !== 'boolean') {
-          throw new RuntimeError(`expect requires a boolean, got ${describe(v)}`);
+          throw new RuntimeError(`expect requires a boolean, got ${describe(v)}`, instr.loc);
         }
         if (!v) {
-          throw new RuntimeError(`expect failed: ${instr.source}`);
+          throw new RuntimeError(`expect failed: ${instr.source}`, instr.loc);
         }
         break;
       }
@@ -301,14 +302,14 @@ export class VM {
 
       case 'CHECK_TYPE': {
         if (this.stack.length === 0) {
-          throw new RuntimeError('Stack underflow in CHECK_TYPE');
+          throw new RuntimeError('Stack underflow in CHECK_TYPE', instr.loc);
         }
         const top = this.stack[this.stack.length - 1];
         const actual = typeof top as 'number' | 'string' | 'boolean';
         if (actual !== instr.expected) {
           throw new RuntimeError(
             `Type mismatch: ${instr.context} (expected ${instr.expected}, got ${actual})`,
-          );
+          instr.loc);
         }
         break;
       }
@@ -316,7 +317,7 @@ export class VM {
       case 'NOT': {
         const a = this.pop();
         if (typeof a !== 'boolean') {
-          throw new RuntimeError(`Type mismatch: 'not' requires a boolean, got ${typeof a}`);
+          throw new RuntimeError(`Type mismatch: 'not' requires a boolean, got ${typeof a}`, instr.loc);
         }
         this.stack.push(!a);
         break;
@@ -328,7 +329,7 @@ export class VM {
         if (typeof a !== 'boolean' || typeof b !== 'boolean') {
           throw new RuntimeError(
             `Type mismatch: 'and' requires booleans, got ${typeof a} and ${typeof b}`,
-          );
+          instr.loc);
         }
         this.stack.push(a && b);
         break;
@@ -340,7 +341,7 @@ export class VM {
         if (typeof a !== 'boolean' || typeof b !== 'boolean') {
           throw new RuntimeError(
             `Type mismatch: 'or' requires booleans, got ${typeof a} and ${typeof b}`,
-          );
+          instr.loc);
         }
         this.stack.push(a || b);
         break;
@@ -354,7 +355,7 @@ export class VM {
       case 'JUMP_IF_FALSE': {
         const v = this.pop();
         if (typeof v !== 'boolean') {
-          throw new RuntimeError(`condition must be a boolean, got ${typeof v}`);
+          throw new RuntimeError(`condition must be a boolean, got ${typeof v}`, instr.loc);
         }
         if (!v) {
           frame.ip = instr.target;
@@ -372,7 +373,7 @@ export class VM {
           elems[i] = this.pop();
         }
         if (instr.count === 0) {
-          throw new RuntimeError('MAKE_LIST with zero elements (use MAKE_EMPTY_LIST)');
+          throw new RuntimeError('MAKE_LIST with zero elements (use MAKE_EMPTY_LIST)', instr.loc);
         }
         let elementType: 'number' | 'string' | 'boolean';
         if (instr.elementType !== null) {
@@ -380,7 +381,7 @@ export class VM {
         } else {
           const first = elems[0];
           if (isList(first)) {
-            throw new RuntimeError('nested lists not supported');
+            throw new RuntimeError('nested lists not supported', instr.loc);
           }
           elementType = typeof first as 'number' | 'string' | 'boolean';
         }
@@ -389,7 +390,7 @@ export class VM {
           if (isList(e) || typeof e !== elementType) {
             throw new RuntimeError(
               `Type mismatch: list element ${i + 1} has type ${describe(e)}, expected ${elementType}`,
-            );
+            instr.loc);
           }
         }
         const list: ChatterList = { kind: 'list', element: elementType, items: elems };
@@ -407,13 +408,13 @@ export class VM {
         const idx = this.pop();
         const list = this.pop();
         if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'item N of X' requires a list, got ${describe(list)}`);
+          throw new RuntimeError(`Type mismatch: 'item N of X' requires a list, got ${describe(list)}`, instr.loc);
         }
         if (typeof idx !== 'number') {
-          throw new RuntimeError(`Type mismatch: list index must be a number, got ${typeof idx}`);
+          throw new RuntimeError(`Type mismatch: list index must be a number, got ${typeof idx}`, instr.loc);
         }
         if (idx < 1 || idx > list.items.length) {
-          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`);
+          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
         this.stack.push(list.items[idx - 1]);
         break;
@@ -424,18 +425,18 @@ export class VM {
         const idx = this.pop();
         const list = this.pop();
         if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'change item N of X' requires a list, got ${describe(list)}`);
+          throw new RuntimeError(`Type mismatch: 'change item N of X' requires a list, got ${describe(list)}`, instr.loc);
         }
         if (typeof idx !== 'number') {
-          throw new RuntimeError(`Type mismatch: list index must be a number, got ${typeof idx}`);
+          throw new RuntimeError(`Type mismatch: list index must be a number, got ${typeof idx}`, instr.loc);
         }
         if (idx < 1 || idx > list.items.length) {
-          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`);
+          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
         if (isList(value) || typeof value !== list.element) {
           throw new RuntimeError(
             `Type mismatch: cannot assign ${describe(value)} to list of ${list.element}`,
-          );
+          instr.loc);
         }
         list.items[idx - 1] = value;
         break;
@@ -451,7 +452,7 @@ export class VM {
           this.stack.push(v.length);
           break;
         }
-        throw new RuntimeError(`Type mismatch: 'length of X' requires a list or string, got ${describe(v)}`);
+        throw new RuntimeError(`Type mismatch: 'length of X' requires a list or string, got ${describe(v)}`, instr.loc);
       }
 
       case 'CONTAINS': {
@@ -461,18 +462,18 @@ export class VM {
           if (typeof value !== 'string') {
             throw new RuntimeError(
               `Type mismatch: 'contains' on string requires a string on the right, got ${describe(value)}`,
-            );
+            instr.loc);
           }
           this.stack.push(left.includes(value));
           break;
         }
         if (!isList(left)) {
-          throw new RuntimeError(`Type mismatch: 'contains' requires a list or string on the left, got ${describe(left)}`);
+          throw new RuntimeError(`Type mismatch: 'contains' requires a list or string on the left, got ${describe(left)}`, instr.loc);
         }
         if (isList(value) || typeof value !== left.element) {
           throw new RuntimeError(
             `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${left.element}`,
-          );
+          instr.loc);
         }
         let found = false;
         for (const e of left.items) {
@@ -493,13 +494,13 @@ export class VM {
         const idx = this.pop();
         const s = this.pop();
         if (typeof s !== 'string') {
-          throw new RuntimeError(`Type mismatch: 'character N of X' requires a string, got ${describe(s)}`);
+          throw new RuntimeError(`Type mismatch: 'character N of X' requires a string, got ${describe(s)}`, instr.loc);
         }
         if (typeof idx !== 'number') {
-          throw new RuntimeError(`Type mismatch: character index must be a number, got ${typeof idx}`);
+          throw new RuntimeError(`Type mismatch: character index must be a number, got ${typeof idx}`, instr.loc);
         }
         if (idx < 1 || idx > s.length) {
-          throw new RuntimeError(`Index out of range: character ${idx} of string (length ${s.length})`);
+          throw new RuntimeError(`Index out of range: character ${idx} of string (length ${s.length})`, instr.loc);
         }
         this.stack.push(s.charAt(idx - 1));
         break;
@@ -510,10 +511,10 @@ export class VM {
         const from = this.pop();
         const s = this.pop();
         if (typeof s !== 'string') {
-          throw new RuntimeError(`Type mismatch: 'characters A to B of X' requires a string, got ${describe(s)}`);
+          throw new RuntimeError(`Type mismatch: 'characters A to B of X' requires a string, got ${describe(s)}`, instr.loc);
         }
         if (typeof from !== 'number' || typeof to !== 'number') {
-          throw new RuntimeError(`Type mismatch: substring bounds must be numbers`);
+          throw new RuntimeError(`Type mismatch: substring bounds must be numbers`, instr.loc);
         }
         if (from > to) {
           this.stack.push('');
@@ -522,7 +523,7 @@ export class VM {
         if (from < 1 || to > s.length) {
           throw new RuntimeError(
             `Index out of range: characters ${from} to ${to} of string (length ${s.length})`,
-          );
+          instr.loc);
         }
         this.stack.push(s.substring(from - 1, to));
         break;
@@ -532,12 +533,12 @@ export class VM {
         const value = this.pop();
         const list = this.pop();
         if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'append' target must be a list, got ${describe(list)}`);
+          throw new RuntimeError(`Type mismatch: 'append' target must be a list, got ${describe(list)}`, instr.loc);
         }
         if (isList(value) || typeof value !== list.element) {
           throw new RuntimeError(
             `Type mismatch: cannot append ${describe(value)} to list of ${list.element}`,
-          );
+          instr.loc);
         }
         list.items.push(value);
         break;
@@ -547,12 +548,12 @@ export class VM {
         const value = this.pop();
         const list = this.pop();
         if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'prepend' target must be a list, got ${describe(list)}`);
+          throw new RuntimeError(`Type mismatch: 'prepend' target must be a list, got ${describe(list)}`, instr.loc);
         }
         if (isList(value) || typeof value !== list.element) {
           throw new RuntimeError(
             `Type mismatch: cannot prepend ${describe(value)} to list of ${list.element}`,
-          );
+          instr.loc);
         }
         list.items.unshift(value);
         break;
@@ -563,18 +564,18 @@ export class VM {
         const idx = this.pop();
         const list = this.pop();
         if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'insert' target must be a list, got ${describe(list)}`);
+          throw new RuntimeError(`Type mismatch: 'insert' target must be a list, got ${describe(list)}`, instr.loc);
         }
         if (typeof idx !== 'number') {
-          throw new RuntimeError(`Type mismatch: insert position must be a number, got ${typeof idx}`);
+          throw new RuntimeError(`Type mismatch: insert position must be a number, got ${typeof idx}`, instr.loc);
         }
         if (idx < 1 || idx > list.items.length + 1) {
-          throw new RuntimeError(`List insert position out of range: ${idx} (list has ${list.items.length} items)`);
+          throw new RuntimeError(`List insert position out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
         if (isList(value) || typeof value !== list.element) {
           throw new RuntimeError(
             `Type mismatch: cannot insert ${describe(value)} into list of ${list.element}`,
-          );
+          instr.loc);
         }
         list.items.splice(idx - 1, 0, value);
         break;
@@ -584,13 +585,13 @@ export class VM {
         const idx = this.pop();
         const list = this.pop();
         if (!isList(list)) {
-          throw new RuntimeError(`Type mismatch: 'remove' target must be a list, got ${describe(list)}`);
+          throw new RuntimeError(`Type mismatch: 'remove' target must be a list, got ${describe(list)}`, instr.loc);
         }
         if (typeof idx !== 'number') {
-          throw new RuntimeError(`Type mismatch: remove position must be a number, got ${typeof idx}`);
+          throw new RuntimeError(`Type mismatch: remove position must be a number, got ${typeof idx}`, instr.loc);
         }
         if (idx < 1 || idx > list.items.length) {
-          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`);
+          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
         list.items.splice(idx - 1, 1);
         break;
@@ -599,14 +600,14 @@ export class VM {
       case 'READ_FILE_LINES': {
         const path = this.pop();
         if (typeof path !== 'string') {
-          throw new RuntimeError(`Type mismatch: file path must be a string, got ${typeof path}`);
+          throw new RuntimeError(`Type mismatch: file path must be a string, got ${typeof path}`, instr.loc);
         }
         let content: string;
         try {
           content = fs.readFileSync(path, 'utf8');
         } catch (err: any) {
           const reason = err && err.code ? err.code : (err && err.message ? err.message : String(err));
-          throw new RuntimeError(`could not read file '${path}': ${reason}`);
+          throw new RuntimeError(`could not read file '${path}': ${reason}`, instr.loc);
         }
         // Split per spec: \r\n or \n is a separator; trailing newline does not
         // produce an empty string. Empty file -> empty list.

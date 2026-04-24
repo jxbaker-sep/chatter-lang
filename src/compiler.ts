@@ -1,5 +1,5 @@
 import {
-  Program, Statement, Expression,
+  Program, Statement, Expression, Located,
   SayStatement, SetStatement, FunctionDeclaration,
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
   IfStatement, RepeatStatement,
@@ -12,13 +12,19 @@ import {
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement,
 } from './ast';
-import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
+import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
+import { ChatterError, SourceLocation } from './errors';
 
-export class CompileError extends Error {
-  constructor(message: string) {
-    super(message);
+export class CompileError extends ChatterError {
+  constructor(message: string, location?: SourceLocation) {
+    super(message, location);
     this.name = 'CompileError';
   }
+}
+
+function locOf(node: Located | undefined | null): SourceLocation | undefined {
+  if (!node || node.line === undefined || node.col === undefined) return undefined;
+  return { line: node.line, col: node.col, length: node.length };
 }
 
 export type ChatterType =
@@ -62,6 +68,26 @@ class Compiler {
   private tempCounter = 0;
   private currentFuncReturnType: ChatterType | null | undefined = undefined;  // undefined = top-level
   private currentFuncName: string | null = null;
+  private locStack: (SourceLocation | undefined)[] = [];
+
+  private get currentLoc(): SourceLocation | undefined {
+    return this.locStack[this.locStack.length - 1];
+  }
+
+  private emit(out: Instruction[], instr: InstructionKind): void {
+    const withLoc = instr as Instruction;
+    if (withLoc.loc === undefined && this.currentLoc !== undefined) {
+      // Attach loc as a non-enumerable property so deep-equality checks in
+      // tests (e.g. toContainEqual) ignore it while the VM can still read it.
+      Object.defineProperty(withLoc, 'loc', {
+        value: this.currentLoc,
+        enumerable: false,
+        writable: true,
+        configurable: true,
+      });
+    }
+    out.push(withLoc);
+  }
 
   private freshName(tag: string): string {
     return `_rep_${tag}_${this.tempCounter++}`;
@@ -101,6 +127,19 @@ class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
+    this.locStack.push(locOf(stmt) ?? this.currentLoc);
+    try {
+      this.compileStatementInner(stmt, out, bindings);
+    } finally {
+      this.locStack.pop();
+    }
+  }
+
+  private compileStatementInner(
+    stmt: Statement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
     switch (stmt.type) {
       case 'SayStatement':
         this.compileSay(stmt, out, bindings);
@@ -128,9 +167,9 @@ class Compiler {
         const rt = this.functionReturnTypes.get(stmt.name);
         if (rt === null) {
           // Void call: discard the implicit 0 returned by the callee. Does NOT update `it`.
-          out.push({ op: 'DROP' });
+          this.emit(out, { op: 'DROP' });
         } else {
-          out.push({ op: 'STORE_IT' });
+          this.emit(out, { op: 'STORE_IT' });
         }
         break;
       }
@@ -170,7 +209,7 @@ class Compiler {
     bindings: Bindings,
   ): void {
     this.compileExpr(stmt.expression, out, bindings);
-    out.push({ op: 'EXPECT', source: stmt.source });
+    this.emit(out, { op: 'EXPECT', source: stmt.source });
   }
 
   private compileReadFileStatement(
@@ -182,11 +221,11 @@ class Compiler {
     if (pt && !(pt.kind === 'scalar' && pt.name === 'string')) {
       throw new CompileError(
         `'read file' requires a string path, got ${typeToString(pt)}`,
-      );
+      this.currentLoc);
     }
     this.compileExpr(stmt.path, out, bindings);
-    out.push({ op: 'READ_FILE_LINES' });
-    out.push({ op: 'STORE_IT' });
+    this.emit(out, { op: 'READ_FILE_LINES' });
+    this.emit(out, { op: 'STORE_IT' });
   }
 
   private compileSay(
@@ -196,13 +235,13 @@ class Compiler {
   ): void {
     if (stmt.expressions.length === 1) {
       this.compileExpr(stmt.expressions[0], out, bindings);
-      out.push({ op: 'SAY' });
+      this.emit(out, { op: 'SAY' });
       return;
     }
     for (const expr of stmt.expressions) {
       this.compileExpr(expr, out, bindings);
     }
-    out.push({ op: 'SAY_MULTI', count: stmt.expressions.length });
+    this.emit(out, { op: 'SAY_MULTI', count: stmt.expressions.length });
   }
 
   private checkNotReadonlySmuggle(value: Expression, bindings: Bindings, ctx: string): void {
@@ -212,7 +251,7 @@ class Compiler {
       if (info?.type && info.type.kind === 'list' && info.type.readonly) {
         throw new CompileError(
           `cannot bind a readonly-list reference to a '${ctx}' binding (name '${value.name}')`,
-        );
+        this.currentLoc);
       }
     }
   }
@@ -223,11 +262,11 @@ class Compiler {
     bindings: Bindings,
   ): void {
     if (bindings.has(stmt.name)) {
-      throw new CompileError(`Duplicate binding: '${stmt.name}' is already set`);
+      throw new CompileError(`Duplicate binding: '${stmt.name}' is already set`, this.currentLoc);
     }
     this.checkNotReadonlySmuggle(stmt.value, bindings, 'set');
     this.compileExpr(stmt.value, out, bindings);
-    out.push({ op: 'STORE', name: stmt.name });
+    this.emit(out, { op: 'STORE', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
     bindings.set(stmt.name, { kind: 'set', type: st ?? undefined });
   }
@@ -240,16 +279,16 @@ class Compiler {
     if (bindings.has(stmt.name)) {
       throw new CompileError(
         `Duplicate binding: '${stmt.name}' is already declared`,
-      );
+      this.currentLoc);
     }
     if (bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name)) {
       throw new CompileError(
         `Variable '${stmt.name}' shadows outer binding`,
-      );
+      this.currentLoc);
     }
     this.checkNotReadonlySmuggle(stmt.value, bindings, 'var');
     this.compileExpr(stmt.value, out, bindings);
-    out.push({ op: 'STORE_VAR', name: stmt.name });
+    this.emit(out, { op: 'STORE_VAR', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
     bindings.set(stmt.name, { kind: 'var', type: st ?? undefined });
   }
@@ -263,12 +302,12 @@ class Compiler {
     if (!info) {
       throw new CompileError(
         `Cannot change '${stmt.name}': no such variable declared in this function`,
-      );
+      this.currentLoc);
     }
     if (info.kind !== 'var') {
       throw new CompileError(
         `Cannot change '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
-      );
+      this.currentLoc);
     }
     // Static type check for list vars: exact match required.
     if (info.type && info.type.kind === 'list') {
@@ -276,17 +315,17 @@ class Compiler {
       if (rhs !== null && !typesEqual(rhs, info.type)) {
         throw new CompileError(
           `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rhs)}`,
-        );
+        this.currentLoc);
       }
       // Prevent readonly smuggling via change
       if (rhs && rhs.kind === 'list' && rhs.readonly && !info.type.readonly) {
         throw new CompileError(
           `cannot change '${stmt.name}' to a readonly-list reference`,
-        );
+        this.currentLoc);
       }
     }
     this.compileExpr(stmt.value, out, bindings);
-    out.push({ op: 'STORE_VAR', name: stmt.name });
+    this.emit(out, { op: 'STORE_VAR', name: stmt.name });
   }
 
   private compileChangeItem(
@@ -298,48 +337,48 @@ class Compiler {
     if (!info) {
       throw new CompileError(
         `Cannot change item of '${stmt.listName}': no such binding`,
-      );
+      this.currentLoc);
     }
     if (!info.type || info.type.kind !== 'list') {
       if (info.type) {
         throw new CompileError(
           `Cannot change item of '${stmt.listName}': not a list (type ${typeToString(info.type)})`,
-        );
+        this.currentLoc);
       }
     } else {
       if (info.type.readonly) {
         throw new CompileError(
           `Cannot change item of '${stmt.listName}': it is a readonly list reference`,
-        );
+        this.currentLoc);
       }
       const rhs = this.staticType(stmt.value, bindings);
       if (rhs && rhs.kind === 'scalar' && rhs.name !== info.type.element) {
         throw new CompileError(
           `Type mismatch: cannot assign ${rhs.name} to list of ${info.type.element}`,
-        );
+        this.currentLoc);
       }
     }
     // Emit: LOAD list; <index>; <value>; LIST_SET
-    out.push({ op: 'LOAD', name: stmt.listName });
+    this.emit(out, { op: 'LOAD', name: stmt.listName });
     this.compileExpr(stmt.index, out, bindings);
     this.compileExpr(stmt.value, out, bindings);
-    out.push({ op: 'LIST_SET' });
+    this.emit(out, { op: 'LIST_SET' });
   }
 
   private compileListMutationTarget(listName: string, bindings: Bindings, op: string): ChatterType | null {
     const info = bindings.get(listName);
     if (!info) {
-      throw new CompileError(`Cannot ${op} to '${listName}': no such binding`);
+      throw new CompileError(`Cannot ${op} to '${listName}': no such binding`, this.currentLoc);
     }
     if (info.type && info.type.kind !== 'list') {
       throw new CompileError(
         `Cannot ${op} to '${listName}': not a list (type ${typeToString(info.type)})`,
-      );
+      this.currentLoc);
     }
     if (info.type && info.type.kind === 'list' && info.type.readonly) {
       throw new CompileError(
         `Cannot ${op} to '${listName}': it is a readonly list reference`,
-      );
+      this.currentLoc);
     }
     return info.type ?? null;
   }
@@ -355,12 +394,12 @@ class Compiler {
       if (rhs && rhs.kind === 'scalar' && rhs.name !== listType.element) {
         throw new CompileError(
           `Type mismatch: cannot ${op} ${rhs.name} to list of ${listType.element}`,
-        );
+        this.currentLoc);
       }
       if (rhs && rhs.kind === 'list') {
         throw new CompileError(
           `Type mismatch: cannot ${op} a list value to list of ${listType.element}`,
-        );
+        this.currentLoc);
       }
     }
   }
@@ -372,9 +411,9 @@ class Compiler {
   ): void {
     const lt = this.compileListMutationTarget(stmt.listName, bindings, 'append');
     this.checkElementType(lt, stmt.value, bindings, 'append');
-    out.push({ op: 'LOAD', name: stmt.listName });
+    this.emit(out, { op: 'LOAD', name: stmt.listName });
     this.compileExpr(stmt.value, out, bindings);
-    out.push({ op: 'LIST_APPEND' });
+    this.emit(out, { op: 'LIST_APPEND' });
   }
 
   private compilePrepend(
@@ -384,9 +423,9 @@ class Compiler {
   ): void {
     const lt = this.compileListMutationTarget(stmt.listName, bindings, 'prepend');
     this.checkElementType(lt, stmt.value, bindings, 'prepend');
-    out.push({ op: 'LOAD', name: stmt.listName });
+    this.emit(out, { op: 'LOAD', name: stmt.listName });
     this.compileExpr(stmt.value, out, bindings);
-    out.push({ op: 'LIST_PREPEND' });
+    this.emit(out, { op: 'LIST_PREPEND' });
   }
 
   private compileInsert(
@@ -396,10 +435,10 @@ class Compiler {
   ): void {
     const lt = this.compileListMutationTarget(stmt.listName, bindings, 'insert');
     this.checkElementType(lt, stmt.value, bindings, 'insert');
-    out.push({ op: 'LOAD', name: stmt.listName });
+    this.emit(out, { op: 'LOAD', name: stmt.listName });
     this.compileExpr(stmt.index, out, bindings);
     this.compileExpr(stmt.value, out, bindings);
-    out.push({ op: 'LIST_INSERT' });
+    this.emit(out, { op: 'LIST_INSERT' });
   }
 
   private compileRemove(
@@ -408,9 +447,9 @@ class Compiler {
     bindings: Bindings,
   ): void {
     this.compileListMutationTarget(stmt.listName, bindings, 'remove');
-    out.push({ op: 'LOAD', name: stmt.listName });
+    this.emit(out, { op: 'LOAD', name: stmt.listName });
     this.compileExpr(stmt.index, out, bindings);
-    out.push({ op: 'LIST_REMOVE' });
+    this.emit(out, { op: 'LIST_REMOVE' });
   }
 
   private compileCompoundAssign(
@@ -422,28 +461,28 @@ class Compiler {
     if (!info) {
       throw new CompileError(
         `Cannot ${stmt.op} '${stmt.name}': no such variable declared in this function`,
-      );
+      this.currentLoc);
     }
     if (info.kind !== 'var') {
       throw new CompileError(
         `Cannot ${stmt.op} '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
-      );
+      this.currentLoc);
     }
     if (info.type !== undefined && !(info.type.kind === 'scalar' && info.type.name === 'number')) {
       throw new CompileError(
         `Cannot ${stmt.op} '${stmt.name}': its type is ${typeToString(info.type)}, not number`,
-      );
+      this.currentLoc);
     }
     // Emit: LOAD name; <value>; OP; STORE_VAR name
-    out.push({ op: 'LOAD', name: stmt.name });
+    this.emit(out, { op: 'LOAD', name: stmt.name });
     this.compileExpr(stmt.value, out, bindings);
     switch (stmt.op) {
-      case 'add':      out.push({ op: 'ADD' }); break;
-      case 'subtract': out.push({ op: 'SUB' }); break;
-      case 'multiply': out.push({ op: 'MUL' }); break;
-      case 'divide':   out.push({ op: 'DIV' }); break;
+      case 'add':      this.emit(out, { op: 'ADD' }); break;
+      case 'subtract': this.emit(out, { op: 'SUB' }); break;
+      case 'multiply': this.emit(out, { op: 'MUL' }); break;
+      case 'divide':   this.emit(out, { op: 'DIV' }); break;
     }
-    out.push({ op: 'STORE_VAR', name: stmt.name });
+    this.emit(out, { op: 'STORE_VAR', name: stmt.name });
   }
 
   private compileFuncDecl(stmt: FunctionDeclaration): void {
@@ -454,7 +493,7 @@ class Compiler {
       if (this.outerBindings.has(param)) {
         throw new CompileError(
           `Parameter '${param}' in function '${stmt.name}' shadows outer binding`,
-        );
+        this.currentLoc);
       }
     }
 
@@ -463,7 +502,7 @@ class Compiler {
       if (!blockTerminates(stmt.body)) {
         throw new CompileError(
           `missing return in typed function '${stmt.name}'; every path must return a ${typeToString(fromAnnotation(stmt.returnType))}`,
-        );
+        this.currentLoc);
       }
     }
 
@@ -492,8 +531,8 @@ class Compiler {
     }
     if (stmt.returnType === null) {
       // Void: implicit `return 0` so the call site has a value to DROP.
-      instructions.push({ op: 'PUSH_INT', value: 0 });
-      instructions.push({ op: 'RETURN' });
+      this.emit(instructions, { op: 'PUSH_INT', value: 0 });
+      this.emit(instructions, { op: 'RETURN' });
     }
   }
 
@@ -513,12 +552,12 @@ class Compiler {
           if (positionalUsed) {
             throw new CompileError(
               `Multiple positional arguments in call to '${stmt.name}'`,
-            );
+            this.currentLoc);
           }
           if (sig.length === 0) {
             throw new CompileError(
               `Function '${stmt.name}' takes no arguments`,
-            );
+            this.currentLoc);
           }
           bound[0] = arg.value;
           positionalUsed = true;
@@ -535,11 +574,11 @@ class Compiler {
             if (anyMatch) {
               throw new CompileError(
                 `Too many arguments with label '${arg.name}' in call to '${stmt.name}'`,
-              );
+              this.currentLoc);
             }
             throw new CompileError(
               `Unknown argument label '${arg.name}' in call to '${stmt.name}'`,
-            );
+            this.currentLoc);
           }
           bound[idx] = arg.value;
         }
@@ -549,7 +588,7 @@ class Compiler {
         if (bound[i] === undefined) {
           throw new CompileError(
             `Missing argument for parameter '${sig[i].name}' in call to '${stmt.name}'`,
-          );
+          this.currentLoc);
         }
         const argExpr = bound[i]!;
         // Static list-type check for arguments.
@@ -559,32 +598,32 @@ class Compiler {
           if (argType.element !== paramType.element) {
             throw new CompileError(
               `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
-            );
+            this.currentLoc);
           }
           // Widening: mutable → readonly OK. Narrowing: readonly → mutable rejected.
           if (argType.readonly && !paramType.readonly) {
             throw new CompileError(
               `Cannot pass readonly-list reference to mutable-list param '${sig[i].name}' in call to '${stmt.name}'`,
-            );
+            this.currentLoc);
           }
         } else if (paramType.kind === 'list' && argType && argType.kind === 'scalar') {
           throw new CompileError(
             `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${argType.name}`,
-          );
+          this.currentLoc);
         } else if (paramType.kind === 'scalar' && argType && argType.kind === 'list') {
           throw new CompileError(
             `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${paramType.name}, got ${typeToString(argType)}`,
-          );
+          this.currentLoc);
         }
         this.compileExpr(argExpr, out, bindings);
       }
 
-      out.push({ op: 'CALL', name: stmt.name, argCount: sig.length });
+      this.emit(out, { op: 'CALL', name: stmt.name, argCount: sig.length });
     } else {
       for (const arg of stmt.args) {
         this.compileExpr(arg.value, out, bindings);
       }
-      out.push({ op: 'CALL', name: stmt.name, argCount: stmt.args.length });
+      this.emit(out, { op: 'CALL', name: stmt.name, argCount: stmt.args.length });
     }
   }
 
@@ -598,14 +637,14 @@ class Compiler {
     for (const branch of stmt.branches) {
       this.compileExpr(branch.condition, out, bindings);
       const jifIdx = out.length;
-      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+      this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
       for (const s of branch.body) {
         this.compileStatement(s, out, bindings);
       }
 
       const exitIdx = out.length;
-      out.push({ op: 'JUMP', target: -1 });
+      this.emit(out, { op: 'JUMP', target: -1 });
       exitJumps.push(exitIdx);
 
       (out[jifIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
@@ -633,34 +672,34 @@ class Compiler {
       const counter = this.freshName('counter');
 
       this.compileExpr(stmt.count, out, bindings);
-      out.push({ op: 'STORE', name: limit });
-      out.push({ op: 'PUSH_INT', value: 0 });
-      out.push({ op: 'STORE', name: counter });
+      this.emit(out, { op: 'STORE', name: limit });
+      this.emit(out, { op: 'PUSH_INT', value: 0 });
+      this.emit(out, { op: 'STORE', name: counter });
 
-      out.push({ op: 'LOAD', name: limit });
-      out.push({ op: 'PUSH_INT', value: 0 });
-      out.push({ op: 'LT' });
+      this.emit(out, { op: 'LOAD', name: limit });
+      this.emit(out, { op: 'PUSH_INT', value: 0 });
+      this.emit(out, { op: 'LT' });
       const jifNegIdx = out.length;
-      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
-      out.push({ op: 'ERROR', message: 'repeat count cannot be negative' });
+      this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
+      this.emit(out, { op: 'ERROR', message: 'repeat count cannot be negative' });
       (out[jifNegIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
 
       const topIdx = out.length;
-      out.push({ op: 'LOAD', name: counter });
-      out.push({ op: 'LOAD', name: limit });
-      out.push({ op: 'LT' });
+      this.emit(out, { op: 'LOAD', name: counter });
+      this.emit(out, { op: 'LOAD', name: limit });
+      this.emit(out, { op: 'LT' });
       const jifEndIdx = out.length;
-      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+      this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
       for (const s of stmt.body) {
         this.compileStatement(s, out, bindings);
       }
 
-      out.push({ op: 'LOAD', name: counter });
-      out.push({ op: 'PUSH_INT', value: 1 });
-      out.push({ op: 'ADD' });
-      out.push({ op: 'STORE', name: counter });
-      out.push({ op: 'JUMP', target: topIdx });
+      this.emit(out, { op: 'LOAD', name: counter });
+      this.emit(out, { op: 'PUSH_INT', value: 1 });
+      this.emit(out, { op: 'ADD' });
+      this.emit(out, { op: 'STORE', name: counter });
+      this.emit(out, { op: 'JUMP', target: topIdx });
       (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
       return;
     }
@@ -668,7 +707,7 @@ class Compiler {
     if (stmt.kind === 'range') {
       const loopVar = stmt.varName;
       if (bindings.has(loopVar) || this.outerBindings.has(loopVar)) {
-        throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`);
+        throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
       }
 
       const limit = this.freshName('limit');
@@ -682,7 +721,7 @@ class Compiler {
           if (step.value < 1) {
             throw new CompileError(
               `step in 'repeat' must be positive (at least 1), got ${step.value}`,
-            );
+            this.currentLoc);
           }
           stepIsKnownPositive = true;
         } else if (
@@ -692,35 +731,35 @@ class Compiler {
         ) {
           throw new CompileError(
             `step in 'repeat' must be positive (at least 1), got ${-step.operand.value}`,
-          );
+          this.currentLoc);
         } else {
           const st = this.staticType(step, bindings);
           if (st && !(st.kind === 'scalar' && st.name === 'number')) {
             throw new CompileError(
               `step in 'repeat' must be a number, got ${typeToString(st)}`,
-            );
+            this.currentLoc);
           }
         }
       }
 
       this.compileExpr(stmt.from, out, bindings);
-      out.push({ op: 'STORE', name: loopVar });
+      this.emit(out, { op: 'STORE', name: loopVar });
       this.compileExpr(stmt.to, out, bindings);
-      out.push({ op: 'STORE', name: limit });
+      this.emit(out, { op: 'STORE', name: limit });
 
       let stepTmp: string | null = null;
       if (stmt.step !== undefined) {
         stepTmp = this.freshName('step');
         this.compileExpr(stmt.step, out, bindings);
-        out.push({ op: 'STORE', name: stepTmp });
+        this.emit(out, { op: 'STORE', name: stepTmp });
         if (!stepIsKnownPositive) {
           // Runtime check: step >= 1, else raise.
-          out.push({ op: 'LOAD', name: stepTmp });
-          out.push({ op: 'PUSH_INT', value: 1 });
-          out.push({ op: 'LT' });
+          this.emit(out, { op: 'LOAD', name: stepTmp });
+          this.emit(out, { op: 'PUSH_INT', value: 1 });
+          this.emit(out, { op: 'LT' });
           const jifSkipIdx = out.length;
-          out.push({ op: 'JUMP_IF_FALSE', target: -1 });
-          out.push({
+          this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
+          this.emit(out, {
             op: 'ERROR',
             message: `step in 'repeat' must be positive (at least 1)`,
           });
@@ -729,11 +768,11 @@ class Compiler {
       }
 
       const topIdx = out.length;
-      out.push({ op: 'LOAD', name: loopVar });
-      out.push({ op: 'LOAD', name: limit });
-      out.push({ op: 'LE' });
+      this.emit(out, { op: 'LOAD', name: loopVar });
+      this.emit(out, { op: 'LOAD', name: limit });
+      this.emit(out, { op: 'LE' });
       const jifEndIdx = out.length;
-      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+      this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
       bindings.set(loopVar, { kind: 'loop', type: { kind: 'scalar', name: 'number' } });
       for (const s of stmt.body) {
@@ -741,20 +780,20 @@ class Compiler {
       }
       bindings.delete(loopVar);
 
-      out.push({ op: 'LOAD', name: loopVar });
+      this.emit(out, { op: 'LOAD', name: loopVar });
       if (stepTmp !== null) {
-        out.push({ op: 'LOAD', name: stepTmp });
+        this.emit(out, { op: 'LOAD', name: stepTmp });
       } else {
-        out.push({ op: 'PUSH_INT', value: 1 });
+        this.emit(out, { op: 'PUSH_INT', value: 1 });
       }
-      out.push({ op: 'ADD' });
-      out.push({ op: 'STORE', name: loopVar });
-      out.push({ op: 'JUMP', target: topIdx });
+      this.emit(out, { op: 'ADD' });
+      this.emit(out, { op: 'STORE', name: loopVar });
+      this.emit(out, { op: 'JUMP', target: topIdx });
       (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
-      out.push({ op: 'DELETE', name: loopVar });
-      out.push({ op: 'DELETE', name: limit });
+      this.emit(out, { op: 'DELETE', name: loopVar });
+      this.emit(out, { op: 'DELETE', name: limit });
       if (stepTmp !== null) {
-        out.push({ op: 'DELETE', name: stepTmp });
+        this.emit(out, { op: 'DELETE', name: stepTmp });
       }
       return;
     }
@@ -762,7 +801,7 @@ class Compiler {
     if (stmt.kind === 'list') {
       const loopVar = stmt.varName;
       if (bindings.has(loopVar) || this.outerBindings.has(loopVar)) {
-        throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`);
+        throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
       }
 
       // Determine element type if statically known.
@@ -772,7 +811,7 @@ class Compiler {
         if (lt.kind !== 'list') {
           throw new CompileError(
             `'repeat with x in ...' requires a list, got ${typeToString(lt)}`,
-          );
+          this.currentLoc);
         }
         elemType = { kind: 'scalar', name: lt.element };
       }
@@ -782,25 +821,25 @@ class Compiler {
       const lenTmp = this.freshName('len');
 
       this.compileExpr(stmt.list, out, bindings);
-      out.push({ op: 'STORE', name: listTmp });
-      out.push({ op: 'LOAD', name: listTmp });
-      out.push({ op: 'LENGTH' });
-      out.push({ op: 'STORE', name: lenTmp });
-      out.push({ op: 'PUSH_INT', value: 1 });
-      out.push({ op: 'STORE', name: idxTmp });
+      this.emit(out, { op: 'STORE', name: listTmp });
+      this.emit(out, { op: 'LOAD', name: listTmp });
+      this.emit(out, { op: 'LENGTH' });
+      this.emit(out, { op: 'STORE', name: lenTmp });
+      this.emit(out, { op: 'PUSH_INT', value: 1 });
+      this.emit(out, { op: 'STORE', name: idxTmp });
 
       const topIdx = out.length;
-      out.push({ op: 'LOAD', name: idxTmp });
-      out.push({ op: 'LOAD', name: lenTmp });
-      out.push({ op: 'LE' });
+      this.emit(out, { op: 'LOAD', name: idxTmp });
+      this.emit(out, { op: 'LOAD', name: lenTmp });
+      this.emit(out, { op: 'LE' });
       const jifEndIdx = out.length;
-      out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+      this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
       // Bind loop var to current element.
-      out.push({ op: 'LOAD', name: listTmp });
-      out.push({ op: 'LOAD', name: idxTmp });
-      out.push({ op: 'LIST_GET' });
-      out.push({ op: 'STORE', name: loopVar });
+      this.emit(out, { op: 'LOAD', name: listTmp });
+      this.emit(out, { op: 'LOAD', name: idxTmp });
+      this.emit(out, { op: 'LIST_GET' });
+      this.emit(out, { op: 'STORE', name: loopVar });
 
       bindings.set(loopVar, { kind: 'loop', type: elemType });
       for (const s of stmt.body) {
@@ -808,16 +847,16 @@ class Compiler {
       }
       bindings.delete(loopVar);
 
-      out.push({ op: 'LOAD', name: idxTmp });
-      out.push({ op: 'PUSH_INT', value: 1 });
-      out.push({ op: 'ADD' });
-      out.push({ op: 'STORE', name: idxTmp });
-      out.push({ op: 'JUMP', target: topIdx });
+      this.emit(out, { op: 'LOAD', name: idxTmp });
+      this.emit(out, { op: 'PUSH_INT', value: 1 });
+      this.emit(out, { op: 'ADD' });
+      this.emit(out, { op: 'STORE', name: idxTmp });
+      this.emit(out, { op: 'JUMP', target: topIdx });
       (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
-      out.push({ op: 'DELETE', name: loopVar });
-      out.push({ op: 'DELETE', name: listTmp });
-      out.push({ op: 'DELETE', name: idxTmp });
-      out.push({ op: 'DELETE', name: lenTmp });
+      this.emit(out, { op: 'DELETE', name: loopVar });
+      this.emit(out, { op: 'DELETE', name: listTmp });
+      this.emit(out, { op: 'DELETE', name: idxTmp });
+      this.emit(out, { op: 'DELETE', name: lenTmp });
       return;
     }
 
@@ -825,11 +864,11 @@ class Compiler {
     const topIdx = out.length;
     this.compileExpr(stmt.condition, out, bindings);
     const jifEndIdx = out.length;
-    out.push({ op: 'JUMP_IF_FALSE', target: -1 });
+    this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
     for (const s of stmt.body) {
       this.compileStatement(s, out, bindings);
     }
-    out.push({ op: 'JUMP', target: topIdx });
+    this.emit(out, { op: 'JUMP', target: topIdx });
     (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
   }
 
@@ -840,24 +879,24 @@ class Compiler {
   ): void {
     const rt = this.currentFuncReturnType;
     if (rt === undefined) {
-      throw new CompileError(`'return' outside of function body`);
+      throw new CompileError(`'return' outside of function body`, this.currentLoc);
     }
     if (rt === null) {
       // Void function
       if (stmt.value !== null) {
         throw new CompileError(
           `void function '${this.currentFuncName}' cannot return a value`,
-        );
+        this.currentLoc);
       }
-      out.push({ op: 'PUSH_INT', value: 0 });
-      out.push({ op: 'RETURN' });
+      this.emit(out, { op: 'PUSH_INT', value: 0 });
+      this.emit(out, { op: 'RETURN' });
       return;
     }
     // Typed function
     if (stmt.value === null) {
       throw new CompileError(
         `typed function '${this.currentFuncName}' must return a ${typeToString(rt)}`,
-      );
+      this.currentLoc);
     }
     // Smuggling ban: a typed function that `return NAME` where NAME is a readonly list → error.
     // (Also: the return type itself is never readonly per spec §8.)
@@ -866,7 +905,7 @@ class Compiler {
       if (info?.type && info.type.kind === 'list' && info.type.readonly) {
         throw new CompileError(
           `cannot return readonly-list reference '${stmt.value.name}' from function '${this.currentFuncName}'`,
-        );
+        this.currentLoc);
       }
     }
     const st = this.staticType(stmt.value, bindings);
@@ -874,35 +913,35 @@ class Compiler {
       if (st.kind !== rt.kind) {
         throw new CompileError(
           `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
-        );
+        this.currentLoc);
       }
       if (rt.kind === 'scalar' && st.kind === 'scalar' && rt.name !== st.name) {
         throw new CompileError(
           `Type mismatch: function '${this.currentFuncName}' declared to return ${rt.name}, but return expression has type ${st.name}`,
-        );
+        this.currentLoc);
       }
       if (rt.kind === 'list' && st.kind === 'list') {
         if (rt.element !== st.element) {
           throw new CompileError(
             `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
-          );
+          this.currentLoc);
         }
         if (st.readonly && !rt.readonly) {
           throw new CompileError(
             `cannot return readonly-list reference from function '${this.currentFuncName}'`,
-          );
+          this.currentLoc);
         }
       }
     }
     this.compileExpr(stmt.value, out, bindings);
     if (st === null && rt.kind === 'scalar') {
-      out.push({
+      this.emit(out, {
         op: 'CHECK_TYPE',
         expected: rt.name,
         context: `function '${this.currentFuncName}' return value`,
       });
     }
-    out.push({ op: 'RETURN' });
+    this.emit(out, { op: 'RETURN' });
   }
 
   private compileExpr(
@@ -910,26 +949,39 @@ class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
+    this.locStack.push(locOf(expr) ?? this.currentLoc);
+    try {
+      this.compileExprInner(expr, out, bindings);
+    } finally {
+      this.locStack.pop();
+    }
+  }
+
+  private compileExprInner(
+    expr: Expression,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
     switch (expr.type) {
       case 'NumberLiteral':
-        out.push({ op: 'PUSH_INT', value: expr.value });
+        this.emit(out, { op: 'PUSH_INT', value: expr.value });
         break;
       case 'StringLiteral':
-        out.push({ op: 'PUSH_STR', value: expr.value });
+        this.emit(out, { op: 'PUSH_STR', value: expr.value });
         break;
       case 'BooleanLiteral':
-        out.push({ op: 'PUSH_BOOL', value: expr.value });
+        this.emit(out, { op: 'PUSH_BOOL', value: expr.value });
         break;
       case 'IdentifierExpression':
         if (this.functionReturnTypes.get(expr.name) === null) {
           throw new CompileError(
             `void function '${expr.name}' cannot be used as a value`,
-          );
+          this.currentLoc);
         }
-        out.push({ op: 'LOAD', name: expr.name });
+        this.emit(out, { op: 'LOAD', name: expr.name });
         break;
       case 'ItExpression':
-        out.push({ op: 'LOAD_IT' });
+        this.emit(out, { op: 'LOAD_IT' });
         break;
       case 'BinaryExpression':
         this.compileBinary(expr, out, bindings);
@@ -940,14 +992,14 @@ class Compiler {
           if (t && !(t.kind === 'scalar' && t.name === 'number')) {
             throw new CompileError(
               `unary '-' requires number, got ${typeToString(t)}`,
-            );
+            this.currentLoc);
           }
-          out.push({ op: 'PUSH_INT', value: 0 });
+          this.emit(out, { op: 'PUSH_INT', value: 0 });
           this.compileExpr(expr.operand, out, bindings);
-          out.push({ op: 'SUB' });
+          this.emit(out, { op: 'SUB' });
         } else {
           this.compileExpr(expr.operand, out, bindings);
-          out.push({ op: 'NOT' });
+          this.emit(out, { op: 'NOT' });
         }
         break;
       case 'CallStatement': {
@@ -955,7 +1007,7 @@ class Compiler {
         if (rt === null) {
           throw new CompileError(
             `void function '${expr.name}' cannot be used as a value`,
-          );
+          this.currentLoc);
         }
         this.compileCallStmt(expr, out, bindings);
         break;
@@ -966,24 +1018,24 @@ class Compiler {
       case 'ItemAccessExpression':
         this.compileExpr(expr.target, out, bindings);
         this.compileExpr(expr.index, out, bindings);
-        out.push({ op: 'LIST_GET' });
+        this.emit(out, { op: 'LIST_GET' });
         break;
       case 'FirstItemExpression':
         this.compileExpr(expr.target, out, bindings);
-        out.push({ op: 'PUSH_INT', value: 1 });
-        out.push({ op: 'LIST_GET' });
+        this.emit(out, { op: 'PUSH_INT', value: 1 });
+        this.emit(out, { op: 'LIST_GET' });
         break;
       case 'LastItemExpression': {
         // LOAD list; LENGTH; LIST_GET — but we need the list twice.
         // Use a fresh temp.
         const tmp = this.freshName('last');
         this.compileExpr(expr.target, out, bindings);
-        out.push({ op: 'STORE', name: tmp });
-        out.push({ op: 'LOAD', name: tmp });
-        out.push({ op: 'LOAD', name: tmp });
-        out.push({ op: 'LENGTH' });
-        out.push({ op: 'LIST_GET' });
-        out.push({ op: 'DELETE', name: tmp });
+        this.emit(out, { op: 'STORE', name: tmp });
+        this.emit(out, { op: 'LOAD', name: tmp });
+        this.emit(out, { op: 'LOAD', name: tmp });
+        this.emit(out, { op: 'LENGTH' });
+        this.emit(out, { op: 'LIST_GET' });
+        this.emit(out, { op: 'DELETE', name: tmp });
         break;
       }
       case 'LengthExpression': {
@@ -991,10 +1043,10 @@ class Compiler {
         if (tt !== null && tt.kind === 'scalar' && tt.name !== 'string') {
           throw new CompileError(
             `'length of' requires a list or string, got ${typeToString(tt)}`,
-          );
+          this.currentLoc);
         }
         this.compileExpr(expr.target, out, bindings);
-        out.push({ op: 'LENGTH' });
+        this.emit(out, { op: 'LENGTH' });
         break;
       }
       case 'CharacterAccessExpression': {
@@ -1002,11 +1054,11 @@ class Compiler {
         if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
           throw new CompileError(
             `'character N of' requires a string, got ${typeToString(tt)}`,
-          );
+          this.currentLoc);
         }
         this.compileExpr(expr.target, out, bindings);
         this.compileExpr(expr.index, out, bindings);
-        out.push({ op: 'STR_CHAR_AT' });
+        this.emit(out, { op: 'STR_CHAR_AT' });
         break;
       }
       case 'FirstCharacterExpression': {
@@ -1014,11 +1066,11 @@ class Compiler {
         if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
           throw new CompileError(
             `'first character of' requires a string, got ${typeToString(tt)}`,
-          );
+          this.currentLoc);
         }
         this.compileExpr(expr.target, out, bindings);
-        out.push({ op: 'PUSH_INT', value: 1 });
-        out.push({ op: 'STR_CHAR_AT' });
+        this.emit(out, { op: 'PUSH_INT', value: 1 });
+        this.emit(out, { op: 'STR_CHAR_AT' });
         break;
       }
       case 'LastCharacterExpression': {
@@ -1026,16 +1078,16 @@ class Compiler {
         if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
           throw new CompileError(
             `'last character of' requires a string, got ${typeToString(tt)}`,
-          );
+          this.currentLoc);
         }
         const tmp = this.freshName('lastch');
         this.compileExpr(expr.target, out, bindings);
-        out.push({ op: 'STORE', name: tmp });
-        out.push({ op: 'LOAD', name: tmp });
-        out.push({ op: 'LOAD', name: tmp });
-        out.push({ op: 'LENGTH' });
-        out.push({ op: 'STR_CHAR_AT' });
-        out.push({ op: 'DELETE', name: tmp });
+        this.emit(out, { op: 'STORE', name: tmp });
+        this.emit(out, { op: 'LOAD', name: tmp });
+        this.emit(out, { op: 'LOAD', name: tmp });
+        this.emit(out, { op: 'LENGTH' });
+        this.emit(out, { op: 'STR_CHAR_AT' });
+        this.emit(out, { op: 'DELETE', name: tmp });
         break;
       }
       case 'SubstringExpression': {
@@ -1043,12 +1095,12 @@ class Compiler {
         if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
           throw new CompileError(
             `'characters A to B of' requires a string, got ${typeToString(tt)}`,
-          );
+          this.currentLoc);
         }
         this.compileExpr(expr.target, out, bindings);
         this.compileExpr(expr.from, out, bindings);
         this.compileExpr(expr.to, out, bindings);
-        out.push({ op: 'STR_SUBSTRING' });
+        this.emit(out, { op: 'STR_SUBSTRING' });
         break;
       }
       case 'ReadFileLinesExpression': {
@@ -1056,10 +1108,10 @@ class Compiler {
         if (pt && !(pt.kind === 'scalar' && pt.name === 'string')) {
           throw new CompileError(
             `'lines of file' requires a string path, got ${typeToString(pt)}`,
-          );
+          this.currentLoc);
         }
         this.compileExpr(expr.path, out, bindings);
-        out.push({ op: 'READ_FILE_LINES' });
+        this.emit(out, { op: 'READ_FILE_LINES' });
         break;
       }
     }
@@ -1071,7 +1123,7 @@ class Compiler {
     bindings: Bindings,
   ): void {
     if (expr.kind === 'empty') {
-      out.push({ op: 'MAKE_EMPTY_LIST', elementType: expr.elementType! });
+      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: expr.elementType! });
       return;
     }
     // Nonempty: static type check when knowable.
@@ -1081,19 +1133,19 @@ class Compiler {
       const t = this.staticType(e, bindings);
       if (t === null) { allKnown = false; continue; }
       if (t.kind !== 'scalar') {
-        throw new CompileError(`nested lists not supported`);
+        throw new CompileError(`nested lists not supported`, this.currentLoc);
       }
       if (inferred === null) inferred = t.name;
       else if (inferred !== t.name) {
         throw new CompileError(
           `Type mismatch in list literal: mixed element types (${inferred} and ${t.name})`,
-        );
+        this.currentLoc);
       }
     }
     for (const e of expr.elements) {
       this.compileExpr(e, out, bindings);
     }
-    out.push({
+    this.emit(out, {
       op: 'MAKE_LIST',
       count: expr.elements.length,
       elementType: allKnown ? inferred : null,
@@ -1112,51 +1164,51 @@ class Compiler {
         if (rt !== null && !(rt.kind === 'scalar' && rt.name === 'string')) {
           throw new CompileError(
             `Type mismatch: 'contains' on string requires a string on the right, got ${typeToString(rt)}`,
-          );
+          this.currentLoc);
         }
       } else if (lt !== null && lt.kind === 'scalar' && lt.name !== 'string') {
         throw new CompileError(
           `'contains' requires a list or string on the left, got ${typeToString(lt)}`,
-        );
+        this.currentLoc);
       } else if (lt !== null && lt.kind === 'list') {
         // Existing list element-type check
         const rt = this.staticType(expr.right, bindings);
         if (rt && rt.kind === 'scalar' && rt.name !== lt.element) {
           throw new CompileError(
             `Type mismatch: 'contains' value type ${rt.name} does not match list element type ${lt.element}`,
-          );
+          this.currentLoc);
         }
         if (rt && rt.kind === 'list') {
           throw new CompileError(
             `Type mismatch: 'contains' value cannot be a list`,
-          );
+          this.currentLoc);
         }
       }
       this.compileExpr(expr.left, out, bindings);
       this.compileExpr(expr.right, out, bindings);
-      out.push({ op: 'CONTAINS' });
+      this.emit(out, { op: 'CONTAINS' });
       return;
     }
     this.compileExpr(expr.left, out, bindings);
     this.compileExpr(expr.right, out, bindings);
     switch (expr.operator) {
-      case '+':  out.push({ op: 'ADD' }); break;
-      case '-':  out.push({ op: 'SUB' }); break;
-      case '*':  out.push({ op: 'MUL' }); break;
-      case '/':  out.push({ op: 'DIV' }); break;
-      case '&':  out.push({ op: 'CONCAT' }); break;
-      case 'mod': out.push({ op: 'MOD' }); break;
-      case '**': out.push({ op: 'POW' }); break;
-      case '==': out.push({ op: 'EQ' }); break;
-      case '!=': out.push({ op: 'NEQ' }); break;
-      case '<':  out.push({ op: 'LT' }); break;
-      case '<=': out.push({ op: 'LE' }); break;
-      case '>':  out.push({ op: 'GT' }); break;
-      case '>=': out.push({ op: 'GE' }); break;
-      case 'and': out.push({ op: 'AND' }); break;
-      case 'or':  out.push({ op: 'OR' }); break;
+      case '+':  this.emit(out, { op: 'ADD' }); break;
+      case '-':  this.emit(out, { op: 'SUB' }); break;
+      case '*':  this.emit(out, { op: 'MUL' }); break;
+      case '/':  this.emit(out, { op: 'DIV' }); break;
+      case '&':  this.emit(out, { op: 'CONCAT' }); break;
+      case 'mod': this.emit(out, { op: 'MOD' }); break;
+      case '**': this.emit(out, { op: 'POW' }); break;
+      case '==': this.emit(out, { op: 'EQ' }); break;
+      case '!=': this.emit(out, { op: 'NEQ' }); break;
+      case '<':  this.emit(out, { op: 'LT' }); break;
+      case '<=': this.emit(out, { op: 'LE' }); break;
+      case '>':  this.emit(out, { op: 'GT' }); break;
+      case '>=': this.emit(out, { op: 'GE' }); break;
+      case 'and': this.emit(out, { op: 'AND' }); break;
+      case 'or':  this.emit(out, { op: 'OR' }); break;
       default:
-        throw new CompileError(`Unknown operator: ${expr.operator}`);
+        throw new CompileError(`Unknown operator: ${expr.operator}`, this.currentLoc);
     }
   }
 

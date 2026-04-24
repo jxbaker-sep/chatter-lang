@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-403 tests, all passing.
+443 tests, all passing.
 
 ## Language spec (current)
 

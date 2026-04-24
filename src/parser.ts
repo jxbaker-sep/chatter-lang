@@ -1,4 +1,5 @@
 import { Token, TokenType } from './lexer';
+import { ChatterError, SourceLocation } from './errors';
 import {
   Program, Statement, Expression,
   SayStatement, SetStatement, FunctionDeclaration, FunctionParam,
@@ -16,9 +17,13 @@ import {
   ExpectStatement,
 } from './ast';
 
-export class ParseError extends Error {
+function locOfToken(t: Token): SourceLocation {
+  return { line: t.line, col: t.col, length: Math.max(1, t.value.length) };
+}
+
+export class ParseError extends ChatterError {
   constructor(message: string, public token: Token) {
-    super(message);
+    super(message, locOfToken(token));
     this.name = 'ParseError';
   }
 }
@@ -60,13 +65,13 @@ export function parse(tokens: Token[], source?: string): Program {
     const tok = peek();
     if (tok.type !== type) {
       throw new ParseError(
-        `Expected ${type}${value ? ` '${value}'` : ''} but got ${tok.type} '${tok.value}' at line ${tok.line}`,
+        `Expected ${type}${value ? ` '${value}'` : ''} but got ${tok.type} '${tok.value}'`,
         tok,
       );
     }
     if (value !== undefined && tok.value !== value) {
       throw new ParseError(
-        `Expected '${value}' but got '${tok.value}' at line ${tok.line}`,
+        `Expected '${value}' but got '${tok.value}'`,
         tok,
       );
     }
@@ -86,7 +91,21 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'Program', body };
   }
 
+  function withLoc<T extends object>(node: T, tok: Token): T {
+    (node as any).line = tok.line;
+    (node as any).col = tok.col;
+    (node as any).length = Math.max(1, tok.value.length);
+    return node;
+  }
+
   function parseStatement(): Statement {
+    const startTok = peek();
+    const stmt = parseStatementInner();
+    if ((stmt as any).line === undefined) withLoc(stmt, startTok);
+    return stmt;
+  }
+
+  function parseStatementInner(): Statement {
     const tok = peek();
     if (tok.type === 'KEYWORD') {
       switch (tok.value) {
@@ -109,14 +128,14 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'read':     return parseReadFileStatement();
         case 'expect':   return parseExpectStatement();
         default:
-          throw new ParseError(`Unexpected keyword '${tok.value}' at line ${tok.line}`, tok);
+          throw new ParseError(`Unexpected keyword '${tok.value}'`, tok);
       }
     }
     if (tok.type === 'IDENT') {
       return parseCallStatement();
     }
     throw new ParseError(
-      `Expected statement at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+      `Expected statement, got ${tok.type} '${tok.value}'`,
       tok,
     );
   }
@@ -242,7 +261,7 @@ export function parse(tokens: Token[], source?: string): Program {
     if (tok.type === 'KEYWORD' && tok.value === 'readonly') {
       if (!allowReadonly) {
         throw new ParseError(
-          `'readonly' is only allowed in parameter type annotations at line ${tok.line}`,
+          `'readonly' is only allowed in parameter type annotations`,
           tok,
         );
       }
@@ -250,7 +269,7 @@ export function parse(tokens: Token[], source?: string): Program {
       // must be followed by `list of TYPE`
       if (!(peek().type === 'KEYWORD' && peek().value === 'list')) {
         throw new ParseError(
-          `'readonly' must be followed by 'list of TYPE' at line ${peek().line}`,
+          `'readonly' must be followed by 'list of TYPE'`,
           peek(),
         );
       }
@@ -258,7 +277,7 @@ export function parse(tokens: Token[], source?: string): Program {
       consume('KEYWORD', 'of');
       const inner = parseTypeAnnotation(false);
       if (inner.kind !== 'scalar') {
-        throw new ParseError(`nested lists not supported at line ${tok.line}`, tok);
+        throw new ParseError(`nested lists not supported`, tok);
       }
       return { kind: 'list', element: inner.name, readonly: true };
     }
@@ -267,19 +286,19 @@ export function parse(tokens: Token[], source?: string): Program {
       consume('KEYWORD', 'of');
       const inner = parseTypeAnnotation(false);
       if (inner.kind !== 'scalar') {
-        throw new ParseError(`nested lists not supported at line ${tok.line}`, tok);
+        throw new ParseError(`nested lists not supported`, tok);
       }
       return { kind: 'list', element: inner.name, readonly: false };
     }
     if (tok.type === 'TYPE') {
       advance();
       if (tok.value !== 'number' && tok.value !== 'string' && tok.value !== 'boolean') {
-        throw new ParseError(`Invalid type '${tok.value}' at line ${tok.line}`, tok);
+        throw new ParseError(`Invalid type '${tok.value}'`, tok);
       }
       return { kind: 'scalar', name: tok.value as ScalarTypeName };
     }
     throw new ParseError(
-      `Expected type annotation at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+      `Expected type annotation, got ${tok.type} '${tok.value}'`,
       tok,
     );
   }
@@ -301,7 +320,7 @@ export function parse(tokens: Token[], source?: string): Program {
       if (tok.type === 'KEYWORD') {
         if (NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
           throw new ParseError(
-            `Cannot use reserved keyword '${tok.value}' as parameter name at line ${tok.line}`,
+            `Cannot use reserved keyword '${tok.value}' as parameter name`,
             tok,
           );
         }
@@ -309,7 +328,7 @@ export function parse(tokens: Token[], source?: string): Program {
         return tok;
       }
       throw new ParseError(
-        `Expected parameter name at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+        `Expected parameter name, got ${tok.type} '${tok.value}'`,
         tok,
       );
     };
@@ -319,7 +338,7 @@ export function parse(tokens: Token[], source?: string): Program {
     // Reject the legacy paren form with an explicit error mentioning `takes`.
     if (peek().type === 'LPAREN') {
       throw new ParseError(
-        `Function parameters use the 'takes' form now; parentheses are no longer allowed (line ${peek().line})`,
+        `Function parameters use the 'takes' form now; parentheses are no longer allowed`,
         peek(),
       );
     }
@@ -341,12 +360,12 @@ export function parse(tokens: Token[], source?: string): Program {
           // Produce a targeted error for stop keywords used where a label is expected.
           if (next.type === 'KEYWORD' && NAMED_ARG_STOP_KEYWORDS.has(next.value)) {
             throw new ParseError(
-              `Cannot use reserved keyword '${next.value}' as a parameter label at line ${next.line}`,
+              `Cannot use reserved keyword '${next.value}' as a parameter label`,
               next,
             );
           }
           throw new ParseError(
-            `Expected parameter label or 'is' at line ${next.line}, got ${next.type} '${next.value}'`,
+            `Expected parameter label or 'is', got ${next.type} '${next.value}'`,
             next,
           );
         }
@@ -362,7 +381,7 @@ export function parse(tokens: Token[], source?: string): Program {
     for (const p of params) {
       if (seen.has(p.name)) {
         throw new ParseError(
-          `Duplicate parameter name '${p.name}' in function '${nameTok.value}' at line ${nameTok.line}`,
+          `Duplicate parameter name '${p.name}' in function '${nameTok.value}'`,
           nameTok,
         );
       }
@@ -513,7 +532,7 @@ export function parse(tokens: Token[], source?: string): Program {
       const varTok = peek();
       if (varTok.type !== 'IDENT') {
         throw new ParseError(
-          `Expected loop variable name at line ${varTok.line}, got ${varTok.type} '${varTok.value}'`,
+          `Expected loop variable name, got ${varTok.type} '${varTok.value}'`,
           varTok,
         );
       }
@@ -625,7 +644,10 @@ export function parse(tokens: Token[], source?: string): Program {
   // --- Expression parsing with precedence ---
 
   function parseExpression(): Expression {
-    return parseLogical();
+    const startTok = peek();
+    const expr = parseLogical();
+    if ((expr as any).line === undefined) withLoc(expr, startTok);
+    return expr;
   }
 
   // Flat `and`/`or` level — no mixing without parentheses.
@@ -638,7 +660,7 @@ export function parse(tokens: Token[], source?: string): Program {
         firstOp = op;
       } else if (op !== firstOp) {
         throw new ParseError(
-          `Mixing 'and' and 'or' requires parentheses at line ${peek().line}`,
+          `Mixing 'and' and 'or' requires parentheses`,
           peek(),
         );
       }
@@ -707,7 +729,7 @@ export function parse(tokens: Token[], source?: string): Program {
           op = '<=';
         } else {
           throw new ParseError(
-            `Expected 'least' or 'most' after 'is at' at line ${after.line}, got ${after.type} '${after.value}'`,
+            `Expected 'least' or 'most' after 'is at', got ${after.type} '${after.value}'`,
             after,
           );
         }
@@ -783,14 +805,14 @@ export function parse(tokens: Token[], source?: string): Program {
         consume('KEYWORD', 'of');
         // Reject nested `list of list of ...`
         if (peek().type === 'KEYWORD' && (peek().value === 'list' || peek().value === 'readonly')) {
-          throw new ParseError(`nested lists not supported at line ${peek().line}`, peek());
+          throw new ParseError(`nested lists not supported`, peek());
         }
         const elements: Expression[] = [];
         elements.push(parsePrimary());
         while (peek().type === 'COMMA') {
           advance();
           if (peek().type === 'KEYWORD' && (peek().value === 'list' || peek().value === 'readonly')) {
-            throw new ParseError(`nested lists not supported at line ${peek().line}`, peek());
+            throw new ParseError(`nested lists not supported`, peek());
           }
           elements.push(parsePrimary());
         }
@@ -802,11 +824,11 @@ export function parse(tokens: Token[], source?: string): Program {
         consume('KEYWORD', 'of');
         const tTok = peek();
         if (tTok.type !== 'TYPE') {
-          throw new ParseError(`Expected element type after 'empty list of' at line ${tTok.line}`, tTok);
+          throw new ParseError(`Expected element type after 'empty list of'`, tTok);
         }
         advance();
         if (tTok.value === 'list' || tTok.value === 'readonly') {
-          throw new ParseError(`nested lists not supported at line ${tTok.line}`, tTok);
+          throw new ParseError(`nested lists not supported`, tTok);
         }
         return {
           type: 'ListLiteral',
@@ -908,7 +930,7 @@ export function parse(tokens: Token[], source?: string): Program {
       }
       if (NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
         throw new ParseError(
-          `Unexpected keyword '${tok.value}' in expression at line ${tok.line}`,
+          `Unexpected keyword '${tok.value}' in expression`,
           tok,
         );
       }
@@ -924,7 +946,7 @@ export function parse(tokens: Token[], source?: string): Program {
     }
 
     throw new ParseError(
-      `Expected expression at line ${tok.line}, got ${tok.type} '${tok.value}'`,
+      `Expected expression, got ${tok.type} '${tok.value}'`,
       tok,
     );
   }
