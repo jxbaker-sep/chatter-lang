@@ -13,6 +13,7 @@ import {
   RemoveItemStatement, TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
+  EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement, UseStatement,
 } from './ast';
@@ -69,6 +70,7 @@ function canStartExpression(tok: Token): boolean {
 
 export function parse(tokens: Token[], source?: string): Program {
   let pos = 0;
+  let indexSlotDepth = 0;
   const sourceLines: string[] | null = source !== undefined ? source.split('\n') : null;
 
   function tokenEndCol(t: Token): number {
@@ -981,6 +983,14 @@ export function parse(tokens: Token[], source?: string): Program {
   function parsePrimary(): Expression {
     const tok = peek();
 
+    // `end` as index-slot sentinel — only inside the index slot of
+    // character/characters/item forms. Elsewhere, `end` remains a reserved
+    // keyword (block terminator) and parsing falls through to the usual path.
+    if (indexSlotDepth > 0 && tok.type === 'KEYWORD' && tok.value === 'end') {
+      advance();
+      return { type: 'EndIndexSentinel' } as EndIndexSentinel;
+    }
+
     // Unary minus: `-EXPR` where EXPR is another primary.
     // Binds tighter than `**` so `-2 ** 2` is `(-2) ** 2 = 4`. Matches how
     // most people read a negative literal.
@@ -1032,7 +1042,9 @@ export function parse(tokens: Token[], source?: string): Program {
       }
       if (tok.value === 'item') {
         advance();
-        const index = parseExpression();
+        indexSlotDepth++;
+        let index: Expression;
+        try { index = parseExpression(); } finally { indexSlotDepth--; }
         consume('KEYWORD', 'of');
         const target = parsePrimary();
         return { type: 'ItemAccessExpression', index, target } as ItemAccessExpression;
@@ -1079,16 +1091,23 @@ export function parse(tokens: Token[], source?: string): Program {
           const code = parsePrimary();
           return { type: 'CharacterFromCodeExpression', code } as any;
         }
-        const index = parseExpression();
+        const index = (() => {
+          indexSlotDepth++;
+          try { return parseExpression(); } finally { indexSlotDepth--; }
+        })();
         consume('KEYWORD', 'of');
         const target = parsePrimary();
         return { type: 'CharacterAccessExpression', index, target } as CharacterAccessExpression;
       }
       if (tok.value === 'characters') {
         advance();
-        const from = parseExpression();
-        consume('KEYWORD', 'to');
-        const to = parseExpression();
+        let from: Expression, to: Expression;
+        indexSlotDepth++;
+        try {
+          from = parseExpression();
+          consume('KEYWORD', 'to');
+          to = parseExpression();
+        } finally { indexSlotDepth--; }
         consume('KEYWORD', 'of');
         const target = parsePrimary();
         return { type: 'SubstringExpression', from, to, target } as SubstringExpression;

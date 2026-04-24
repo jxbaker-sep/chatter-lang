@@ -12,12 +12,12 @@ export function parse takes string input returns number is
   set zero to code of "0"
   var start is 1
   var sign is 1
-  expect length of input is at least 1, "expected a number but got an empty string"
+  expect length of input to be at least 1, "expected a number but got an empty string"
   if character 1 of input is "-"
     change start to 2
     change sign to -1
   end if
-  expect start is at most length of input, "expected a number but got " & input
+  expect start to be at most length of input, "expected a number but got " & input
   repeat with i from start to length of input
     multiply result by 10
     set c to character i of input

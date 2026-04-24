@@ -33,7 +33,12 @@ export type Expression = (
   | CodeOfExpression
   | CharacterFromCodeExpression
   | IsCharClassExpression
+  | EndIndexSentinel
 ) & Located;
+
+export interface EndIndexSentinel {
+  type: 'EndIndexSentinel';
+}
 
 export type Statement = (
 

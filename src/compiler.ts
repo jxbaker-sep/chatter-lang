@@ -9,6 +9,7 @@ import {
   RemoveItemStatement, TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
+  EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement,
 } from './ast';
@@ -25,6 +26,24 @@ export class CompileError extends ChatterError {
 function locOf(node: Located | undefined | null): SourceLocation | undefined {
   if (!node || node.line === undefined || node.col === undefined) return undefined;
   return { line: node.line, col: node.col, length: node.length };
+}
+
+function containsEndSentinel(expr: Expression | null | undefined): boolean {
+  if (!expr) return false;
+  switch (expr.type) {
+    case 'EndIndexSentinel': return true;
+    case 'BinaryExpression':
+      return containsEndSentinel(expr.left) || containsEndSentinel(expr.right);
+    case 'UnaryExpression':
+      return containsEndSentinel(expr.operand);
+    // Stop at nested indexable forms: their index slots have their own scope.
+    case 'CharacterAccessExpression':
+    case 'ItemAccessExpression':
+    case 'SubstringExpression':
+      return false;
+    default:
+      return false;
+  }
 }
 
 export type ChatterType =
@@ -91,6 +110,7 @@ export class Compiler {
   private moduleId: string | null = null;
   private imports: Map<string, ImportedFunction> = new Map();
   private localFunctions = new Map<string, FunctionDeclaration>();
+  private endLenTmpStack: string[] = [];
 
   private get currentLoc(): SourceLocation | undefined {
     return this.locStack[this.locStack.length - 1];
@@ -1142,11 +1162,29 @@ export class Compiler {
       case 'ListLiteral':
         this.compileListLiteral(expr, out, bindings);
         break;
-      case 'ItemAccessExpression':
-        this.compileExpr(expr.target, out, bindings);
-        this.compileExpr(expr.index, out, bindings);
-        this.emit(out, { op: 'LIST_GET' });
+      case 'ItemAccessExpression': {
+        if (containsEndSentinel(expr.index)) {
+          const tgtTmp = this.freshName('tgt');
+          const lenTmp = this.freshName('len');
+          this.compileExpr(expr.target, out, bindings);
+          this.emit(out, { op: 'STORE', name: tgtTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.emit(out, { op: 'LENGTH' });
+          this.emit(out, { op: 'STORE', name: lenTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.endLenTmpStack.push(lenTmp);
+          this.compileExpr(expr.index, out, bindings);
+          this.endLenTmpStack.pop();
+          this.emit(out, { op: 'LIST_GET' });
+          this.emit(out, { op: 'DELETE', name: tgtTmp });
+          this.emit(out, { op: 'DELETE', name: lenTmp });
+        } else {
+          this.compileExpr(expr.target, out, bindings);
+          this.compileExpr(expr.index, out, bindings);
+          this.emit(out, { op: 'LIST_GET' });
+        }
         break;
+      }
       case 'FirstItemExpression':
         this.compileExpr(expr.target, out, bindings);
         this.emit(out, { op: 'PUSH_INT', value: 1 });
@@ -1183,9 +1221,26 @@ export class Compiler {
             `'character N of' requires a string, got ${typeToString(tt)}`,
           this.currentLoc);
         }
-        this.compileExpr(expr.target, out, bindings);
-        this.compileExpr(expr.index, out, bindings);
-        this.emit(out, { op: 'STR_CHAR_AT' });
+        if (containsEndSentinel(expr.index)) {
+          const tgtTmp = this.freshName('tgt');
+          const lenTmp = this.freshName('len');
+          this.compileExpr(expr.target, out, bindings);
+          this.emit(out, { op: 'STORE', name: tgtTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.emit(out, { op: 'LENGTH' });
+          this.emit(out, { op: 'STORE', name: lenTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.endLenTmpStack.push(lenTmp);
+          this.compileExpr(expr.index, out, bindings);
+          this.endLenTmpStack.pop();
+          this.emit(out, { op: 'STR_CHAR_AT' });
+          this.emit(out, { op: 'DELETE', name: tgtTmp });
+          this.emit(out, { op: 'DELETE', name: lenTmp });
+        } else {
+          this.compileExpr(expr.target, out, bindings);
+          this.compileExpr(expr.index, out, bindings);
+          this.emit(out, { op: 'STR_CHAR_AT' });
+        }
         break;
       }
       case 'FirstCharacterExpression': {
@@ -1224,10 +1279,38 @@ export class Compiler {
             `'characters A to B of' requires a string, got ${typeToString(tt)}`,
           this.currentLoc);
         }
-        this.compileExpr(expr.target, out, bindings);
-        this.compileExpr(expr.from, out, bindings);
-        this.compileExpr(expr.to, out, bindings);
-        this.emit(out, { op: 'STR_SUBSTRING' });
+        if (containsEndSentinel(expr.from) || containsEndSentinel(expr.to)) {
+          const tgtTmp = this.freshName('tgt');
+          const lenTmp = this.freshName('len');
+          this.compileExpr(expr.target, out, bindings);
+          this.emit(out, { op: 'STORE', name: tgtTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.emit(out, { op: 'LENGTH' });
+          this.emit(out, { op: 'STORE', name: lenTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.endLenTmpStack.push(lenTmp);
+          this.compileExpr(expr.from, out, bindings);
+          this.compileExpr(expr.to, out, bindings);
+          this.endLenTmpStack.pop();
+          this.emit(out, { op: 'STR_SUBSTRING' });
+          this.emit(out, { op: 'DELETE', name: tgtTmp });
+          this.emit(out, { op: 'DELETE', name: lenTmp });
+        } else {
+          this.compileExpr(expr.target, out, bindings);
+          this.compileExpr(expr.from, out, bindings);
+          this.compileExpr(expr.to, out, bindings);
+          this.emit(out, { op: 'STR_SUBSTRING' });
+        }
+        break;
+      }
+      case 'EndIndexSentinel': {
+        if (this.endLenTmpStack.length === 0) {
+          throw new CompileError(
+            `'end' can only be used inside an index slot of 'character', 'characters', or 'item'`,
+          this.currentLoc);
+        }
+        const name = this.endLenTmpStack[this.endLenTmpStack.length - 1];
+        this.emit(out, { op: 'LOAD', name });
         break;
       }
       case 'ReadFileLinesExpression': {
@@ -1425,6 +1508,8 @@ export class Compiler {
         return null;
       }
       case 'LengthExpression':
+        return { kind: 'scalar', name: 'number' };
+      case 'EndIndexSentinel':
         return { kind: 'scalar', name: 'number' };
       case 'CharacterAccessExpression':
       case 'FirstCharacterExpression':

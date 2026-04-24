@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-512 tests passing (plus 11 intentionally-failing stdlib_parse_* tests tracked separately).
+512 tests passing (plus 11 intentionally-failing stdlib_parse_* tests tracked separately). Total: 534 (512 + 11 + 11 `end` sentinel golden tests).
 
 ## Language spec (current)
 
@@ -178,8 +178,8 @@ One file = one module. The file path (normalized absolute) identifies the module
 - **Concat** `&` — binary OP, **lower precedence than `+`/`-`** (own level between equality and additive), left-assoc. Both sides coerced to string (`String(n)` for numbers, `"true"`/`"false"` for booleans, `say`-style `[...]` formatter for lists). Always returns string. Never a type error. Example: `"x=" & 1 + 2` → `"x=3"` because `+` binds tighter than `&`.
 - **`length of S`** — polymorphic with list; returns character count.
 - **`S contains T`** — polymorphic with list; both sides must be strings (enforced statically when LHS type is known-string; runtime error otherwise). `""` contains `""` → true.
-- **`character N of S`** — 1-indexed char access; OOB/non-string/non-number → runtime error.
-- **`characters A to B of S`** — inclusive substring. `A > B` → `""`. `A < 1` or `B > length` → runtime error.
+- **`character N of S`** — 1-indexed char access; OOB/non-string/non-number → runtime error. `N` may use the `end` index sentinel (see below).
+- **`characters A to B of S`** — inclusive substring. `A > B` → `""`. `A < 1` or `B > length` → runtime error. Both `A` and `B` may use the `end` index sentinel (see below).
 - **`first character of S`** / **`last character of S`** — sugar (parse to dedicated AST nodes). Empty string → runtime error. `last` uses a compiler temp to avoid double-evaluating the target (parallel with `last item of`).
 - **Character primitives (Phase 1)**:
   - **`code of S`** — expression form. Returns the Unicode code point (0..0x10FFFF) of a single-code-point string. Runtime error on empty or multi-code-point strings. `code` is **not** a reserved keyword — parsed contextually when followed by `of`; any existing user variable named `code` still works (e.g. `set code to 5` / `say code`). Compile error when `S` is statically non-string. Does NOT update `it`.
@@ -191,12 +191,23 @@ One file = one module. The file path (normalized absolute) identifies the module
     - Runtime error on empty or multi-code-point `S`; compile error when statically non-string.
     - `a`, `digit`, `letter`, `whitespace` are **not** reserved; parsed contextually after `is` / `is a`. These are boolean expressions and do not update `it`.
 - **Static checks**: `character/characters/first character/last character of X` with statically-known non-string `X` → compile error. `contains` with string LHS + non-string RHS (static) → compile error.
+
+### `end` index sentinel
+Inside the **index slot** of `character N of S`, `characters A to B of S`, and `item N of L`, the bare identifier `end` is sugar for "length of the target" (the value to the right of `of`). It participates in arithmetic like a normal number: `character end - 1 of S`, `characters end - 2 to end of S`, `item end of L`, `character end / 2 of S`, etc.
+
+Scoping: `end` is lexically bound to the **nearest enclosing index slot's target**. So in `character end of (characters 1 to end of s)` the outer `end` is the length of the (already-computed) substring, the inner `end` is the length of `s`. Each index slot gets its own scope.
+
+Evaluation: the target is evaluated exactly once per indexable expression; the length is computed once and reused for every `end` occurrence in that index slot (compiler-emitted temp, parallel with `last item of` / `last character of`).
+
+Shadowing: inside an index slot `end` is **always** the sentinel — it does not resolve to any user binding. Outside an index slot, `end` remains a reserved keyword (block terminator) and does not name a value.
+
+Errors: `end` outside an index slot → parse error (reserved keyword, unchanged from before the feature). Arithmetic with `end` that produces an out-of-range index → the same runtime "Index out of range" error as a literal OOB index.
 - **`&` is the only new OP token.** Lexer change: `+-*/&`.
 
 ### Lists (v1)
 - **Literals**: `list of EXPR (, EXPR)*` (nonempty, at least one element) — element type inferred/checked; `empty list of TYPE` (element type required).
 - **Read ops (expressions)**:
-  - `item N of L` — 1-indexed access; OOB / non-list / non-number index → runtime error.
+  - `item N of L` — 1-indexed access; OOB / non-list / non-number index → runtime error. `N` may use the `end` index sentinel (see below).
   - `first item of L` — sugar for `item 1 of L`; empty → runtime error.
   - `last item of L` — sugar for `item (length) of L`; empty → runtime error.
   - `length of L` — returns number.
