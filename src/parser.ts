@@ -41,7 +41,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
   'list', 'of', 'readonly', 'empty',
   'item', 'first', 'last', 'length', 'contains',
-  'append', 'prepend', 'insert', 'in', 'remove',
+  'append', 'prepend', 'insert', 'remove',
   'character', 'characters',
   'expect',
   'use', 'export',
