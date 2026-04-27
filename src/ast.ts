@@ -25,11 +25,9 @@ export type Expression = (
   | ListLiteral
   | UniqueListLiteral
   | ItemAccessExpression
-  | FirstItemExpression
   | LastItemExpression
   | LengthExpression
   | CharacterAccessExpression
-  | FirstCharacterExpression
   | LastCharacterExpression
   | SubstringExpression
   | ReadFileLinesExpression
@@ -224,11 +222,6 @@ export interface ItemAccessExpression {
   target: Expression;
 }
 
-export interface FirstItemExpression {
-  type: 'FirstItemExpression';
-  target: Expression;
-}
-
 export interface LastItemExpression {
   type: 'LastItemExpression';
   target: Expression;
@@ -242,11 +235,6 @@ export interface LengthExpression {
 export interface CharacterAccessExpression {
   type: 'CharacterAccessExpression';
   index: Expression;
-  target: Expression;
-}
-
-export interface FirstCharacterExpression {
-  type: 'FirstCharacterExpression';
   target: Expression;
 }
 

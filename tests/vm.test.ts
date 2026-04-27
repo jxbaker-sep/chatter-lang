@@ -667,8 +667,8 @@ describe('VM', () => {
       expectRuntimeError('set l to list of 1, 2\nsay item 5 of l');
     });
 
-    test('first/last item of empty → runtime error', () => {
-      expectRuntimeError('set l to empty list of number\nsay first item of l');
+    test('item 1 / last item of empty → runtime error', () => {
+      expectRuntimeError('set l to empty list of number\nsay item 1 of l');
       expectRuntimeError('set l to empty list of string\nsay last item of l');
     });
 
@@ -777,8 +777,8 @@ describe('VM', () => {
       expectRuntimeError('say character 0 of "hi"');
     });
 
-    test('first character of empty string → runtime error', () => {
-      expectRuntimeError('say first character of ""');
+    test('character 1 of empty string → runtime error', () => {
+      expectRuntimeError('say character 1 of ""');
     });
 
     test('substring out of range → runtime error', () => {

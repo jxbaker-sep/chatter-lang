@@ -6,7 +6,7 @@ end repeat
 
 read file "tests/chatter/fixtures/greek.txt"
 say length of it
-say first item of it
+say item 1 of it
 say last item of it
 
 set empty_lines to lines of file "tests/chatter/fixtures/empty.txt"

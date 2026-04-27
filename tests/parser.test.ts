@@ -568,11 +568,10 @@ describe('Parser', () => {
       });
     });
 
-    test('parses first item of / last item of / length of', () => {
-      const ast = parseSource('say first item of xs\nsay last item of xs\nsay length of xs');
-      expect(ast.body[0]).toMatchObject({ expressions: [{ type: 'FirstItemExpression' }] });
-      expect(ast.body[1]).toMatchObject({ expressions: [{ type: 'LastItemExpression' }] });
-      expect(ast.body[2]).toMatchObject({ expressions: [{ type: 'LengthExpression' }] });
+    test('parses last item of / length of', () => {
+      const ast = parseSource('say last item of xs\nsay length of xs');
+      expect(ast.body[0]).toMatchObject({ expressions: [{ type: 'LastItemExpression' }] });
+      expect(ast.body[1]).toMatchObject({ expressions: [{ type: 'LengthExpression' }] });
     });
 
     test('parses contains as binary operator', () => {
@@ -656,14 +655,6 @@ describe('Parser', () => {
       });
     });
 
-    test('parses first character of S', () => {
-      const ast = parseSource('say first character of "hi"');
-      expect((ast.body[0] as any).expressions[0]).toMatchObject({
-        type: 'FirstCharacterExpression',
-        target: { type: 'StringLiteral', value: 'hi' },
-      });
-    });
-
     test('parses last character of S', () => {
       const ast = parseSource('say last character of "hi"');
       expect((ast.body[0] as any).expressions[0]).toMatchObject({
@@ -672,9 +663,9 @@ describe('Parser', () => {
       });
     });
 
-    test('still parses first item of L (lists unaffected)', () => {
-      const ast = parseSource('set l to list of 1\nsay first item of l');
-      expect((ast.body[1] as any).expressions[0].type).toBe('FirstItemExpression');
+    test('first is now usable as identifier', () => {
+      const ast = parseSource('var first is 0');
+      expect(ast.body[0]).toMatchObject({ type: 'VarDeclaration', name: 'first' });
     });
   });
 

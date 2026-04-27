@@ -8,11 +8,11 @@ import {
   NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
   IfStatement, IfBranch, RepeatStatement,
   VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
-  ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
+  ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
   TypeAnnotation, ScalarTypeName,
-  CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
+  CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
@@ -41,7 +41,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
   'list', 'of', 'readonly', 'empty', 'unique',
-  'item', 'first', 'last', 'length', 'contains',
+  'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'remove',
   'character', 'characters',
   'expect',
@@ -52,7 +52,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
 const EXPRESSION_START_KEYWORDS = new Set([
   'true', 'false',
   'not',
-  'first', 'last',
+  'last',
   'length',
   'item',
   'character', 'characters',
@@ -1218,19 +1218,6 @@ export function parse(tokens: Token[], source?: string): Program {
         consume('KEYWORD', 'of');
         const target = parsePrimary();
         return { type: 'ItemAccessExpression', index, target } as ItemAccessExpression;
-      }
-      if (tok.value === 'first') {
-        advance();
-        if (peek().type === 'KEYWORD' && peek().value === 'character') {
-          advance();
-          consume('KEYWORD', 'of');
-          const target = parsePrimary();
-          return { type: 'FirstCharacterExpression', target } as FirstCharacterExpression;
-        }
-        consume('KEYWORD', 'item');
-        consume('KEYWORD', 'of');
-        const target = parsePrimary();
-        return { type: 'FirstItemExpression', target } as FirstItemExpression;
       }
       if (tok.value === 'last') {
         advance();

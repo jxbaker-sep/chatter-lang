@@ -4,11 +4,11 @@ import {
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
   IfStatement, RepeatStatement,
   VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
-  ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
+  ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
   TypeAnnotation, ScalarTypeName,
-  CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
+  CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
@@ -1491,18 +1491,6 @@ export class Compiler {
         }
         break;
       }
-      case 'FirstItemExpression': {
-        const tt = this.staticType(expr.target, bindings);
-        if (tt !== null && tt.kind === 'uniqueList') {
-          throw new CompileError(
-            `'first item of X' is a list operation; unique lists do not support random access`,
-          this.currentLoc);
-        }
-        this.compileExpr(expr.target, out, bindings);
-        this.emit(out, { op: 'PUSH_INT', value: 1 });
-        this.emit(out, { op: 'LIST_GET' });
-        break;
-      }
       case 'LastItemExpression': {
         const tt = this.staticType(expr.target, bindings);
         if (tt !== null && tt.kind === 'uniqueList') {
@@ -1560,18 +1548,6 @@ export class Compiler {
           this.compileExpr(expr.index, out, bindings);
           this.emit(out, { op: 'STR_CHAR_AT' });
         }
-        break;
-      }
-      case 'FirstCharacterExpression': {
-        const tt = this.staticType(expr.target, bindings);
-        if (tt !== null && !(tt.kind === 'scalar' && tt.name === 'string')) {
-          throw new CompileError(
-            `'first character of' requires a string, got ${typeToString(tt)}`,
-          this.currentLoc);
-        }
-        this.compileExpr(expr.target, out, bindings);
-        this.emit(out, { op: 'PUSH_INT', value: 1 });
-        this.emit(out, { op: 'STR_CHAR_AT' });
         break;
       }
       case 'LastCharacterExpression': {
@@ -1935,7 +1911,6 @@ export class Compiler {
         return inferred ? { kind: 'uniqueList', element: inferred, readonly: false } : null;
       }
       case 'ItemAccessExpression':
-      case 'FirstItemExpression':
       case 'LastItemExpression': {
         const tt = this.staticType((expr as any).target, bindings);
         if (tt && (tt.kind === 'list' || tt.kind === 'uniqueList')) return { kind: 'scalar', name: tt.element };
@@ -1946,7 +1921,6 @@ export class Compiler {
       case 'EndIndexSentinel':
         return { kind: 'scalar', name: 'number' };
       case 'CharacterAccessExpression':
-      case 'FirstCharacterExpression':
       case 'LastCharacterExpression':
       case 'SubstringExpression':
         return { kind: 'scalar', name: 'string' };

@@ -644,10 +644,6 @@ describe('Compiler', () => {
       expect(() => compileSource('set n to 5\nsay character 1 of n')).toThrow(/character/);
     });
 
-    test('first character of non-string → compile error', () => {
-      expect(() => compileSource('set n to 5\nsay first character of n')).toThrow(/character/);
-    });
-
     test('last character of non-string → compile error', () => {
       expect(() => compileSource('set n to 5\nsay last character of n')).toThrow(/character/);
     });

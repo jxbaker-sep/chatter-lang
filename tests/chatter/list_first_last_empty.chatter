@@ -1,2 +1,2 @@
 set l to empty list of number
-say first item of l
+say item 1 of l

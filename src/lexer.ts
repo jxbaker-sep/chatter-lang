@@ -29,7 +29,7 @@ const KEYWORDS = new Set([
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
   'list', 'of', 'readonly', 'empty', 'unique',
-  'item', 'first', 'last', 'length', 'contains',
+  'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',
   'character', 'characters',
   'read', 'file', 'lines',

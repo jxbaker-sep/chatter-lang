@@ -129,10 +129,10 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 `exit`, `next` (each only meaningful in the two-word sequences `exit repeat` / `next repeat`; bare `exit` / `next` is a parse error).
 
 ### Keywords reserved for lists
-`list`, `of`, `readonly`, `empty`, `unique`, `item`, `first`, `last`, `length`, `contains`, `append`, `prepend`, `insert`, `in`, `remove`
+`list`, `of`, `readonly`, `empty`, `unique`, `item`, `last`, `length`, `contains`, `append`, `prepend`, `insert`, `in`, `remove`
 
 ### Keywords reserved for string operations
-`character`, `characters` (new). `length`, `contains`, `first`, `last`, `of` are shared with lists.
+`character`, `characters` (new). `length`, `contains`, `last`, `of` are shared with lists.
 
 ### Keywords reserved for file I/O
 `read`, `file`, `lines`. See "File I/O" below.
@@ -193,7 +193,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 - **`S contains T`** — polymorphic with list; both sides must be strings (enforced statically when LHS type is known-string; runtime error otherwise). `""` contains `""` → true.
 - **`character N of S`** — 1-indexed char access; OOB/non-string/non-number → runtime error. `N` may use the `end` index sentinel (see below).
 - **`characters A to B of S`** — inclusive substring. `A > B` → `""`. `A < 1` or `B > length` → runtime error. Both `A` and `B` may use the `end` index sentinel (see below).
-- **`first character of S`** / **`last character of S`** — sugar (parse to dedicated AST nodes). Empty string → runtime error. `last` uses a compiler temp to avoid double-evaluating the target (parallel with `last item of`).
+- **`last character of S`** — sugar (parses to a dedicated AST node). Empty string → runtime error. Uses a compiler temp to avoid double-evaluating the target (parallel with `last item of`). (Note: there is no `first character of` sugar — use `character 1 of S` instead. `first` is an ordinary identifier.)
 - **Character primitives (Phase 1)**:
   - **`code of S`** — expression form. Returns the Unicode code point (0..0x10FFFF) of a single-code-point string. Runtime error on empty or multi-code-point strings. `code` is **not** a reserved keyword — parsed contextually when followed by `of`; any existing user variable named `code` still works (e.g. `set code to 5` / `say code`). Compile error when `S` is statically non-string. Does NOT update `it`.
   - **`character of N`** — expression form (parallel to the existing `character N of S`; disambiguated by `of` coming immediately after `character`). Returns a one-code-point string built from code point `N`. Runtime error on non-integer, negative, `> 0x10FFFF`, or surrogate halves `0xD800..0xDFFF`. Compile error when `N` is statically non-number. Does NOT update `it`.
@@ -203,7 +203,7 @@ One file = one module. The file path (normalized absolute) identifies the module
     - `S is whitespace` — true iff single-code-point string equal to space (0x20), tab (0x09), LF (0x0A), or CR (0x0D).
     - Runtime error on empty or multi-code-point `S`; compile error when statically non-string.
     - `a`, `digit`, `letter`, `whitespace` are **not** reserved; parsed contextually after `is` / `is a`. These are boolean expressions and do not update `it`.
-- **Static checks**: `character/characters/first character/last character of X` with statically-known non-string `X` → compile error. `contains` with string LHS + non-string RHS (static) → compile error.
+- **Static checks**: `character/characters/last character of X` with statically-known non-string `X` → compile error. `contains` with string LHS + non-string RHS (static) → compile error.
 
 ### `end` index sentinel
 Inside the **index slot** of `character N of S`, `characters A to B of S`, and `item N of L`, the bare identifier `end` is sugar for "length of the target" (the value to the right of `of`). It participates in arithmetic like a normal number: `character end - 1 of S`, `characters end - 2 to end of S`, `item end of L`, `character end / 2 of S`, etc.
@@ -221,8 +221,7 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
 - **Literals**: `list of EXPR (, EXPR)*` (nonempty, at least one element) — element type inferred/checked; `empty list of TYPE` (element type required).
 - **Read ops (expressions)**:
   - `item N of L` — 1-indexed access; OOB / non-list / non-number index → runtime error. `N` may use the `end` index sentinel (see below).
-  - `first item of L` — sugar for `item 1 of L`; empty → runtime error.
-  - `last item of L` — sugar for `item (length) of L`; empty → runtime error.
+  - `last item of L` — sugar for `item (length) of L`; empty → runtime error. (No `first item of L` sugar — use `item 1 of L`.)
   - `length of L` — returns number.
   - `L is empty` / `L is not empty` — polymorphic with string; same semantics (and same compile/runtime checks) as the string form.
   - `L contains V` — binary predicate at equality precedence (same level as `is`); left-associative.
@@ -256,7 +255,7 @@ A **unique list** is a "set" data structure (no duplicate values) spelled `uniqu
   - `S is empty` / `S is not empty` — polymorphic with string/list.
   - `S contains V` — linear scan; element type must match.
   - `repeat with x in S ... end repeat` — iterates in insertion order; same scoping rules as list iteration.
-  - **No random access**: `item N of S`, `first item of S`, `last item of S`, `change item N of S to V` all → compile error mentioning "random access".
+  - **No random access**: `item N of S`, `last item of S`, `change item N of S to V` all → compile error mentioning "random access".
 - **Mutation statements**:
   - `add EXPR to NAME` — adds `EXPR` if not already present (value equality). **No-op if present.** Element-type mismatch is a compile error when statically known; runtime error otherwise. Targeting a `list` binding with `add` → compile error pointing at `append` / `prepend` / `insert at`.
   - `remove EXPR from NAME` — removes `EXPR` by value. **No-op if absent (no error).** Element-type mismatch is a compile error / runtime error like `add`. Targeting a `list` binding with `remove EXPR from …` → compile error pointing at `remove item N from NAME`.
@@ -290,7 +289,7 @@ A **unique list** is a "set" data structure (no duplicate values) spelled `uniqu
   - `expect PREDICATE` (bare form) — predicate must be `boolean` when statically known.
   - **Pass-through rule**: when an operand's static type is unknown (most commonly `it`, an identifier whose binding type is unknown, a function-call result without a return type, or any expression `staticType` returns `null` for), the compile check is **skipped** and the existing runtime check still applies. No false positives.
   - `&` (string concat) is **never** type-checked statically — it always succeeds at runtime by coercing to string.
-- **Runtime**: list OOB (get/set/insert/remove), non-list targets when static type is unknown, wrong-type elements when compile-time type couldn't verify, empty `first`/`last`, non-number index, all of the above operator/control-flow checks when at least one operand's static type is unknown.
+- **Runtime**: list OOB (get/set/insert/remove), non-list targets when static type is unknown, wrong-type elements when compile-time type couldn't verify, empty `last item`/`last character`, non-number index, all of the above operator/control-flow checks when at least one operand's static type is unknown.
 
 ## Keyword `takes` / `returns`
 `takes` is reserved and introduces the parameter list of a function declaration. `returns` is reserved and introduces the return-type clause (before `is`). Both are "stop keywords" — they cannot be used as a named-argument label or parameter separator label.
@@ -415,7 +414,7 @@ Existing golden cases:
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
 
 ### Natural follow-ups
-- **String operations (tier 3/4 deferred)**: case transforms (`uppercase/lowercase of`), trim, split/join, replace, index-of, starts-with/ends-with. Tiers 1+2 (concat `&`, `length of`, `contains`, `character N of`, `characters A to B of`, `first/last character of`) are **implemented**.
+- **String operations (tier 3/4 deferred)**: case transforms (`uppercase/lowercase of`), trim, split/join, replace, index-of, starts-with/ends-with. Tiers 1+2 (concat `&`, `length of`, `contains`, `character N of`, `characters A to B of`, `last character of`) are **implemented**.
 - **More HyperTalk naturalizations** (if desired): `put X into Y`, word-form arithmetic (`plus`, `times`), `to the power of`. (Function-decl `takes` form and `mod` are implemented; negative literals / unary `-` are implemented.)
 - **String escape sequences**: `\"`, `\n` etc.
 
