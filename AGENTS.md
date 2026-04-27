@@ -387,6 +387,29 @@ Existing golden cases:
 ### Quality of life
 - Better error messages (line/col + source snippet).
 - **Cross-module error reports with source caret.** Currently when a runtime error fires inside an imported module (e.g. `std:strings`), `formatError` shows the right filename + line:col but skips the source-line caret because it only has access to the entry file's source. Full fix: thread per-module sources into the formatter (e.g. via a `sources: Map<filename, string>` argument) and render the caret using the appropriate source. The plumbing for `loc.file` already exists.
+- **F2 (Rename Symbol) support in `vscode-chatter`.** Today the extension is declarative-only (TextMate grammar + language-configuration). To enable rename:
+  - **Phase 1 — single-file local rename (MVP).**
+    - Build a `resolveSymbol(source, line, col) → { defLoc, refLocs[], kind, isRenameable, reason? }` API in `src/` (probably new file `src/resolver.ts`). Walks the AST scope tree the same way the compiler does (function body, `repeat with i / x in L` loop body, if/else blocks).
+    - Covers: `set`, `var`, function parameters, loop variables (`repeat with i`, `repeat with x in L`).
+    - Convert `vscode-chatter/` from declarative to a TS extension: `package.json` adds `main: ./out/extension.js`, build script, tsconfig; `src/extension.ts` registers `vscode.languages.registerRenameProvider`.
+    - `prepareRename` validates the cursor is on a renameable local; `provideRenameEdits` returns a `WorkspaceEdit` against the current document only.
+    - Bundle de compiled parser/resolver — easiest path is to publish `chatter-lang` as a workspace-local npm dep of de extension and re-export the resolver from `dist/`.
+    - Validate `newName`: must be a valid IDENT, must not be a reserved keyword (reuse the lexer's KEYWORDS set), must not collide with another binding visible in the same scope.
+    - Refuse (with a clear message) for anything outside Phase 1 scope.
+  - **Phase 2 — module-scope locals.**
+    - Top-level `set`/`var` bindings (within one file).
+    - Non-exported function declarations (within one file).
+    - Same single-file scope, larger surface area.
+  - **Phase 3 — workspace-wide rename.**
+    - Exported functions: walk every `.chatter` file in the workspace, parse each, follow `use` graphs, and update every `use NAME from "..."` clause + every call site that resolves to the exported function.
+    - `use NAME from "..."` import (which in v1 must match the exported name): renaming this is equivalent to renaming the export — handle as one operation that also renames inside the source module.
+    - **Hard refusal**: any chain of refs that touches a `std:` module → block rename with "cannot rename names defined in stdlib".
+    - File-level renames (`.chatter` filename change → update every `from "..."` string) — usually delivered by VS Code's `onWillRenameFiles` rather dan F2. Sibling work.
+  - **Required language plumbing dat doesn't exist yet:**
+    - `IdentifierExpression` already carries line/col/length ✓.
+    - But binding sites (`SetStatement.name`, `VarDeclaration.name`, `FunctionParam.name`, repeat-with loop-var, `UseStatement.names[i]` already has `nameLocs[]`, `FunctionDeclaration.name`) need locations on de **name token specifically**, not just de statement. Some have it (UseStatement `nameLocs`), some don't. Audit and add as needed.
+    - `CallStatement` / call-expression target name needs a location too (currently only de statement has loc).
+  - **Out of scope (later):** semantic highlighting, hover docs, go-to-definition, find-all-references as a standalone command. Once de resolver exists, all of dese fall out almost for free, but treat as separate roadmap items.
 - REPL.
 - More example programs (FizzBuzz, Fibonacci — need loops first).
 - **GitHub syntax highlighting for `.chatter` files.** Quick win: `.gitattributes` override like `*.chatter linguist-language=Ruby` (imperfect but instant). Proper path: PR to github-linguist/linguist with a TextMate grammar (the `vscode-chatter/` extension may already have one to reuse); requires ~200 public `.chatter` files to clear the popularity bar.
