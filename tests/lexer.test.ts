@@ -62,6 +62,38 @@ describe('Lexer', () => {
     expect(tokens.some(t => t.type === 'NUMBER' && t.value === '42')).toBe(true);
   });
 
+  test('numbers may use _ as digit separator', () => {
+    const tokens = lex('set x to 10_000');
+    const nums = tokens.filter(t => t.type === 'NUMBER');
+    expect(nums).toHaveLength(1);
+    expect(nums[0].value).toBe('10000');
+  });
+
+  test('multi-group _ separator (1_000_000)', () => {
+    const tokens = lex('set x to 1_000_000');
+    const nums = tokens.filter(t => t.type === 'NUMBER');
+    expect(nums).toHaveLength(1);
+    expect(nums[0].value).toBe('1000000');
+  });
+
+  test('trailing _ is not consumed by number lexer', () => {
+    // 10_ -> NUMBER(10) IDENT(_)
+    const tokens = lex('say 10_');
+    const nums = tokens.filter(t => t.type === 'NUMBER');
+    expect(nums).toHaveLength(1);
+    expect(nums[0].value).toBe('10');
+    expect(tokens.some(t => t.type === 'IDENT' && t.value === '_')).toBe(true);
+  });
+
+  test('double underscore is not consumed (1__0)', () => {
+    // 1__0 -> NUMBER(1) IDENT(__0)
+    const tokens = lex('say 1__0');
+    const nums = tokens.filter(t => t.type === 'NUMBER');
+    expect(nums).toHaveLength(1);
+    expect(nums[0].value).toBe('1');
+    expect(tokens.some(t => t.type === 'IDENT' && t.value === '__0')).toBe(true);
+  });
+
   test('last token is always EOF', () => {
     expect(lex('')[0].type).toBe('EOF');
     expect(lex(helloSource).at(-1)!.type).toBe('EOF');

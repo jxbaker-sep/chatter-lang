@@ -37,7 +37,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - Python-style indentation for blocks (`function ... end`, `if ... end`).
 
 ### Types
-- `number` = signed integer, safe range ±(2^53 − 1) = ±9_007_199_254_740_991. Overflow = runtime error.
+- `number` = signed integer, safe range ±(2^53 − 1) = ±9_007_199_254_740_991. Overflow = runtime error. Number literals may use `_` as a digit separator (e.g. `10_000`, `1_000_000`); `_` is allowed only between digits, no doubles, no leading/trailing.
 - `string` = double-quoted literals.
 - `boolean` = `true` / `false`. Prints as literal `true`/`false`.
 - `list of TYPE` — mutable, ordered, **reference-value** list of scalar elements (TYPE ∈ {number, string, boolean}). Assignment / argument passing / returning aliases the same underlying list (mutations visible via every reference).

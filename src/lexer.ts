@@ -100,11 +100,24 @@ export function lex(source: string, filename?: string): Token[] {
         continue;
       }
 
-      // Number literal
+      // Number literal (digits, with optional `_` separator between digits)
       if (line[col] >= '0' && line[col] <= '9') {
         let value = '';
-        while (col < line.length && line[col] >= '0' && line[col] <= '9') {
-          value += line[col++];
+        while (col < line.length) {
+          const c = line[col];
+          if (c >= '0' && c <= '9') {
+            value += c;
+            col++;
+          } else if (
+            c === '_' &&
+            value.length > 0 &&
+            value[value.length - 1] !== '_' &&
+            col + 1 < line.length &&
+            line[col + 1] >= '0' && line[col + 1] <= '9'
+          ) {
+            // underscore separator: only between digits, no doubles
+            col++;
+          } else break;
         }
         tokens.push({ type: 'NUMBER', value, line: lineNum, col: startCol });
         continue;
