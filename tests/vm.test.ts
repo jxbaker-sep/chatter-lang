@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { lex } from '../src/lexer';
 import { parse } from '../src/parser';
-import { compile } from '../src/compiler';
+import { compile, CompileError } from '../src/compiler';
 import { VM, RuntimeError } from '../src/vm';
 import { BytecodeProgram } from '../src/bytecode';
 
@@ -335,8 +335,8 @@ describe('VM', () => {
     });
 
     test('EQ across different types throws "compare"', () => {
-      const program = compile(parse(lex('say 5 is "hello"')));
-      expect(() => new VM(program).run()).toThrow(/compare/);
+      // Now caught statically at compile time.
+      expect(() => compile(parse(lex('say 5 is "hello"')))).toThrow(/compare/);
     });
 
     test('if with non-boolean condition throws at runtime', () => {
@@ -451,8 +451,8 @@ describe('VM', () => {
       expect(runSource('repeat while false\n    say "x"\nend repeat\nsay "done"')).toEqual(['done']);
     });
 
-    test('repeat while with non-boolean condition raises runtime error', () => {
-      expectRuntimeError('repeat while 5\n    say "x"\nend repeat');
+    test('repeat while with non-boolean condition raises compile error', () => {
+      expect(() => compile(parse(lex('repeat while 5\n    say "x"\nend repeat')))).toThrow(CompileError);
     });
 
     test('repeat with negative count raises runtime error', () => {
@@ -485,11 +485,13 @@ describe('VM', () => {
       expect(truthy('5 is at most 5')).toEqual(['yes']);
       expect(truthy('6 is at most 5')).toEqual(['no']);
     });
-    test('type mismatch throws RuntimeError', () => {
-      expectRuntimeError('if 5 is greater than "x"\n    say 1\nend if');
-      expectRuntimeError('if 5 is at least "x"\n    say 1\nend if');
-      expectRuntimeError('if 5 is less than "x"\n    say 1\nend if');
-      expectRuntimeError('if 5 is at most "x"\n    say 1\nend if');
+    test('type mismatch throws CompileError', () => {
+      const expectCompileError = (src: string) =>
+        expect(() => compile(parse(lex(src)))).toThrow(CompileError);
+      expectCompileError('if 5 is greater than "x"\n    say 1\nend if');
+      expectCompileError('if 5 is at least "x"\n    say 1\nend if');
+      expectCompileError('if 5 is less than "x"\n    say 1\nend if');
+      expectCompileError('if 5 is at most "x"\n    say 1\nend if');
     });
   });
 

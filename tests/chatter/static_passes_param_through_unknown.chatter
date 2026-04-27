@@ -1,0 +1,5 @@
+function double takes number n returns number is
+    return n * 2
+end function
+double 21
+say it

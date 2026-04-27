@@ -1,0 +1,5 @@
+function f returns number is
+    return 5
+end function
+f
+say it + 1

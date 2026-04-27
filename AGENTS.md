@@ -246,7 +246,20 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
 
 ### Compile-time vs runtime checks
 - **Compile-time**: readonly enforcement, call-site arg/param type matching, readonly smuggling prevention, return-type matching (scalar and list kind/element/readonly), type-locked `var` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
-- **Runtime**: list OOB (get/set/insert/remove), non-list targets when static type is unknown, wrong-type elements when compile-time type couldn't verify, empty `first`/`last`, non-number index.
+- **Compile-time (operator/control-flow type checks, when operand types are statically known)**:
+  - Arithmetic (`+`, `-`, `*`, `/`, `**`, `mod`) — both operands must be `number`. Known non-number → `Type mismatch: arithmetic requires numbers, got X`.
+  - Unary minus `-X` — `X` must be `number`.
+  - Logical `not X` — `X` must be `boolean`.
+  - Logical `and` / `or` — both operands must be `boolean`. Known non-boolean → `Type mismatch: 'and' requires booleans, got X` (likewise `or`).
+  - Equality `is` / `is not` — when **both** sides have known static types, they must be compatible (same scalar name, or both `list of T` with the same element type). Otherwise → `Type mismatch: cannot compare X and Y`.
+  - Comparison `is less than` / `is at most` / `is greater than` / `is at least` — both operands must be `number`. Known non-number → `Type mismatch: comparison requires numbers, got X`.
+  - `if` / `else if` condition — must be `boolean`.
+  - `repeat while COND` — `COND` must be `boolean`.
+  - `repeat N times` — `N` must be `number`. Literal-negative `N` (a `NumberLiteral` with negative value, or `-NumberLiteral`) → `repeat count cannot be negative, got -K`.
+  - `expect PREDICATE` (bare form) — predicate must be `boolean` when statically known.
+  - **Pass-through rule**: when an operand's static type is unknown (most commonly `it`, an identifier whose binding type is unknown, a function-call result without a return type, or any expression `staticType` returns `null` for), the compile check is **skipped** and the existing runtime check still applies. No false positives.
+  - `&` (string concat) is **never** type-checked statically — it always succeeds at runtime by coercing to string.
+- **Runtime**: list OOB (get/set/insert/remove), non-list targets when static type is unknown, wrong-type elements when compile-time type couldn't verify, empty `first`/`last`, non-number index, all of the above operator/control-flow checks when at least one operand's static type is unknown.
 
 ## Keyword `takes` / `returns`
 `takes` is reserved and introduces the parameter list of a function declaration. `returns` is reserved and introduces the return-type clause (before `is`). Both are "stop keywords" — they cannot be used as a named-argument label or parameter separator label.

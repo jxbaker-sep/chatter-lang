@@ -354,6 +354,14 @@ export class Compiler {
     out: Instruction[],
     bindings: Bindings,
   ): void {
+    // Static type check on predicate (skip when unknown).
+    const pt = this.staticType(stmt.expression, bindings);
+    if (pt && !(pt.kind === 'scalar' && pt.name === 'boolean')) {
+      throw new CompileError(
+        `expect requires a boolean, got ${typeToString(pt)}`,
+      this.currentLoc);
+    }
+
     if (!stmt.message) {
       this.compileExpr(stmt.expression, out, bindings);
       this.emit(out, { op: 'EXPECT', source: stmt.source });
@@ -869,6 +877,12 @@ export class Compiler {
     const exitJumps: number[] = [];
 
     for (const branch of stmt.branches) {
+      const ct = this.staticType(branch.condition, bindings);
+      if (ct && !(ct.kind === 'scalar' && ct.name === 'boolean')) {
+        throw new CompileError(
+          `Type mismatch: 'if' condition must be a boolean, got ${typeToString(ct)}`,
+        this.currentLoc);
+      }
       this.compileExpr(branch.condition, out, bindings);
       const jifIdx = out.length;
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
@@ -902,6 +916,29 @@ export class Compiler {
     bindings: Bindings,
   ): void {
     if (stmt.kind === 'times') {
+      // Static type check on count.
+      const countT = this.staticType(stmt.count, bindings);
+      if (countT && !(countT.kind === 'scalar' && countT.name === 'number')) {
+        throw new CompileError(
+          `Type mismatch: 'repeat N times' requires a number, got ${typeToString(countT)}`,
+        this.currentLoc);
+      }
+      // Literal-negative count: surface at compile time.
+      if (stmt.count.type === 'NumberLiteral' && stmt.count.value < 0) {
+        throw new CompileError(
+          `repeat count cannot be negative, got ${stmt.count.value}`,
+        this.currentLoc);
+      }
+      if (
+        stmt.count.type === 'UnaryExpression' &&
+        stmt.count.operator === '-' &&
+        stmt.count.operand.type === 'NumberLiteral' &&
+        stmt.count.operand.value > 0
+      ) {
+        throw new CompileError(
+          `repeat count cannot be negative, got ${-stmt.count.operand.value}`,
+        this.currentLoc);
+      }
       const limit = this.freshName('limit');
       const counter = this.freshName('counter');
 
@@ -1128,6 +1165,12 @@ export class Compiler {
     }
 
     // while
+    const wct = this.staticType(stmt.condition, bindings);
+    if (wct && !(wct.kind === 'scalar' && wct.name === 'boolean')) {
+      throw new CompileError(
+        `Type mismatch: 'repeat while' requires a boolean, got ${typeToString(wct)}`,
+      this.currentLoc);
+    }
     const topIdx = out.length;
     this.compileExpr(stmt.condition, out, bindings);
     const jifEndIdx = out.length;
@@ -1292,6 +1335,12 @@ export class Compiler {
           this.compileExpr(expr.operand, out, bindings);
           this.emit(out, { op: 'SUB' });
         } else {
+          const t = this.staticType(expr.operand, bindings);
+          if (t && !(t.kind === 'scalar' && t.name === 'boolean')) {
+            throw new CompileError(
+              `Type mismatch: 'not' requires a boolean, got ${typeToString(t)}`,
+            this.currentLoc);
+          }
           this.compileExpr(expr.operand, out, bindings);
           this.emit(out, { op: 'NOT' });
         }
@@ -1599,7 +1648,60 @@ export class Compiler {
     }
     this.compileExpr(expr.left, out, bindings);
     this.compileExpr(expr.right, out, bindings);
-    switch (expr.operator) {
+    const op = expr.operator;
+    // --- Static type checks (skip when either side has unknown static type) ---
+    const lt = this.staticType(expr.left, bindings);
+    const rt = this.staticType(expr.right, bindings);
+    const isArith = (op === '+' || op === '-' || op === '*' || op === '/' || op === '**' || op === 'mod');
+    const isCmp = (op === '<' || op === '<=' || op === '>' || op === '>=');
+    const isEq = (op === '==' || op === '!=');
+    const isLogical = (op === 'and' || op === 'or');
+    if (isArith) {
+      if (lt && !(lt.kind === 'scalar' && lt.name === 'number')) {
+        throw new CompileError(
+          `Type mismatch: arithmetic requires numbers, got ${typeToString(lt)}`,
+        this.currentLoc);
+      }
+      if (rt && !(rt.kind === 'scalar' && rt.name === 'number')) {
+        throw new CompileError(
+          `Type mismatch: arithmetic requires numbers, got ${typeToString(rt)}`,
+        this.currentLoc);
+      }
+    } else if (isCmp) {
+      if (lt && !(lt.kind === 'scalar' && lt.name === 'number')) {
+        throw new CompileError(
+          `Type mismatch: comparison requires numbers, got ${typeToString(lt)}`,
+        this.currentLoc);
+      }
+      if (rt && !(rt.kind === 'scalar' && rt.name === 'number')) {
+        throw new CompileError(
+          `Type mismatch: comparison requires numbers, got ${typeToString(rt)}`,
+        this.currentLoc);
+      }
+    } else if (isEq) {
+      if (lt && rt) {
+        const compatible =
+          (lt.kind === 'scalar' && rt.kind === 'scalar' && lt.name === rt.name) ||
+          (lt.kind === 'list' && rt.kind === 'list' && lt.element === rt.element);
+        if (!compatible) {
+          throw new CompileError(
+            `Type mismatch: cannot compare ${typeToString(lt)} and ${typeToString(rt)}`,
+          this.currentLoc);
+        }
+      }
+    } else if (isLogical) {
+      if (lt && !(lt.kind === 'scalar' && lt.name === 'boolean')) {
+        throw new CompileError(
+          `Type mismatch: '${op}' requires booleans, got ${typeToString(lt)}`,
+        this.currentLoc);
+      }
+      if (rt && !(rt.kind === 'scalar' && rt.name === 'boolean')) {
+        throw new CompileError(
+          `Type mismatch: '${op}' requires booleans, got ${typeToString(rt)}`,
+        this.currentLoc);
+      }
+    }
+    switch (op) {
       case '+':  this.emit(out, { op: 'ADD' }); break;
       case '-':  this.emit(out, { op: 'SUB' }); break;
       case '*':  this.emit(out, { op: 'MUL' }); break;
@@ -1616,7 +1718,7 @@ export class Compiler {
       case 'and': this.emit(out, { op: 'AND' }); break;
       case 'or':  this.emit(out, { op: 'OR' }); break;
       default:
-        throw new CompileError(`Unknown operator: ${expr.operator}`, this.currentLoc);
+        throw new CompileError(`Unknown operator: ${op}`, this.currentLoc);
     }
   }
 

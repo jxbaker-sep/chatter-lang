@@ -688,4 +688,76 @@ describe('Compiler', () => {
       expect(() => compileSource('set x to the result of nope 5')).toThrow(/unknown function/);
     });
   });
+
+  describe('static type checks', () => {
+    test('arithmetic with string operand is a compile error', () => {
+      expect(() => compileSource('say 5 + "hi"')).toThrow(/arithmetic requires numbers.*string/);
+    });
+
+    test('arithmetic with boolean operand is a compile error', () => {
+      expect(() => compileSource('say 5 + true')).toThrow(/arithmetic requires numbers.*boolean/);
+    });
+
+    test('mod with string operand is a compile error', () => {
+      expect(() => compileSource('say "x" mod 3')).toThrow(/arithmetic requires numbers/);
+    });
+
+    test('unary minus on string is a compile error', () => {
+      expect(() => compileSource('say -"hi"')).toThrow(/unary '-' requires number/);
+    });
+
+    test('not on number is a compile error', () => {
+      expect(() => compileSource('say not 5')).toThrow(/'not' requires a boolean/);
+    });
+
+    test('and with non-boolean is a compile error', () => {
+      expect(() => compileSource('say 5 and true')).toThrow(/'and' requires booleans/);
+    });
+
+    test('or with non-boolean is a compile error', () => {
+      expect(() => compileSource('say "hi" or false')).toThrow(/'or' requires booleans/);
+    });
+
+    test('equality across known-different types is a compile error', () => {
+      expect(() => compileSource('say 5 is "hi"')).toThrow(/cannot compare/);
+    });
+
+    test('inequality across known-different types is a compile error', () => {
+      expect(() => compileSource('say 5 is not "hi"')).toThrow(/cannot compare/);
+    });
+
+    test('comparison with non-number is a compile error', () => {
+      expect(() => compileSource('say 5 is less than "x"')).toThrow(/comparison requires numbers/);
+    });
+
+    test('if with non-boolean condition is a compile error', () => {
+      expect(() => compileSource('if 5\n  say "x"\nend if')).toThrow(/'if' condition must be a boolean/);
+    });
+
+    test('repeat while with non-boolean is a compile error', () => {
+      expect(() => compileSource('repeat while "hi"\n  say "x"\nend repeat')).toThrow(/'repeat while' requires a boolean/);
+    });
+
+    test('repeat N times with non-number is a compile error', () => {
+      expect(() => compileSource('repeat "hi" times\n  say "x"\nend repeat')).toThrow(/'repeat N times' requires a number/);
+    });
+
+    test('repeat with literal-negative count is a compile error', () => {
+      expect(() => compileSource('repeat -3 times\n  say "x"\nend repeat')).toThrow(/repeat count cannot be negative/);
+    });
+
+    test('expect with non-boolean predicate is a compile error', () => {
+      expect(() => compileSource('expect 42')).toThrow(/expect requires a boolean, got number/);
+    });
+
+    test('passes through unknown types via `it` (no false positive)', () => {
+      // it has unknown static type; arithmetic should compile fine.
+      expect(() => compileSource('say it + 1')).not.toThrow();
+    });
+
+    test('passes through string concat (& never type-checked)', () => {
+      expect(() => compileSource('say 5 & "x"')).not.toThrow();
+      expect(() => compileSource('say true & 1')).not.toThrow();
+    });
+  });
 });
