@@ -10,7 +10,8 @@ import {
   VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
   ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
-  RemoveItemStatement, TypeAnnotation, ScalarTypeName,
+  RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
+  TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
   EndIndexSentinel,
@@ -39,7 +40,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'repeat', 'times', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
-  'list', 'of', 'readonly', 'empty',
+  'list', 'of', 'readonly', 'empty', 'unique',
   'item', 'first', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'remove',
   'character', 'characters',
@@ -57,6 +58,7 @@ const EXPRESSION_START_KEYWORDS = new Set([
   'character', 'characters',
   'empty',
   'list',
+  'unique',
   'lines',
 ]);
 
@@ -444,6 +446,13 @@ export function parse(tokens: Token[], source?: string): Program {
         );
       }
       advance();
+      // Reject `readonly unique list of …` — readonly unique list is not supported in v1.
+      if (peek().type === 'KEYWORD' && peek().value === 'unique') {
+        throw new ParseError(
+          `'readonly unique list of T' is not supported`,
+          peek(),
+        );
+      }
       // must be followed by `list of TYPE`
       if (!(peek().type === 'KEYWORD' && peek().value === 'list')) {
         throw new ParseError(
@@ -458,6 +467,16 @@ export function parse(tokens: Token[], source?: string): Program {
         throw new ParseError(`nested lists not supported`, tok);
       }
       return { kind: 'list', element: inner.name, readonly: true };
+    }
+    if (tok.type === 'KEYWORD' && tok.value === 'unique') {
+      advance();
+      consume('KEYWORD', 'list');
+      consume('KEYWORD', 'of');
+      const inner = parseTypeAnnotation(false);
+      if (inner.kind !== 'scalar') {
+        throw new ParseError(`nested lists not supported`, tok);
+      }
+      return { kind: 'uniqueList', element: inner.name, readonly: false };
     }
     if (tok.type === 'KEYWORD' && tok.value === 'list') {
       advance();
@@ -875,14 +894,23 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'InsertStatement', listName: nameTok.value, index, value };
   }
 
-  function parseRemoveStatement(): RemoveItemStatement {
+  function parseRemoveStatement(): RemoveItemStatement | RemoveValueStatement {
     consume('KEYWORD', 'remove');
-    consume('KEYWORD', 'item');
-    const index = parseExpression();
+    // `remove item N from NAME` — list element-by-index removal (existing).
+    // `remove EXPR from NAME` — unique-list value removal (new).
+    if (peek().type === 'KEYWORD' && peek().value === 'item') {
+      advance();
+      const index = parseExpression();
+      consume('KEYWORD', 'from');
+      const nameTok = consume('IDENT');
+      consumeNewline();
+      return { type: 'RemoveItemStatement', listName: nameTok.value, index };
+    }
+    const value = parseExpression();
     consume('KEYWORD', 'from');
     const nameTok = consume('IDENT');
     consumeNewline();
-    return { type: 'RemoveItemStatement', listName: nameTok.value, index };
+    return { type: 'RemoveValueStatement', listName: nameTok.value, value };
   }
 
   // `read file EXPR` — sugar for reading a text file. Assigns the
@@ -1103,6 +1131,27 @@ export function parse(tokens: Token[], source?: string): Program {
 
     // List literals and list-read prefix forms
     if (tok.type === 'KEYWORD') {
+      if (tok.value === 'unique') {
+        // `unique list of EXPR (, EXPR)*` — nonempty unique-list literal.
+        advance();
+        consume('KEYWORD', 'list');
+        consume('KEYWORD', 'of');
+        if (peek().type === 'KEYWORD' &&
+            (peek().value === 'list' || peek().value === 'unique' || peek().value === 'readonly')) {
+          throw new ParseError(`nested lists not supported`, peek());
+        }
+        const elements: Expression[] = [];
+        elements.push(parsePrimary());
+        while (peek().type === 'COMMA') {
+          advance();
+          if (peek().type === 'KEYWORD' &&
+              (peek().value === 'list' || peek().value === 'unique' || peek().value === 'readonly')) {
+            throw new ParseError(`nested lists not supported`, peek());
+          }
+          elements.push(parsePrimary());
+        }
+        return { type: 'UniqueListLiteral', kind: 'nonempty', elementType: null, elements } as UniqueListLiteral;
+      }
       if (tok.value === 'list') {
         // `list of EXPR (, EXPR)*` — nonempty list literal.
         advance();
@@ -1124,6 +1173,26 @@ export function parse(tokens: Token[], source?: string): Program {
       }
       if (tok.value === 'empty') {
         advance();
+        // `empty unique list of T`
+        if (peek().type === 'KEYWORD' && peek().value === 'unique') {
+          advance();
+          consume('KEYWORD', 'list');
+          consume('KEYWORD', 'of');
+          const tTok = peek();
+          if (tTok.type !== 'TYPE') {
+            throw new ParseError(`Expected element type after 'empty unique list of'`, tTok);
+          }
+          advance();
+          if (tTok.value === 'list' || tTok.value === 'readonly' || tTok.value === 'unique') {
+            throw new ParseError(`nested lists not supported`, tTok);
+          }
+          return {
+            type: 'UniqueListLiteral',
+            kind: 'empty',
+            elementType: tTok.value as ScalarTypeName,
+            elements: [],
+          } as UniqueListLiteral;
+        }
         consume('KEYWORD', 'list');
         consume('KEYWORD', 'of');
         const tTok = peek();

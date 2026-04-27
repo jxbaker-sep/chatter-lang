@@ -1,0 +1,2 @@
+set s to unique list of 1, 2, 3
+insert 9 at 2 in s

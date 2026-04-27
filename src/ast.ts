@@ -2,7 +2,8 @@ export type ScalarTypeName = 'number' | 'string' | 'boolean';
 
 export type TypeAnnotation =
   | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: ScalarTypeName; readonly: boolean };
+  | { kind: 'list'; element: ScalarTypeName; readonly: boolean }
+  | { kind: 'uniqueList'; element: ScalarTypeName; readonly: false };
 
 export interface Located {
   line?: number;
@@ -22,6 +23,7 @@ export type Expression = (
   | ItExpression
   | CallStatement
   | ListLiteral
+  | UniqueListLiteral
   | ItemAccessExpression
   | FirstItemExpression
   | LastItemExpression
@@ -59,6 +61,7 @@ export type Statement = (
   | PrependStatement
   | InsertStatement
   | RemoveItemStatement
+  | RemoveValueStatement
   | ReadFileStatement
   | ExpectStatement
   | UseStatement
@@ -322,5 +325,18 @@ export interface RemoveItemStatement {
   type: 'RemoveItemStatement';
   listName: string;
   index: Expression;
+}
+
+export interface RemoveValueStatement {
+  type: 'RemoveValueStatement';
+  listName: string;
+  value: Expression;
+}
+
+export interface UniqueListLiteral {
+  type: 'UniqueListLiteral';
+  kind: 'nonempty' | 'empty';
+  elementType: ScalarTypeName | null;  // required for empty; null for nonempty (inferred)
+  elements: Expression[];
 }
 

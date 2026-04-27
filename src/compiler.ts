@@ -6,7 +6,8 @@ import {
   VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
   ListLiteral, ItemAccessExpression, FirstItemExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
-  RemoveItemStatement, TypeAnnotation, ScalarTypeName,
+  RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
+  TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, FirstCharacterExpression, LastCharacterExpression,
   SubstringExpression,
   EndIndexSentinel,
@@ -49,7 +50,8 @@ function containsEndSentinel(expr: Expression | null | undefined): boolean {
 
 export type ChatterType =
   | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: ScalarTypeName; readonly: boolean };
+  | { kind: 'list'; element: ScalarTypeName; readonly: boolean }
+  | { kind: 'uniqueList'; element: ScalarTypeName; readonly: false };
 
 function typesEqual(a: ChatterType, b: ChatterType): boolean {
   if (a.kind !== b.kind) return false;
@@ -57,16 +59,21 @@ function typesEqual(a: ChatterType, b: ChatterType): boolean {
   if (a.kind === 'list' && b.kind === 'list') {
     return a.element === b.element && a.readonly === b.readonly;
   }
+  if (a.kind === 'uniqueList' && b.kind === 'uniqueList') {
+    return a.element === b.element;
+  }
   return false;
 }
 
 function typeToString(t: ChatterType): string {
   if (t.kind === 'scalar') return t.name;
+  if (t.kind === 'uniqueList') return 'unique list of ' + t.element;
   return (t.readonly ? 'readonly list of ' : 'list of ') + t.element;
 }
 
 function fromAnnotation(a: TypeAnnotation): ChatterType {
   if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
+  if (a.kind === 'uniqueList') return { kind: 'uniqueList', element: a.element, readonly: false };
   return { kind: 'list', element: a.element, readonly: a.readonly };
 }
 
@@ -311,6 +318,9 @@ export class Compiler {
       case 'RemoveItemStatement':
         this.compileRemove(stmt, out, bindings);
         break;
+      case 'RemoveValueStatement':
+        this.compileRemoveValue(stmt, out, bindings);
+        break;
       case 'ReadFileStatement':
         this.compileReadFileStatement(stmt, out, bindings);
         break;
@@ -539,7 +549,8 @@ export class Compiler {
       if (info.type) {
         if (info.type.kind !== rt.kind ||
             (info.type.kind === 'scalar' && rt.kind === 'scalar' && info.type.name !== rt.name) ||
-            (info.type.kind === 'list' && rt.kind === 'list' && info.type.element !== rt.element)) {
+            (info.type.kind === 'list' && rt.kind === 'list' && info.type.element !== rt.element) ||
+            (info.type.kind === 'uniqueList' && rt.kind === 'uniqueList' && info.type.element !== rt.element)) {
           throw new CompileError(
             `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rt)}`,
             this.currentLoc,
@@ -550,8 +561,8 @@ export class Compiler {
       this.emit(out, { op: 'STORE_VAR', name: stmt.name });
       return;
     }
-    // Static type check for list vars: exact match required.
-    if (info.type && info.type.kind === 'list') {
+    // Static type check for list/uniqueList vars: exact match required.
+    if (info.type && (info.type.kind === 'list' || info.type.kind === 'uniqueList')) {
       const rhs = this.staticType(stmt.value, bindings);
       if (rhs !== null && !typesEqual(rhs, info.type)) {
         throw new CompileError(
@@ -559,7 +570,7 @@ export class Compiler {
         this.currentLoc);
       }
       // Prevent readonly smuggling via change
-      if (rhs && rhs.kind === 'list' && rhs.readonly && !info.type.readonly) {
+      if (rhs && rhs.kind === 'list' && rhs.readonly && info.type.kind === 'list' && !info.type.readonly) {
         throw new CompileError(
           `cannot change '${stmt.name}' to a readonly-list reference`,
         this.currentLoc);
@@ -578,6 +589,11 @@ export class Compiler {
     if (!info) {
       throw new CompileError(
         `Cannot change item of '${stmt.listName}': no such binding`,
+      this.currentLoc);
+    }
+    if (info.type && info.type.kind === 'uniqueList') {
+      throw new CompileError(
+        `'change item N of NAME' is not a unique-list operation; unique lists do not support random access (name '${stmt.listName}')`,
       this.currentLoc);
     }
     if (!info.type || info.type.kind !== 'list') {
@@ -610,6 +626,11 @@ export class Compiler {
     const info = bindings.get(listName);
     if (!info) {
       throw new CompileError(`Cannot ${op} to '${listName}': no such binding`, this.currentLoc);
+    }
+    if (info.type && info.type.kind === 'uniqueList') {
+      throw new CompileError(
+        `'${op}' is a list operation; unique lists use 'add' / 'remove EXPR from NAME' instead (name '${listName}')`,
+      this.currentLoc);
     }
     if (info.type && info.type.kind !== 'list') {
       throw new CompileError(
@@ -693,6 +714,46 @@ export class Compiler {
     this.emit(out, { op: 'LIST_REMOVE' });
   }
 
+  private compileRemoveValue(
+    stmt: RemoveValueStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const info = bindings.get(stmt.listName);
+    if (!info) {
+      throw new CompileError(
+        `Cannot remove value from '${stmt.listName}': no such binding`,
+      this.currentLoc);
+    }
+    if (info.type) {
+      if (info.type.kind === 'list') {
+        throw new CompileError(
+          `'remove EXPR from NAME' is not a list operation; use 'remove item N from NAME' (name '${stmt.listName}')`,
+        this.currentLoc);
+      }
+      if (info.type.kind !== 'uniqueList') {
+        throw new CompileError(
+          `Cannot remove value from '${stmt.listName}': not a unique list (type ${typeToString(info.type)})`,
+        this.currentLoc);
+      }
+      // Element-type check.
+      const rhs = this.staticType(stmt.value, bindings);
+      if (rhs && rhs.kind === 'scalar' && rhs.name !== info.type.element) {
+        throw new CompileError(
+          `Type mismatch: cannot remove ${rhs.name} from unique list of ${info.type.element}`,
+        this.currentLoc);
+      }
+      if (rhs && rhs.kind !== 'scalar') {
+        throw new CompileError(
+          `Type mismatch: cannot remove ${typeToString(rhs)} from unique list of ${info.type.element}`,
+        this.currentLoc);
+      }
+    }
+    this.emit(out, { op: 'LOAD', name: stmt.listName });
+    this.compileExpr(stmt.value, out, bindings);
+    this.emit(out, { op: 'UNIQUE_LIST_REMOVE' });
+  }
+
   private compileCompoundAssign(
     stmt: CompoundAssignStatement,
     out: Instruction[],
@@ -702,6 +763,30 @@ export class Compiler {
     if (!info) {
       throw new CompileError(
         `Cannot ${stmt.op} '${stmt.name}': no such variable declared in this function`,
+      this.currentLoc);
+    }
+    // `add EXPR to NAME` is overloaded: for unique-list bindings, route to UNIQUE_LIST_ADD.
+    if (stmt.op === 'add' && info.type && info.type.kind === 'uniqueList') {
+      const rhs = this.staticType(stmt.value, bindings);
+      if (rhs && rhs.kind === 'scalar' && rhs.name !== info.type.element) {
+        throw new CompileError(
+          `Type mismatch: cannot add ${rhs.name} to unique list of ${info.type.element}`,
+        this.currentLoc);
+      }
+      if (rhs && rhs.kind !== 'scalar') {
+        throw new CompileError(
+          `Type mismatch: cannot add ${typeToString(rhs)} to unique list of ${info.type.element}`,
+        this.currentLoc);
+      }
+      this.emit(out, { op: 'LOAD', name: stmt.name });
+      this.compileExpr(stmt.value, out, bindings);
+      this.emit(out, { op: 'UNIQUE_LIST_ADD' });
+      return;
+    }
+    // `add EXPR to NAME` on a list → helpful error pointing at append/prepend/insert at.
+    if (stmt.op === 'add' && info.type && info.type.kind === 'list') {
+      throw new CompileError(
+        `'add' cannot insert into a list (use 'append', 'prepend', or 'insert at' for '${stmt.name}')`,
       this.currentLoc);
     }
     if (info.kind !== 'var') {
@@ -833,29 +918,37 @@ export class Compiler {
           this.currentLoc);
         }
         const argExpr = bound[i]!;
-        // Static list-type check for arguments.
+        // Static type check for arguments.
         const paramType = sig[i].type;
         const argType = this.staticType(argExpr, bindings);
-        if (paramType.kind === 'list' && argType && argType.kind === 'list') {
-          if (argType.element !== paramType.element) {
+        if (argType !== null) {
+          // Aggregate kind matching: kinds must match exactly between list / unique list / scalar.
+          if (paramType.kind !== argType.kind) {
             throw new CompileError(
               `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
             this.currentLoc);
           }
-          // Widening: mutable → readonly OK. Narrowing: readonly → mutable rejected.
-          if (argType.readonly && !paramType.readonly) {
-            throw new CompileError(
-              `Cannot pass readonly-list reference to mutable-list param '${sig[i].name}' in call to '${stmt.name}'`,
-            this.currentLoc);
+          if (paramType.kind === 'list' && argType.kind === 'list') {
+            if (argType.element !== paramType.element) {
+              throw new CompileError(
+                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
+              this.currentLoc);
+            }
+            // Widening: mutable → readonly OK. Narrowing: readonly → mutable rejected.
+            if (argType.readonly && !paramType.readonly) {
+              throw new CompileError(
+                `Cannot pass readonly-list reference to mutable-list param '${sig[i].name}' in call to '${stmt.name}'`,
+              this.currentLoc);
+            }
+          } else if (paramType.kind === 'uniqueList' && argType.kind === 'uniqueList') {
+            if (argType.element !== paramType.element) {
+              throw new CompileError(
+                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
+              this.currentLoc);
+            }
+          } else if (paramType.kind === 'scalar' && argType.kind === 'scalar') {
+            // Scalar kinds match — element-name check delegated to existing runtime / future static.
           }
-        } else if (paramType.kind === 'list' && argType && argType.kind === 'scalar') {
-          throw new CompileError(
-            `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${argType.name}`,
-          this.currentLoc);
-        } else if (paramType.kind === 'scalar' && argType && argType.kind === 'list') {
-          throw new CompileError(
-            `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${paramType.name}, got ${typeToString(argType)}`,
-          this.currentLoc);
         }
         this.compileExpr(argExpr, out, bindings);
       }
@@ -1101,9 +1194,9 @@ export class Compiler {
       const lt = this.staticType(stmt.list, bindings);
       let elemType: ChatterType | undefined;
       if (lt) {
-        if (lt.kind !== 'list') {
+        if (lt.kind !== 'list' && lt.kind !== 'uniqueList') {
           throw new CompileError(
-            `'repeat with x in ...' requires a list, got ${typeToString(lt)}`,
+            `'repeat with x in ...' requires a list or unique list, got ${typeToString(lt)}`,
           this.currentLoc);
         }
         elemType = { kind: 'scalar', name: lt.element };
@@ -1225,7 +1318,8 @@ export class Compiler {
       const callRt = this.compilePrecall(stmt.precall, out, bindings);
       if (callRt.kind !== rt.kind ||
           (callRt.kind === 'scalar' && rt.kind === 'scalar' && callRt.name !== rt.name) ||
-          (callRt.kind === 'list' && rt.kind === 'list' && callRt.element !== rt.element)) {
+          (callRt.kind === 'list' && rt.kind === 'list' && callRt.element !== rt.element) ||
+          (callRt.kind === 'uniqueList' && rt.kind === 'uniqueList' && callRt.element !== rt.element)) {
         throw new CompileError(
           `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(callRt)}`,
           this.currentLoc,
@@ -1266,6 +1360,13 @@ export class Compiler {
         if (st.readonly && !rt.readonly) {
           throw new CompileError(
             `cannot return readonly-list reference from function '${this.currentFuncName}'`,
+          this.currentLoc);
+        }
+      }
+      if (rt.kind === 'uniqueList' && st.kind === 'uniqueList') {
+        if (rt.element !== st.element) {
+          throw new CompileError(
+            `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
           this.currentLoc);
         }
       }
@@ -1358,7 +1459,16 @@ export class Compiler {
       case 'ListLiteral':
         this.compileListLiteral(expr, out, bindings);
         break;
+      case 'UniqueListLiteral':
+        this.compileUniqueListLiteral(expr, out, bindings);
+        break;
       case 'ItemAccessExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && tt.kind === 'uniqueList') {
+          throw new CompileError(
+            `'item N of X' is a list operation; unique lists do not support random access`,
+          this.currentLoc);
+        }
         if (containsEndSentinel(expr.index)) {
           const tgtTmp = this.freshName('tgt');
           const lenTmp = this.freshName('len');
@@ -1381,12 +1491,25 @@ export class Compiler {
         }
         break;
       }
-      case 'FirstItemExpression':
+      case 'FirstItemExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && tt.kind === 'uniqueList') {
+          throw new CompileError(
+            `'first item of X' is a list operation; unique lists do not support random access`,
+          this.currentLoc);
+        }
         this.compileExpr(expr.target, out, bindings);
         this.emit(out, { op: 'PUSH_INT', value: 1 });
         this.emit(out, { op: 'LIST_GET' });
         break;
+      }
       case 'LastItemExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && tt.kind === 'uniqueList') {
+          throw new CompileError(
+            `'last item of X' is a list operation; unique lists do not support random access`,
+          this.currentLoc);
+        }
         // LOAD list; LENGTH; LIST_GET — but we need the list twice.
         // Use a fresh temp.
         const tmp = this.freshName('last');
@@ -1562,7 +1685,8 @@ export class Compiler {
         const tt = this.staticType(expr.target, bindings);
         if (tt !== null
             && !(tt.kind === 'scalar' && tt.name === 'string')
-            && tt.kind !== 'list') {
+            && tt.kind !== 'list'
+            && tt.kind !== 'uniqueList') {
           throw new CompileError(
             `'is empty' requires a string or list, got ${typeToString(tt)}`,
           this.currentLoc);
@@ -1572,6 +1696,40 @@ export class Compiler {
         break;
       }
     }
+  }
+
+  private compileUniqueListLiteral(
+    expr: UniqueListLiteral,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (expr.kind === 'empty') {
+      this.emit(out, { op: 'MAKE_EMPTY_UNIQUE_LIST', elementType: expr.elementType! });
+      return;
+    }
+    let inferred: ScalarTypeName | null = null;
+    let allKnown = true;
+    for (const e of expr.elements) {
+      const t = this.staticType(e, bindings);
+      if (t === null) { allKnown = false; continue; }
+      if (t.kind !== 'scalar') {
+        throw new CompileError(`nested lists not supported`, this.currentLoc);
+      }
+      if (inferred === null) inferred = t.name;
+      else if (inferred !== t.name) {
+        throw new CompileError(
+          `Type mismatch in unique list literal: mixed element types (${inferred} and ${t.name})`,
+        this.currentLoc);
+      }
+    }
+    for (const e of expr.elements) {
+      this.compileExpr(e, out, bindings);
+    }
+    this.emit(out, {
+      op: 'MAKE_UNIQUE_LIST',
+      count: expr.elements.length,
+      elementType: allKnown ? inferred : null,
+    });
   }
 
   private compileListLiteral(
@@ -1627,15 +1785,15 @@ export class Compiler {
         throw new CompileError(
           `'contains' requires a list or string on the left, got ${typeToString(lt)}`,
         this.currentLoc);
-      } else if (lt !== null && lt.kind === 'list') {
-        // Existing list element-type check
+      } else if (lt !== null && (lt.kind === 'list' || lt.kind === 'uniqueList')) {
+        // Existing list element-type check, also applies to unique list.
         const rt = this.staticType(expr.right, bindings);
         if (rt && rt.kind === 'scalar' && rt.name !== lt.element) {
           throw new CompileError(
             `Type mismatch: 'contains' value type ${rt.name} does not match list element type ${lt.element}`,
           this.currentLoc);
         }
-        if (rt && rt.kind === 'list') {
+        if (rt && rt.kind !== 'scalar') {
           throw new CompileError(
             `Type mismatch: 'contains' value cannot be a list`,
           this.currentLoc);
@@ -1682,7 +1840,10 @@ export class Compiler {
       if (lt && rt) {
         const compatible =
           (lt.kind === 'scalar' && rt.kind === 'scalar' && lt.name === rt.name) ||
-          (lt.kind === 'list' && rt.kind === 'list' && lt.element === rt.element);
+          (lt.kind === 'list' && rt.kind === 'list' && lt.element === rt.element) ||
+          (lt.kind === 'uniqueList' && rt.kind === 'uniqueList' && lt.element === rt.element) ||
+          (lt.kind === 'list' && rt.kind === 'uniqueList' && lt.element === rt.element) ||
+          (lt.kind === 'uniqueList' && rt.kind === 'list' && lt.element === rt.element);
         if (!compatible) {
           throw new CompileError(
             `Type mismatch: cannot compare ${typeToString(lt)} and ${typeToString(rt)}`,
@@ -1762,11 +1923,22 @@ export class Compiler {
         }
         return inferred ? { kind: 'list', element: inferred, readonly: false } : null;
       }
+      case 'UniqueListLiteral': {
+        if (expr.kind === 'empty') {
+          return { kind: 'uniqueList', element: expr.elementType!, readonly: false };
+        }
+        let inferred: ScalarTypeName | null = null;
+        for (const e of expr.elements) {
+          const t = this.staticType(e, bindings);
+          if (t && t.kind === 'scalar') { inferred = t.name; break; }
+        }
+        return inferred ? { kind: 'uniqueList', element: inferred, readonly: false } : null;
+      }
       case 'ItemAccessExpression':
       case 'FirstItemExpression':
       case 'LastItemExpression': {
         const tt = this.staticType((expr as any).target, bindings);
-        if (tt && tt.kind === 'list') return { kind: 'scalar', name: tt.element };
+        if (tt && (tt.kind === 'list' || tt.kind === 'uniqueList')) return { kind: 'scalar', name: tt.element };
         return null;
       }
       case 'LengthExpression':

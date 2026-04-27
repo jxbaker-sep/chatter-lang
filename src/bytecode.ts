@@ -36,6 +36,10 @@ export type InstructionKind =
   | { op: 'CHECK_TYPE'; expected: 'number' | 'string' | 'boolean'; context: string }  // peeks stack top; throws if type mismatches; used to enforce typed-function return types when the static type is unknown
   | { op: 'MAKE_LIST'; count: number; elementType: 'number' | 'string' | 'boolean' | null }  // pop count values, push list; elementType=null means infer from first
   | { op: 'MAKE_EMPTY_LIST'; elementType: 'number' | 'string' | 'boolean' }
+  | { op: 'MAKE_UNIQUE_LIST'; count: number; elementType: 'number' | 'string' | 'boolean' | null }  // pop count values, dedupe (preserve insertion order), push unique list
+  | { op: 'MAKE_EMPTY_UNIQUE_LIST'; elementType: 'number' | 'string' | 'boolean' }
+  | { op: 'UNIQUE_LIST_ADD' }    // pop value, pop unique-list, append if not already present
+  | { op: 'UNIQUE_LIST_REMOVE' } // pop value, pop unique-list, remove if present (no-op otherwise)
   | { op: 'LIST_GET' }        // pop index, pop list, push element
   | { op: 'LIST_SET' }        // pop value, pop index, pop list, mutate
   | { op: 'LENGTH' }          // pop value (list or string), push number

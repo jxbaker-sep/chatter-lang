@@ -1,0 +1,3 @@
+function f takes readonly unique list of number xs is
+    say length of xs
+end function

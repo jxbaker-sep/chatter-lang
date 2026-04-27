@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-571 tests passing (plus 1 intentionally-failing stdlib_trim_tab_lf_cr test tracked separately). Total: 572.
+709 tests passing (plus 1 intentionally-failing stdlib_trim_tab_lf_cr test tracked separately). Total: 710.
 
 ## Language spec (current)
 
@@ -129,7 +129,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 `exit`, `next` (each only meaningful in the two-word sequences `exit repeat` / `next repeat`; bare `exit` / `next` is a parse error).
 
 ### Keywords reserved for lists
-`list`, `of`, `readonly`, `empty`, `item`, `first`, `last`, `length`, `contains`, `append`, `prepend`, `insert`, `in`, `remove`
+`list`, `of`, `readonly`, `empty`, `unique`, `item`, `first`, `last`, `length`, `contains`, `append`, `prepend`, `insert`, `in`, `remove`
 
 ### Keywords reserved for string operations
 `character`, `characters` (new). `length`, `contains`, `first`, `last`, `of` are shared with lists.
@@ -242,7 +242,38 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
   - `set x to readonly_param` / `var x is readonly_param` / `change v to readonly_param` → compile error ("cannot bind a readonly-list reference").
   - `return readonly_param` from a typed function → compile error. Return types cannot be `readonly list of T` (parse error).
   - **Call-site matching**: `list of T` arg widens to `readonly list of T` param (OK). `readonly list of T` → `list of T` param rejected (compile error). Element type must match exactly.
-- **Internal type representation**: `ChatterType = {kind:'scalar', name} | {kind:'list', element, readonly}`. Used uniformly in bindings, signatures, param/return annotations, staticType. AST types: `TypeAnnotation` (same shape minus `kind`) for `FunctionParam.paramType` and `FunctionDeclaration.returnType`.
+- **Internal type representation**: `ChatterType = {kind:'scalar', name} | {kind:'list', element, readonly} | {kind:'uniqueList', element, readonly:false}`. Used uniformly in bindings, signatures, param/return annotations, staticType. AST types: `TypeAnnotation` (same shape minus `kind`) for `FunctionParam.paramType` and `FunctionDeclaration.returnType`.
+
+### Unique lists (v1)
+A **unique list** is a "set" data structure (no duplicate values) spelled `unique list of T` to avoid the keyword clash with the `set` binding form. Like lists, unique lists are mutable references; like sets, they enforce uniqueness via value equality and offer no random access. Element type `T` ∈ {`number`, `string`, `boolean`}. Insertion order is always preserved (iteration yields elements in the order they were first added).
+
+- **Literals**:
+  - `unique list of EXPR (, EXPR)*` — nonempty literal. Duplicate values in the literal are **silently dropped at creation time**, preserving the position of the first occurrence (so `unique list of 1, 2, 1, 3, 2` becomes `[1, 2, 3]`).
+  - `empty unique list of T` — empty literal; element type required.
+- **Type annotation**: `unique list of T` is allowed in parameter type annotations and as the return type of typed functions. **`readonly unique list of T` is not supported in v1** (parse error).
+- **Read ops (expressions)** — all polymorphic with `list` and (where noted) `string`:
+  - `length of S` — returns count.
+  - `S is empty` / `S is not empty` — polymorphic with string/list.
+  - `S contains V` — linear scan; element type must match.
+  - `repeat with x in S ... end repeat` — iterates in insertion order; same scoping rules as list iteration.
+  - **No random access**: `item N of S`, `first item of S`, `last item of S`, `change item N of S to V` all → compile error mentioning "random access".
+- **Mutation statements**:
+  - `add EXPR to NAME` — adds `EXPR` if not already present (value equality). **No-op if present.** Element-type mismatch is a compile error when statically known; runtime error otherwise. Targeting a `list` binding with `add` → compile error pointing at `append` / `prepend` / `insert at`.
+  - `remove EXPR from NAME` — removes `EXPR` by value. **No-op if absent (no error).** Element-type mismatch is a compile error / runtime error like `add`. Targeting a `list` binding with `remove EXPR from …` → compile error pointing at `remove item N from NAME`.
+  - The list-only mutations (`append`, `prepend`, `insert at`, `change item N of`) targeting a unique list → compile error mentioning unique list.
+  - Neither `add` nor `remove EXPR from …` updates `it`.
+  - Both work on any binding kind (`set`, `var`, `param`) — the underlying unique list is mutable through aliases just like a regular list.
+- **Equality** (`is` / `is not`) — extends to unique lists:
+  - **unique list ↔ unique list**: equal iff same element type, same size, every element of one is contained in the other (order-independent set equality).
+  - **unique list ↔ list** (either direction): equal iff same element type, same size, same elements **in same insertion / index order** (intersection of list and unique-list semantics).
+  - **list ↔ list**: unchanged (reference equality).
+  - Mismatched element types between aggregates → static compile error.
+- **Type compatibility**: `unique list of T` and `list of T` are **distinct kinds**. A `list of T` arg cannot be passed to a `unique list of T` param (compile error), and vice versa. Returning the wrong kind from a typed function → compile error.
+- **Reference semantics & aliasing**: identical to `list` — `set b to a`, function-arg passing, and storing in another binding all alias the same underlying `items` array. Mutations through any alias are visible everywhere.
+- **Iteration during mutation**: undefined behavior (same as list).
+- **Formatting**: `say uniqueList` and `uniqueList & "..."` use the same `[1, 2, 3]` formatter as list. Users introspect via `length`, `contains`, and iteration.
+- **Static type checker**: arithmetic / comparison / logical / `not` / `if` / `while` / bare-`expect` operands of known unique-list type → compile error (parallel to existing list checks).
+- **Internal**: `ChatterUniqueList = { kind:'uniqueList'; element; items: ChatterValue[] }`. Uniqueness enforced by linear scan on add (insertion-order array, not a JS `Set`). Var type-locking records `uniqueList:T` (parallel to `list:T`).
 
 ### Compile-time vs runtime checks
 - **Compile-time**: readonly enforcement, call-site arg/param type matching, readonly smuggling prevention, return-type matching (scalar and list kind/element/readonly), type-locked `var` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
@@ -283,6 +314,10 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
 ### List / string bytecode ops
 - `MAKE_LIST { count, elementType: 'number'|'string'|'boolean'|null }` — pops `count` values (order-preserving), pushes a new `ChatterList`. `elementType=null` means infer from the first element; all others must match. Used for nonempty list literals.
 - `MAKE_EMPTY_LIST { elementType }` — push a fresh empty list with explicit element type.
+- `MAKE_UNIQUE_LIST { count, elementType }` — pops `count` values, dedupes preserving insertion order (silent), pushes a new `ChatterUniqueList`. Used for nonempty unique-list literals.
+- `MAKE_EMPTY_UNIQUE_LIST { elementType }` — push a fresh empty unique list with explicit element type.
+- `UNIQUE_LIST_ADD` — pop value, pop unique list, append the value if not already present (linear scan); element-type check.
+- `UNIQUE_LIST_REMOVE` — pop value, pop unique list, remove the value if present (linear scan, no-op if absent); element-type check.
 - `LIST_GET` — pop index, pop list, push element (1-indexed). Errors: non-list, non-number index, OOB.
 - `LIST_SET` — pop value, pop index, pop list, mutate element in place (1-indexed). Element-type check.
 - `LENGTH` — pop value, push number. Polymorphic: works on list (items.length) or string (character count). Other types → runtime error.
@@ -375,7 +410,7 @@ Existing golden cases:
 - **Loop extensions (deferred)**: reverse direction (`down to`), `repeat until cond`. Base `repeat` loops (times / range / while / with-in) and the `by STEP` clause on range-form are implemented; early exit (`exit repeat` / `next repeat`) is implemented.
 - **Chatter-native test framework**: write tests in Chatter (`assert x is 10`) once assertions exist.
 - **Maps**: independent built-in key-value type. Mutable. Also need a read-only variant.
-- **Sets**: independent built-in unordered unique-element collection. Mutable + readonly variant.
+- **Sets**: delivered as `unique list of T` (see "Unique lists (v1)" above). A readonly variant is not yet supported.
 - **Structs**: independent built-in "plain old data" aggregate — named fields, no methods. **Immutable.** Should have syntactic sugar for "copy with specific fields changed" (like Rust's struct update syntax or a `with` clause). Not objects — pure data containers.
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
 

@@ -15,13 +15,28 @@ export interface ChatterList {
   items: ChatterValue[];
 }
 
-export type ChatterValue = number | string | boolean | ChatterList;
+export interface ChatterUniqueList {
+  kind: 'uniqueList';
+  element: 'number' | 'string' | 'boolean';
+  items: ChatterValue[];
+}
+
+export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList;
 
 function isList(v: ChatterValue): v is ChatterList {
   return typeof v === 'object' && v !== null && (v as any).kind === 'list';
 }
 
+function isUniqueList(v: ChatterValue): v is ChatterUniqueList {
+  return typeof v === 'object' && v !== null && (v as any).kind === 'uniqueList';
+}
+
+function isAnyList(v: ChatterValue): v is ChatterList | ChatterUniqueList {
+  return isList(v) || isUniqueList(v);
+}
+
 function describe(v: ChatterValue): string {
+  if (isUniqueList(v)) return `unique list of ${v.element}`;
   if (isList(v)) return `list of ${v.element}`;
   return typeof v;
 }
@@ -43,9 +58,9 @@ function formatScalar(v: number | string | boolean): string {
 }
 
 function formatValue(v: ChatterValue): string {
-  if (isList(v)) {
+  if (isAnyList(v)) {
     return '[' + v.items.map(e => {
-      if (isList(e)) return formatValue(e);
+      if (isAnyList(e)) return formatValue(e);
       if (typeof e === 'string') return `"${e}"`;
       return formatScalar(e);
     }).join(', ') + ']';
@@ -133,7 +148,11 @@ export class VM {
 
       case 'STORE_VAR': {
         const val = this.pop();
-        const valType = isList(val) ? `list:${val.element}` : (typeof val as string);
+        const valType = isUniqueList(val)
+          ? `uniqueList:${val.element}`
+          : isList(val)
+            ? `list:${val.element}`
+            : (typeof val as string);
         const existing = frame.varTypes.get(instr.name);
         if (existing === undefined) {
           frame.varTypes.set(instr.name, valType);
@@ -247,27 +266,12 @@ export class VM {
         break;
       }
 
-      case 'EQ': {
-        const b = this.pop();
-        const a = this.pop();
-        if (typeof a !== typeof b) {
-          throw new RuntimeError(
-            `Type mismatch: cannot compare ${typeof a} and ${typeof b}`,
-          instr.loc);
-        }
-        this.stack.push(a === b);
-        break;
-      }
-
+      case 'EQ':
       case 'NEQ': {
         const b = this.pop();
         const a = this.pop();
-        if (typeof a !== typeof b) {
-          throw new RuntimeError(
-            `Type mismatch: cannot compare ${typeof a} and ${typeof b}`,
-          instr.loc);
-        }
-        this.stack.push(a !== b);
+        const result = this.aggregateEquals(a, b, instr.loc);
+        this.stack.push(instr.op === 'EQ' ? result : !result);
         break;
       }
 
@@ -433,10 +437,85 @@ export class VM {
         break;
       }
 
+      case 'MAKE_UNIQUE_LIST': {
+        const elems: ChatterValue[] = new Array(instr.count);
+        for (let i = instr.count - 1; i >= 0; i--) {
+          elems[i] = this.pop();
+        }
+        if (instr.count === 0) {
+          throw new RuntimeError('MAKE_UNIQUE_LIST with zero elements (use MAKE_EMPTY_UNIQUE_LIST)', instr.loc);
+        }
+        let elementType: 'number' | 'string' | 'boolean';
+        if (instr.elementType !== null) {
+          elementType = instr.elementType;
+        } else {
+          const first = elems[0];
+          if (isAnyList(first)) {
+            throw new RuntimeError('nested lists not supported', instr.loc);
+          }
+          elementType = typeof first as 'number' | 'string' | 'boolean';
+        }
+        for (let i = 0; i < elems.length; i++) {
+          const e = elems[i];
+          if (isAnyList(e) || typeof e !== elementType) {
+            throw new RuntimeError(
+              `Type mismatch: unique list element ${i + 1} has type ${describe(e)}, expected ${elementType}`,
+            instr.loc);
+          }
+        }
+        // Dedupe in-place, preserving insertion order.
+        const items: ChatterValue[] = [];
+        for (const e of elems) {
+          if (!items.some(x => x === e)) items.push(e);
+        }
+        const uList: ChatterUniqueList = { kind: 'uniqueList', element: elementType, items };
+        this.stack.push(uList);
+        break;
+      }
+
+      case 'MAKE_EMPTY_UNIQUE_LIST': {
+        const uList: ChatterUniqueList = { kind: 'uniqueList', element: instr.elementType, items: [] };
+        this.stack.push(uList);
+        break;
+      }
+
+      case 'UNIQUE_LIST_ADD': {
+        const value = this.pop();
+        const list = this.pop();
+        if (!isUniqueList(list)) {
+          throw new RuntimeError(`Type mismatch: 'add' target must be a unique list, got ${describe(list)}`, instr.loc);
+        }
+        if (isAnyList(value) || typeof value !== list.element) {
+          throw new RuntimeError(
+            `Type mismatch: cannot add ${describe(value)} to unique list of ${list.element}`,
+          instr.loc);
+        }
+        if (!list.items.some(x => x === value)) {
+          list.items.push(value);
+        }
+        break;
+      }
+
+      case 'UNIQUE_LIST_REMOVE': {
+        const value = this.pop();
+        const list = this.pop();
+        if (!isUniqueList(list)) {
+          throw new RuntimeError(`Type mismatch: 'remove' target must be a unique list, got ${describe(list)}`, instr.loc);
+        }
+        if (isAnyList(value) || typeof value !== list.element) {
+          throw new RuntimeError(
+            `Type mismatch: cannot remove ${describe(value)} from unique list of ${list.element}`,
+          instr.loc);
+        }
+        const idx = list.items.findIndex(x => x === value);
+        if (idx >= 0) list.items.splice(idx, 1);
+        break;
+      }
+
       case 'LIST_GET': {
         const idx = this.pop();
         const list = this.pop();
-        if (!isList(list)) {
+        if (!isAnyList(list)) {
           throw new RuntimeError(`Type mismatch: 'item N of X' requires a list, got ${describe(list)}`, instr.loc);
         }
         if (typeof idx !== 'number') {
@@ -473,7 +552,7 @@ export class VM {
 
       case 'LENGTH': {
         const v = this.pop();
-        if (isList(v)) {
+        if (isAnyList(v)) {
           this.stack.push(v.items.length);
           break;
         }
@@ -496,10 +575,10 @@ export class VM {
           this.stack.push(left.includes(value));
           break;
         }
-        if (!isList(left)) {
+        if (!isAnyList(left)) {
           throw new RuntimeError(`Type mismatch: 'contains' requires a list or string on the left, got ${describe(left)}`, instr.loc);
         }
-        if (isList(value) || typeof value !== left.element) {
+        if (isAnyList(value) || typeof value !== left.element) {
           throw new RuntimeError(
             `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${left.element}`,
           instr.loc);
@@ -722,7 +801,7 @@ export class VM {
           this.stack.push(v.length === 0);
           break;
         }
-        if (isList(v)) {
+        if (isAnyList(v)) {
           this.stack.push(v.items.length === 0);
           break;
         }
@@ -737,5 +816,39 @@ export class VM {
       throw new RuntimeError('Stack underflow');
     }
     return this.stack.pop()!;
+  }
+
+  private aggregateEquals(a: ChatterValue, b: ChatterValue, loc?: SourceLocation): boolean {
+    // unique-list <-> unique-list: order-independent set equality.
+    if (isUniqueList(a) && isUniqueList(b)) {
+      if (a.element !== b.element) return false;
+      if (a.items.length !== b.items.length) return false;
+      for (const x of a.items) {
+        if (!b.items.some(y => y === x)) return false;
+      }
+      return true;
+    }
+    // unique-list <-> list (either direction): same element type, same length, same order.
+    if ((isUniqueList(a) && isList(b)) || (isList(a) && isUniqueList(b))) {
+      const ua = a as ChatterUniqueList | ChatterList;
+      const ub = b as ChatterUniqueList | ChatterList;
+      if (ua.element !== ub.element) return false;
+      if (ua.items.length !== ub.items.length) return false;
+      for (let i = 0; i < ua.items.length; i++) {
+        if (ua.items[i] !== ub.items[i]) return false;
+      }
+      return true;
+    }
+    // list <-> list: existing reference equality.
+    if (isList(a) && isList(b)) {
+      return a === b;
+    }
+    if (typeof a !== typeof b) {
+      throw new RuntimeError(
+        `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
+        loc,
+      );
+    }
+    return a === b;
   }
 }

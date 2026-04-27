@@ -28,7 +28,7 @@ const KEYWORDS = new Set([
   'repeat', 'times', 'with', 'from', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
-  'list', 'of', 'readonly', 'empty',
+  'list', 'of', 'readonly', 'empty', 'unique',
   'item', 'first', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',
   'character', 'characters',
