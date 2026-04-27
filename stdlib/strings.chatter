@@ -5,7 +5,7 @@
 
 # parse: convert a string of digits (with optional leading '-') into a number.
 # Accepts "42", "-7", "0", "-0".
-# Range: -2147483647 .. 2147483647. INT_MIN (-2147483648) is NOT supported.
+# Range: within Chatter's safe integer range (±(2^53 - 1)).
 # Runtime error on anything else: empty, whitespace, '+' sign, decimal, non-digit chars, lone '-'.
 export function parse takes string input returns number is
   var result is 0

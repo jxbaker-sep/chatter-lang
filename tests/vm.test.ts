@@ -60,11 +60,11 @@ describe('VM', () => {
 
   // ── OVERFLOW ───────────────────────────────────────────────────────────────
   describe('Integer overflow', () => {
-    test('throws RuntimeError when result exceeds i32 max (2147483647 + 1)', () => {
+    test('throws RuntimeError when result exceeds safe integer max (MAX_SAFE_INTEGER + 1)', () => {
       const program: BytecodeProgram = {
         functions: new Map(),
         main: [
-          { op: 'PUSH_INT', value: 2147483647 },
+          { op: 'PUSH_INT', value: Number.MAX_SAFE_INTEGER },
           { op: 'PUSH_INT', value: 1 },
           { op: 'ADD' },
         ],
@@ -72,11 +72,11 @@ describe('VM', () => {
       expect(() => new VM(program).run()).toThrow(RuntimeError);
     });
 
-    test('throws RuntimeError when result below i32 min (-2147483648 - 1)', () => {
+    test('throws RuntimeError when result below safe integer min (MIN_SAFE_INTEGER - 1)', () => {
       const program: BytecodeProgram = {
         functions: new Map(),
         main: [
-          { op: 'PUSH_INT', value: -2147483648 },
+          { op: 'PUSH_INT', value: Number.MIN_SAFE_INTEGER },
           { op: 'PUSH_INT', value: 1 },
           { op: 'SUB' },
         ],
@@ -84,12 +84,12 @@ describe('VM', () => {
       expect(() => new VM(program).run()).toThrow(RuntimeError);
     });
 
-    test('large POW overflow is detected (2 ** 31 = 2147483648)', () => {
+    test('large POW overflow is detected (2 ** 53 = 9007199254740992)', () => {
       const program: BytecodeProgram = {
         functions: new Map(),
         main: [
           { op: 'PUSH_INT', value: 2 },
-          { op: 'PUSH_INT', value: 31 },
+          { op: 'PUSH_INT', value: 53 },
           { op: 'POW' },
         ],
       };

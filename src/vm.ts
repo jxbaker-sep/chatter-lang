@@ -65,8 +65,8 @@ interface Frame {
   it: ChatterValue | null;
 }
 
-const I32_MIN = -2147483648;
-const I32_MAX = 2147483647;
+const INT_MIN = Number.MIN_SAFE_INTEGER;
+const INT_MAX = Number.MAX_SAFE_INTEGER;
 
 export class VM {
   private stack: ChatterValue[] = [];
@@ -189,8 +189,8 @@ export class VM {
           case 'MOD': result = a - Math.floor(a / b) * b; break;
           case 'POW': result = Math.pow(a, b); break;
         }
-        if (result < I32_MIN || result > I32_MAX) {
-          throw new RuntimeError(`Integer overflow: result ${result} exceeds i32 range`, instr.loc);
+        if (result < INT_MIN || result > INT_MAX) {
+          throw new RuntimeError(`Integer overflow: result ${result} exceeds safe integer range`, instr.loc);
         }
         this.stack.push(result);
         break;

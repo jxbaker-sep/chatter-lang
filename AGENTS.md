@@ -37,7 +37,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - Python-style indentation for blocks (`function ... end`, `if ... end`).
 
 ### Types
-- `number` = i32, signed. Overflow = runtime error.
+- `number` = signed integer, safe range ±(2^53 − 1) = ±9_007_199_254_740_991. Overflow = runtime error.
 - `string` = double-quoted literals.
 - `boolean` = `true` / `false`. Prints as literal `true`/`false`.
 - `list of TYPE` — mutable, ordered, **reference-value** list of scalar elements (TYPE ∈ {number, string, boolean}). Assignment / argument passing / returning aliases the same underlying list (mutations visible via every reference).
@@ -371,7 +371,7 @@ Existing golden cases:
 
 ### Explicitly queued
 - **Path C**: static type checker. Would catch `5 is "hello"` at compile time, validate param types, etc. Currently Path A (runtime checks). Deferred.
-- **Fractional numbers**: planned. `number` is currently i32 only.
+- **Fractional numbers**: planned. `number` is currently integer-only (safe range ±(2^53 − 1)).
 - **Loop extensions (deferred)**: reverse direction (`down to`), `repeat until cond`. Base `repeat` loops (times / range / while / with-in) and the `by STEP` clause on range-form are implemented; early exit (`exit repeat` / `next repeat`) is implemented.
 - **Chatter-native test framework**: write tests in Chatter (`assert x is 10`) once assertions exist.
 - **Maps**: independent built-in key-value type. Mutable. Also need a read-only variant.
