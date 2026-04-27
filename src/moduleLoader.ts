@@ -73,10 +73,10 @@ function resolveUse(userPath: string, fromDir: string, stdlibDir: string): Resol
 }
 
 function useLocation(u: UseStatement): SourceLocation | undefined {
-  if (u.pathLoc) return { line: u.pathLoc.line, col: u.pathLoc.col, length: u.pathLoc.length };
+  if (u.pathLoc) return { line: u.pathLoc.line, col: u.pathLoc.col, length: u.pathLoc.length, file: u.pathLoc.file };
   const anyU = u as any;
   if (anyU.line !== undefined && anyU.col !== undefined) {
-    return { line: anyU.line, col: anyU.col, length: anyU.length };
+    return { line: anyU.line, col: anyU.col, length: anyU.length, file: anyU.file };
   }
   return undefined;
 }
@@ -84,7 +84,7 @@ function useLocation(u: UseStatement): SourceLocation | undefined {
 function nameLocation(u: UseStatement, idx: number): SourceLocation | undefined {
   if (u.nameLocs && u.nameLocs[idx]) {
     const n = u.nameLocs[idx];
-    return { line: n.line, col: n.col, length: n.length };
+    return { line: n.line, col: n.col, length: n.length, file: n.file };
   }
   return useLocation(u);
 }
@@ -132,7 +132,7 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
     const source = fs.readFileSync(absPath, 'utf8');
     let ast: Program;
     try {
-      const tokens = lex(source);
+      const tokens = lex(source, displayPath);
       ast = parse(tokens, source);
     } catch (e) {
       // Attach module file path to the error by re-throwing as-is; the caller

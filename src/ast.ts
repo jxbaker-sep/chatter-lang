@@ -8,6 +8,7 @@ export interface Located {
   line?: number;
   col?: number;
   length?: number;
+  file?: string;
 }
 
 export type Expression = (
@@ -137,8 +138,8 @@ export interface UseStatement {
   type: 'UseStatement';
   names: string[];
   path: string;            // as written by user, no .chatter appended
-  nameLocs?: Array<{ line: number; col: number; length: number }>;
-  pathLoc?: { line: number; col: number; length: number };
+  nameLocs?: Array<{ line: number; col: number; length: number; file?: string }>;
+  pathLoc?: { line: number; col: number; length: number; file?: string };
 }
 
 export interface CallStatement {

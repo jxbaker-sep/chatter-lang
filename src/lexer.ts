@@ -19,6 +19,7 @@ export interface Token {
   value: string;
   line: number;
   col: number;
+  file?: string;
 }
 
 const KEYWORDS = new Set([
@@ -37,7 +38,7 @@ const KEYWORDS = new Set([
 ]);
 const TYPES = new Set(['number', 'boolean', 'string']);
 
-export function lex(source: string): Token[] {
+export function lex(source: string, filename?: string): Token[] {
   const tokens: Token[] = [];
   const lines = source.split('\n');
   const indentStack: number[] = [0];
@@ -165,5 +166,8 @@ export function lex(source: string): Token[] {
   }
 
   tokens.push({ type: 'EOF', value: '', line: lines.length + 1, col: 0 });
+  if (filename !== undefined) {
+    for (const t of tokens) t.file = filename;
+  }
   return tokens;
 }

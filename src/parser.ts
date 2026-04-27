@@ -20,7 +20,7 @@ import {
 } from './ast';
 
 function locOfToken(t: Token): SourceLocation {
-  return { line: t.line, col: t.col, length: Math.max(1, t.value.length) };
+  return { line: t.line, col: t.col, length: Math.max(1, t.value.length), file: t.file };
 }
 
 export class ParseError extends ChatterError {
@@ -132,6 +132,7 @@ export function parse(tokens: Token[], source?: string): Program {
     (node as any).line = tok.line;
     (node as any).col = tok.col;
     (node as any).length = Math.max(1, tok.value.length);
+    (node as any).file = tok.file;
     return node;
   }
 
@@ -602,28 +603,29 @@ export function parse(tokens: Token[], source?: string): Program {
     (fn as any).line = exportTok.line;
     (fn as any).col = exportTok.col;
     (fn as any).length = Math.max(1, exportTok.value.length);
+    (fn as any).file = exportTok.file;
     return fn;
   }
 
   function parseUseStatement(): UseStatement {
     const useTok = consume('KEYWORD', 'use');
     const names: string[] = [];
-    const nameLocs: Array<{ line: number; col: number; length: number }> = [];
+    const nameLocs: Array<{ line: number; col: number; length: number; file?: string }> = [];
     const firstName = consume('IDENT');
     names.push(firstName.value);
-    nameLocs.push({ line: firstName.line, col: firstName.col, length: firstName.value.length });
+    nameLocs.push({ line: firstName.line, col: firstName.col, length: firstName.value.length, file: firstName.file });
     while (peek().type === 'COMMA') {
       consume('COMMA');
       const n = consume('IDENT');
       names.push(n.value);
-      nameLocs.push({ line: n.line, col: n.col, length: n.value.length });
+      nameLocs.push({ line: n.line, col: n.col, length: n.value.length, file: n.file });
     }
     const seen = new Set<string>();
     for (let i = 0; i < names.length; i++) {
       if (seen.has(names[i])) {
         throw new ChatterError(
           `duplicate name '${names[i]}' in use statement`,
-          { line: nameLocs[i].line, col: nameLocs[i].col, length: nameLocs[i].length },
+          { line: nameLocs[i].line, col: nameLocs[i].col, length: nameLocs[i].length, file: nameLocs[i].file },
         );
       }
       seen.add(names[i]);
@@ -636,11 +638,12 @@ export function parse(tokens: Token[], source?: string): Program {
       names,
       path: pathTok.value,
       nameLocs,
-      pathLoc: { line: pathTok.line, col: pathTok.col, length: pathTok.value.length + 2 },
+      pathLoc: { line: pathTok.line, col: pathTok.col, length: pathTok.value.length + 2, file: pathTok.file },
     };
     (node as any).line = useTok.line;
     (node as any).col = useTok.col;
     (node as any).length = Math.max(1, useTok.value.length);
+    (node as any).file = useTok.file;
     return node;
   }
 

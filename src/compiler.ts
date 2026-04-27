@@ -26,7 +26,7 @@ export class CompileError extends ChatterError {
 
 function locOf(node: Located | undefined | null): SourceLocation | undefined {
   if (!node || node.line === undefined || node.col === undefined) return undefined;
-  return { line: node.line, col: node.col, length: node.length };
+  return { line: node.line, col: node.col, length: node.length, file: node.file };
 }
 
 function containsEndSentinel(expr: Expression | null | undefined): boolean {

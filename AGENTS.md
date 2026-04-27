@@ -386,6 +386,7 @@ Existing golden cases:
 
 ### Quality of life
 - Better error messages (line/col + source snippet).
+- **Cross-module error reports with source caret.** Currently when a runtime error fires inside an imported module (e.g. `std:strings`), `formatError` shows the right filename + line:col but skips the source-line caret because it only has access to the entry file's source. Full fix: thread per-module sources into the formatter (e.g. via a `sources: Map<filename, string>` argument) and render the caret using the appropriate source. The plumbing for `loc.file` already exists.
 - REPL.
 - More example programs (FizzBuzz, Fibonacci — need loops first).
 - **GitHub syntax highlighting for `.chatter` files.** Quick win: `.gitattributes` override like `*.chatter linguist-language=Ruby` (imperfect but instant). Proper path: PR to github-linguist/linguist with a TextMate grammar (the `vscode-chatter/` extension may already have one to reuse); requires ~200 public `.chatter` files to clear the popularity bar.
