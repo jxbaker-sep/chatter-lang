@@ -77,12 +77,14 @@ export interface VarDeclaration {
   type: 'VarDeclaration';
   name: string;
   value: Expression;
+  precall?: CallStatement | null;
 }
 
 export interface ChangeStatement {
   type: 'ChangeStatement';
   name: string;
   value: Expression;
+  precall?: CallStatement | null;
 }
 
 export interface ChangeItemStatement {
@@ -113,6 +115,7 @@ export interface SetStatement {
   type: 'SetStatement';
   name: string;
   value: Expression;
+  precall?: CallStatement | null;
 }
 
 export interface FunctionParam {
@@ -147,6 +150,7 @@ export interface CallStatement {
 export interface ReturnStatement {
   type: 'ReturnStatement';
   value: Expression | null;
+  precall?: CallStatement | null;
 }
 
 export interface BinaryExpression {

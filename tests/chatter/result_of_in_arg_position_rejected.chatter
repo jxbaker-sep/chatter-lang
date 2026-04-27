@@ -1,0 +1,9 @@
+function f takes number n returns number is
+  return n
+end function
+
+function g takes number n returns number is
+  return n + 1
+end function
+
+g the result of f 5

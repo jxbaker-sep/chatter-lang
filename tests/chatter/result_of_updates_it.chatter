@@ -1,0 +1,7 @@
+function double takes number n returns number is
+  return n * 2
+end function
+
+set x to the result of double 5
+say x
+say it

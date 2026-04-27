@@ -1,0 +1,5 @@
+function f takes number n returns number is
+  return n
+end function
+
+say the result of f 5

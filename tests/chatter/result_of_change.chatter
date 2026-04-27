@@ -1,0 +1,7 @@
+function double takes number n returns number is
+  return n * 2
+end function
+
+var x is 0
+change x to the result of double 7
+say x

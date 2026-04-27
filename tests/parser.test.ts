@@ -677,4 +677,33 @@ describe('Parser', () => {
       expect((ast.body[1] as any).expressions[0].type).toBe('FirstItemExpression');
     });
   });
+
+  describe('the result of sugar', () => {
+    test('parses set ... the result of CALL with precall', () => {
+      const src = 'function f takes number n returns number is\n    return n\nend function\nset x to the result of f 5';
+      const ast = parseSource(src);
+      const setStmt = ast.body[1] as any;
+      expect(setStmt.type).toBe('SetStatement');
+      expect(setStmt.value).toMatchObject({ type: 'ItExpression' });
+      expect(setStmt.precall).toMatchObject({
+        type: 'CallStatement',
+        name: 'f',
+        args: [{ name: null, value: { type: 'NumberLiteral', value: 5 } }],
+      });
+    });
+
+    test('parses return the result of CALL with precall', () => {
+      const src = 'function f takes number n returns number is\n    return n\nend function\nfunction g takes number n returns number is\n    return the result of f n\nend function';
+      const ast = parseSource(src);
+      const retStmt = (ast.body[1] as FunctionDeclaration).body[0] as any;
+      expect(retStmt.type).toBe('ReturnStatement');
+      expect(retStmt.value).toMatchObject({ type: 'ItExpression' });
+      expect(retStmt.precall).toMatchObject({ type: 'CallStatement', name: 'f' });
+    });
+
+    test('does not trigger sugar when of is missing', () => {
+      const ast = parseSource('set the to 1\nset result to 2\nsay the\nsay result');
+      expect((ast.body[0] as any).precall).toBeFalsy();
+    });
+  });
 });

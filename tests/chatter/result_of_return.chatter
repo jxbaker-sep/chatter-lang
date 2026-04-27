@@ -1,0 +1,10 @@
+function double takes number n returns number is
+  return n * 2
+end function
+
+function quadruple takes number n returns number is
+  return the result of double n * 2
+end function
+
+quadruple 5
+say it

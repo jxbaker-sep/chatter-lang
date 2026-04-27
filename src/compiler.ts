@@ -436,6 +436,29 @@ export class Compiler {
     }
   }
 
+  private compilePrecall(
+    precall: CallStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): ChatterType {
+    if (!this.functionReturnTypes.has(precall.name)) {
+      throw new CompileError(
+        `'the result of' refers to unknown function '${precall.name}'`,
+        this.currentLoc,
+      );
+    }
+    const rt = this.functionReturnTypes.get(precall.name);
+    if (rt === null || rt === undefined) {
+      throw new CompileError(
+        `'the result of' requires a typed function, but '${precall.name}' is void`,
+        this.currentLoc,
+      );
+    }
+    this.compileCallStmt(precall, out, bindings);
+    this.emit(out, { op: 'STORE_IT' });
+    return rt;
+  }
+
   private compileSet(
     stmt: SetStatement,
     out: Instruction[],
@@ -443,6 +466,13 @@ export class Compiler {
   ): void {
     if (bindings.has(stmt.name)) {
       throw new CompileError(`Duplicate binding: '${stmt.name}' is already set`, this.currentLoc);
+    }
+    if (stmt.precall) {
+      const rt = this.compilePrecall(stmt.precall, out, bindings);
+      this.compileExpr(stmt.value, out, bindings);
+      this.emit(out, { op: 'STORE', name: stmt.name });
+      bindings.set(stmt.name, { kind: 'set', type: rt });
+      return;
     }
     this.checkNotReadonlySmuggle(stmt.value, bindings, 'set');
     this.compileExpr(stmt.value, out, bindings);
@@ -466,6 +496,13 @@ export class Compiler {
         `Variable '${stmt.name}' shadows outer binding`,
       this.currentLoc);
     }
+    if (stmt.precall) {
+      const rt = this.compilePrecall(stmt.precall, out, bindings);
+      this.compileExpr(stmt.value, out, bindings);
+      this.emit(out, { op: 'STORE_VAR', name: stmt.name });
+      bindings.set(stmt.name, { kind: 'var', type: rt });
+      return;
+    }
     this.checkNotReadonlySmuggle(stmt.value, bindings, 'var');
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'STORE_VAR', name: stmt.name });
@@ -488,6 +525,22 @@ export class Compiler {
       throw new CompileError(
         `Cannot change '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
       this.currentLoc);
+    }
+    if (stmt.precall) {
+      const rt = this.compilePrecall(stmt.precall, out, bindings);
+      if (info.type) {
+        if (info.type.kind !== rt.kind ||
+            (info.type.kind === 'scalar' && rt.kind === 'scalar' && info.type.name !== rt.name) ||
+            (info.type.kind === 'list' && rt.kind === 'list' && info.type.element !== rt.element)) {
+          throw new CompileError(
+            `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rt)}`,
+            this.currentLoc,
+          );
+        }
+      }
+      this.compileExpr(stmt.value, out, bindings);
+      this.emit(out, { op: 'STORE_VAR', name: stmt.name });
+      return;
     }
     // Static type check for list vars: exact match required.
     if (info.type && info.type.kind === 'list') {
@@ -1124,6 +1177,20 @@ export class Compiler {
       throw new CompileError(
         `typed function '${this.currentFuncName}' must return a ${typeToString(rt)}`,
       this.currentLoc);
+    }
+    if (stmt.precall) {
+      const callRt = this.compilePrecall(stmt.precall, out, bindings);
+      if (callRt.kind !== rt.kind ||
+          (callRt.kind === 'scalar' && rt.kind === 'scalar' && callRt.name !== rt.name) ||
+          (callRt.kind === 'list' && rt.kind === 'list' && callRt.element !== rt.element)) {
+        throw new CompileError(
+          `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(callRt)}`,
+          this.currentLoc,
+        );
+      }
+      this.compileExpr(stmt.value, out, bindings);
+      this.emit(out, { op: 'RETURN' });
+      return;
     }
     // Smuggling ban: a typed function that `return NAME` where NAME is a readonly list → error.
     // (Also: the return type itself is never readonly per spec §8.)

@@ -1,0 +1,4 @@
+use parse from "std:strings"
+
+set n to the result of parse "42"
+say n

@@ -666,4 +666,26 @@ describe('Compiler', () => {
       expect(() => compileSource(src)).not.toThrow();
     });
   });
+
+  describe('the result of sugar', () => {
+    test('emits call then STORE_IT then LOAD_IT then STORE for set', () => {
+      const src = 'function f takes number n returns number is\n    return n\nend function\nset x to the result of f 5';
+      const bc = compileSource(src);
+      const main = bc.main;
+      const callIdx = main.findIndex(i => i.op === 'CALL' && (i as any).name === 'f');
+      expect(callIdx).toBeGreaterThanOrEqual(0);
+      expect(main[callIdx + 1]).toMatchObject({ op: 'STORE_IT' });
+      expect(main[callIdx + 2]).toMatchObject({ op: 'LOAD_IT' });
+      expect(main[callIdx + 3]).toMatchObject({ op: 'STORE', name: 'x' });
+    });
+
+    test('void function in the result of → compile error', () => {
+      const src = 'function noop is\n    say "hi"\nend function\nset x to the result of noop';
+      expect(() => compileSource(src)).toThrow(/void/);
+    });
+
+    test('unknown function in the result of → compile error', () => {
+      expect(() => compileSource('set x to the result of nope 5')).toThrow(/unknown function/);
+    });
+  });
 });

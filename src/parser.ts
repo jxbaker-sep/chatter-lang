@@ -329,10 +329,30 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
   }
 
+  function tryConsumeTheResultOf(): CallStatement | null {
+    const t0 = tokens[pos];
+    const t1 = tokens[pos + 1];
+    const t2 = tokens[pos + 2];
+    if (
+      t0 && t0.type === 'IDENT' && t0.value === 'the' &&
+      t1 && t1.type === 'IDENT' && t1.value === 'result' &&
+      t2 && t2.type === 'KEYWORD' && t2.value === 'of'
+    ) {
+      advance(); advance(); advance();
+      return parseCallStatement();
+    }
+    return null;
+  }
+
   function parseSetStatement(): SetStatement {
     consume('KEYWORD', 'set');
     const nameTok = consume('IDENT');
     consume('KEYWORD', 'to');
+    const precall = tryConsumeTheResultOf();
+    if (precall) {
+      const itExpr: Expression = { type: 'ItExpression' };
+      return { type: 'SetStatement', name: nameTok.value, value: itExpr, precall };
+    }
     const value = parseExpression();
     consumeNewline();
     return { type: 'SetStatement', name: nameTok.value, value };
@@ -342,6 +362,11 @@ export function parse(tokens: Token[], source?: string): Program {
     consume('KEYWORD', 'var');
     const nameTok = consume('IDENT');
     consume('KEYWORD', 'is');
+    const precall = tryConsumeTheResultOf();
+    if (precall) {
+      const itExpr: Expression = { type: 'ItExpression' };
+      return { type: 'VarDeclaration', name: nameTok.value, value: itExpr, precall };
+    }
     const value = parseExpression();
     consumeNewline();
     return { type: 'VarDeclaration', name: nameTok.value, value };
@@ -362,6 +387,11 @@ export function parse(tokens: Token[], source?: string): Program {
     }
     const nameTok = consume('IDENT');
     consume('KEYWORD', 'to');
+    const precall = tryConsumeTheResultOf();
+    if (precall) {
+      const itExpr: Expression = { type: 'ItExpression' };
+      return { type: 'ChangeStatement', name: nameTok.value, value: itExpr, precall };
+    }
     const value = parseExpression();
     consumeNewline();
     return { type: 'ChangeStatement', name: nameTok.value, value };
@@ -619,6 +649,11 @@ export function parse(tokens: Token[], source?: string): Program {
     if (peek().type === 'NEWLINE') {
       advance();
       return { type: 'ReturnStatement', value: null };
+    }
+    const precall = tryConsumeTheResultOf();
+    if (precall) {
+      const itExpr: Expression = { type: 'ItExpression' };
+      return { type: 'ReturnStatement', value: itExpr, precall };
     }
     const value = parseExpression();
     consumeNewline();

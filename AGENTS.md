@@ -67,6 +67,12 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
   - `repeat` bodies never contribute termination (loop body may run zero times).
   - All other statements: not terminating.
 - `return expr` / `return` — `return expr` in typed fns, bare `return` in void fns only. Multiple returns allowed.
+- **`the result of CALL` sugar** — appears ONLY at the top of the RHS of these four host statements (not as an expression, never nested, never inside an arg position):
+  - `set NAME to the result of CALL` ≡ `CALL` (typed-call, updates `it`) followed by `set NAME to it`.
+  - `var NAME is the result of CALL` ≡ same, then `var NAME is it`. Type-locks NAME to CALL's declared return type.
+  - `change NAME to the result of CALL` ≡ same, then `change NAME to it`. Compile error if NAME's locked type statically mismatches CALL's return type.
+  - `return the result of CALL` ≡ same, then `return it`. CALL's return type must match the enclosing function's declared return type.
+  CALL parses exactly like a normal call statement (function name, optional positional first arg, zero or more named args, terminated by newline). The function MUST be a known user-defined or imported function (primitives like `length` / `character` / `code` are not callable; missing IDENT after `of` produces a parse error). The function MUST be typed (have a `returns` clause) — calling a void function is a compile error: `'the result of' requires a typed function, but 'X' is void`. After the sugared line, `it` equals the call's return value (the host statement does NOT independently update `it`). `the` and `result` are NOT reserved keywords — detection is a contextual peek for the exact 3-token sequence `IDENT(the) IDENT(result) KEYWORD(of)` immediately after `to` / `is` / `return`. Implemented via an optional `precall: CallStatement | null` field on `SetStatement`, `VarDeclaration`, `ChangeStatement`, and `ReturnStatement`; when set, the compiler emits the call (+`STORE_IT`) before the host store/return.
 - `NAME firstArg LABEL1 val1 LABEL2 val2` — function call: first arg positional, rest selected by the declared separator labels.
 - `if cond ... [else if cond ... ]* [else ...] end if` — the closing `end if` qualifier is **required** (bare `end` is a parse error).
 - `repeat N times ... end [repeat]` — run body N times. N must be a number; N=0 = 0 iterations; N<0 = runtime error.
