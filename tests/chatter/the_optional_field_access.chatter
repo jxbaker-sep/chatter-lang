@@ -2,6 +2,6 @@ struct Point
   number X
   number Y
 end struct
-set p to make Point with X 3, Y 4
+constant p is make Point with X 3, Y 4
 say the X of p
 say the Y of p

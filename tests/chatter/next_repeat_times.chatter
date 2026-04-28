@@ -1,5 +1,5 @@
-var kept is 0
-var counter is 0
+variable kept is 0
+variable counter is 0
 repeat 6 times
   add 1 to counter
   if counter mod 2 is 1

@@ -1,4 +1,4 @@
-set x to 5
+constant x is 5
 if x is 5
     say "match"
 end if
@@ -7,7 +7,7 @@ if x is not 10
     say "yes different"
 end if
 
-set s to "hello"
+constant s is "hello"
 if s is "hello"
     say "greeting"
 end if

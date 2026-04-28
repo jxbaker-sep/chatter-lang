@@ -1,2 +1,2 @@
-set code to 5
+constant code is 5
 say code

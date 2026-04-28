@@ -2,5 +2,5 @@ function f takes unique list of number xs is
     say length of xs
 end function
 
-set s to list of 1, 2, 3
+constant s is list of 1, 2, 3
 f s

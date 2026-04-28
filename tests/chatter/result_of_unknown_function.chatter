@@ -1,1 +1,1 @@
-set x to the result of nope 5
+constant x is the result of nope 5

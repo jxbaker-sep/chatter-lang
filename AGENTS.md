@@ -41,24 +41,24 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `string` = double-quoted literals.
 - `boolean` = `true` / `false`. Prints as literal `true`/`false`.
 - `list of TYPE` — mutable, ordered, **reference-value** list of scalar elements (TYPE ∈ {number, string, boolean}). Assignment / argument passing / returning aliases the same underlying list (mutations visible via every reference).
-- `readonly list of TYPE` — a **reference-capability marker** used *only* in parameter type annotations. Forbids mutation through that reference at compile time. Not stored at runtime. Cannot appear as a `set`/`var` annotation nor as a return type.
+- `readonly list of TYPE` — a **reference-capability marker** used *only* in parameter type annotations. Forbids mutation through that reference at compile time. Not stored at runtime. Cannot appear as a `constant`/`variable` annotation nor as a return type.
 - Nested lists (`list of list of T`) are **not supported** (parse error).
 
 ### Statements
 - `say expr (, expr)*` — prints one or more expressions space-separated on one line, terminated by newline. **Does NOT update `it`** (for debugging). Empty `say` or trailing comma = compile error. Single-arg form output is byte-identical to the old single-expression `say`. List literals stay greedy in `say` arg position — use parens to mix a list alongside other items: `say (list of 1, 2), "end"`.
-- `set NAME to expr` — immutable binding. Duplicate `set` = compile error.
-- `var NAME is expr` — **mutable** binding. Initializer required. Type-locked at first assignment to whichever of {number, string, boolean} the value is. Same scoping rules as `set` (function-local; no shadowing of outer bindings; no redeclaration at same level — including mixing `set`/`var`). Does NOT update `it`.
-- `change NAME to expr` — reassigns an existing `var`. Compile error if NAME is not a `var` (e.g. a `set`, param, loop var, or undeclared). Runtime error if the new value's type doesn't match the locked type (message mentions name + expected/got). Does NOT update `it`.
+- `constant NAME is expr` — immutable binding. Duplicate `constant` = compile error.
+- `variable NAME is expr` — **mutable** binding. Initializer required. Type-locked at first assignment to whichever of {number, string, boolean} the value is. Same scoping rules as `constant` (function-local; no shadowing of outer bindings; no redeclaration at same level — including mixing `constant`/`variable`). Does NOT update `it`.
+- `change NAME to expr` — reassigns an existing `variable`. Compile error if NAME is not a `variable` (e.g. a `constant`, param, loop var, or undeclared). Runtime error if the new value's type doesn't match the locked type (message mentions name + expected/got). Does NOT update `it`.
 - Arithmetic sugar (all shorthand for `change NAME to NAME <op> EXPR`):
   - `add EXPR to NAME`
   - `subtract EXPR from NAME`
   - `multiply NAME by EXPR`
   - `divide NAME by EXPR`
-  All require NAME to be a `var` of locked type `number` (compile error if the type is statically known to be string or boolean; otherwise deferred to runtime arithmetic check). Do NOT update `it`.
+  All require NAME to be a `variable` of locked type `number` (compile error if the type is statically known to be string or boolean; otherwise deferred to runtime arithmetic check). Do NOT update `it`.
 - `function NAME [takes TYPE IDENT (LABEL TYPE IDENT)*] [returns TYPE] is ... end function` — function decl. `TYPE` is `number`, `boolean`, or `string`. Zero-arg functions omit `takes` entirely. First param is positional (no label). Each subsequent param is preceded by a **separator label** that is used at the call site; the param's **body name** (the IDENT) is what the body code refers to. `LABEL` may be any IDENT or any non-stop KEYWORD (e.g. `to`, `with`, `from`, `in` are valid labels; `is`, `end`, `if`, `and`, `takes`, `returns`, ... are not). Duplicate body names in the same function → compile error. Duplicate labels are allowed; at the call site, multiple args with the same label bind to the matching params **in declaration order**. The closing `end function` qualifier is **required** (bare `end` is a parse error).
 
   **Two kinds of function (determined by presence of `returns` clause):**
-  - **Void** (no `returns`): body may use bare `return` (no expression) to exit early. `return EXPR` in a void function is a **compile error**. Call sites emit `DROP` after `CALL` — the call does **NOT** update `it`. A void function used in expression position (`set x to greet`, `say greet`, `greet + 1`, etc.) is a **compile error**. Empty void body is legal.
+  - **Void** (no `returns`): body may use bare `return` (no expression) to exit early. `return EXPR` in a void function is a **compile error**. Call sites emit `DROP` after `CALL` — the call does **NOT** update `it`. A void function used in expression position (`constant x is greet`, `say greet`, `greet + 1`, etc.) is a **compile error**. Empty void body is legal.
   - **Typed** (`returns TYPE`): every execution path must end with an explicit `return EXPR` (compile-time path analysis; see below). `return` alone is a compile error. `return EXPR`: if EXPR's static type mismatches the declared type → compile error; if unknown → runtime `CHECK_TYPE` op is emitted. Call sites emit `STORE_IT` normally. Empty typed body or fall-through → compile error ("missing return").
 
   **Path-termination analyzer** (`statementTerminates` / `blockTerminates` in `compiler.ts`):
@@ -68,17 +68,17 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
   - All other statements: not terminating.
 - `return expr` / `return` — `return expr` in typed fns, bare `return` in void fns only. Multiple returns allowed.
 - **`the result of CALL` sugar** — appears ONLY at the top of the RHS of these four host statements (not as an expression, never nested, never inside an arg position):
-  - `set NAME to the result of CALL` ≡ `CALL` (typed-call, updates `it`) followed by `set NAME to it`.
-  - `var NAME is the result of CALL` ≡ same, then `var NAME is it`. Type-locks NAME to CALL's declared return type.
+  - `constant NAME is the result of CALL` ≡ `CALL` (typed-call, updates `it`) followed by `constant NAME is it`.
+  - `variable NAME is the result of CALL` ≡ same, then `variable NAME is it`. Type-locks NAME to CALL's declared return type.
   - `change NAME to the result of CALL` ≡ same, then `change NAME to it`. Compile error if NAME's locked type statically mismatches CALL's return type.
   - `return the result of CALL` ≡ same, then `return it`. CALL's return type must match the enclosing function's declared return type.
-  CALL parses exactly like a normal call statement (function name, optional positional first arg, zero or more named args, terminated by newline). The function MUST be a known user-defined or imported function (primitives like `length` / `character` / `code` are not callable; missing IDENT after `of` produces a parse error). The function MUST be typed (have a `returns` clause) — calling a void function is a compile error: `'the result of' requires a typed function, but 'X' is void`. After the sugared line, `it` equals the call's return value (the host statement does NOT independently update `it`). The leading `the` is **optional** (`set x to result of f arg` works the same as `set x to the result of f arg`). `the` and `result` are NOT reserved keywords — detection is a contextual peek for `[the] result of` immediately after `to` / `is` / `return`. Implemented via an optional `precall: CallStatement | null` field on `SetStatement`, `VarDeclaration`, `ChangeStatement`, and `ReturnStatement`; when set, the compiler emits the call (+`STORE_IT`) before the host store/return.
+  CALL parses exactly like a normal call statement (function name, optional positional first arg, zero or more named args, terminated by newline). The function MUST be a known user-defined or imported function (primitives like `length` / `character` / `code` are not callable; missing IDENT after `of` produces a parse error). The function MUST be typed (have a `returns` clause) — calling a void function is a compile error: `'the result of' requires a typed function, but 'X' is void`. After the sugared line, `it` equals the call's return value (the host statement does NOT independently update `it`). The leading `the` is **optional** (`constant x is result of f arg` works the same as `constant x is the result of f arg`). `the` and `result` are NOT reserved keywords — detection is a contextual peek for `[the] result of` immediately after `to` / `is` / `return`. Implemented via an optional `precall: CallStatement | null` field on `ConstantDeclaration`, `VarDeclaration`, `ChangeStatement`, and `ReturnStatement`; when set, the compiler emits the call (+`STORE_IT`) before the host store/return.
 
-- **Optional cosmetic `the` in front of any noun-phrase form.** Anywhere an expression of the shape `<word> ... of EXPR` appears (`length of`, `item N of`, `last item of`, `last character of`, `character N of`, `characters A to B of`, `lines of file`, `code of`, struct field access `FIELD of EXPR`), the parser accepts an optional leading `the` and silently drops it. So `the length of xs`, `the item 2 of xs`, `the X of point`, `the code of "A"`, etc. all parse identically to the bare form. `the` remains a contextual identifier (not a reserved keyword): `var the is 99 / say the` still works. Inside an index slot (the EXPR in `item N of`, `character N of`, `characters A to B of`), the `the FIELD of EXPR` form is suppressed for the same reason field-access parsing is — to avoid stealing the `of`.
+- **Optional cosmetic `the` in front of any noun-phrase form.** Anywhere an expression of the shape `<word> ... of EXPR` appears (`length of`, `item N of`, `last item of`, `last character of`, `character N of`, `characters A to B of`, `lines of file`, `code of`, struct field access `FIELD of EXPR`), the parser accepts an optional leading `the` and silently drops it. So `the length of xs`, `the item 2 of xs`, `the X of point`, `the code of "A"`, etc. all parse identically to the bare form. `the` remains a contextual identifier (not a reserved keyword): `variable the is 99 / say the` still works. Inside an index slot (the EXPR in `item N of`, `character N of`, `characters A to B of`), the `the FIELD of EXPR` form is suppressed for the same reason field-access parsing is — to avoid stealing the `of`.
 - `NAME firstArg LABEL1 val1 LABEL2 val2` — function call: first arg positional, rest selected by the declared separator labels.
 - `if cond ... [else if cond ... ]* [else ...] end if` — the closing `end if` qualifier is **required** (bare `end` is a parse error).
 - `repeat N times ... end [repeat]` — run body N times. N must be a number; N=0 = 0 iterations; N<0 = runtime error.
-- `repeat with i from A to B ... end [repeat]` — inclusive range loop. `i` is block-scoped (mutable across iterations, invisible after loop). `i` cannot shadow outer bindings (compile error). `set i to ...` inside body also a compile error (duplicate binding). If A > B, zero iterations.
+- `repeat with i from A to B ... end [repeat]` — inclusive range loop. `i` is block-scoped (mutable across iterations, invisible after loop). `i` cannot shadow outer bindings (compile error). `constant i is ...` inside body also a compile error (duplicate binding). If A > B, zero iterations.
 - `repeat while cond ... end [repeat]` — pre-test while loop. `cond` must be a boolean (runtime error otherwise). Note: without mutable state, rarely useful for now.
 - All three variants require `end repeat` as the closer (bare `end` is a parse error).
 - `exit repeat` — immediately terminates the innermost enclosing `repeat` loop, transferring control to the statement immediately after `end repeat`. Compile error if used outside any `repeat` (including inside an `if` that is not inside a repeat, and inside a function body outside a loop). Valid inside `if` / `else` blocks nested inside a repeat. Always targets the innermost repeat. Works in all four loop forms.
@@ -119,13 +119,13 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - Parenthesised expressions allowed everywhere.
 
 ### Scoping
-- `set` bindings are immutable; `var` bindings are mutable but type-locked.
-- **Lexical scoping.** A function body sees only: its own params/locals, and **module top-level** `set`/`var` bindings. It does NOT see locals of any caller frame. A reference to an unknown name is a compile error (`Undefined variable: 'X'`). `change`/sugar can only target `var`s declared in the **same** function body.
+- `constant` bindings are immutable; `variable` bindings are mutable but type-locked.
+- **Lexical scoping.** A function body sees only: its own params/locals, and **module top-level** `constant`/`variable` bindings. It does NOT see locals of any caller frame. A reference to an unknown name is a compile error (`Undefined variable: 'X'`). `change`/sugar can only target `variable`s declared in the **same** function body.
 - Param names **cannot shadow** outer bindings — compile error.
-- `var` **cannot shadow** outer bindings (inside a function) — compile error. Redeclaring a name already bound via `set`/`var` in the same scope — compile error.
+- `variable` **cannot shadow** outer bindings (inside a function) — compile error. Redeclaring a name already bound via `constant`/`variable` in the same scope — compile error.
 
 ### Keywords reserved for mutable vars
-`var`, `change`, `add`, `subtract`, `multiply`, `divide`, `by`
+`variable`, `change`, `add`, `subtract`, `multiply`, `divide`, `by`
 
 ### Keywords reserved for loop control
 `exit`, `next` (each only meaningful in the two-word sequences `exit repeat` / `next repeat`; bare `exit` / `next` is a parse error).
@@ -151,7 +151,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 - Path matching is case-sensitive.
 - Missing file → compile error `cannot find module "PATH"` (uses the exact string the user wrote).
 
-**Export**: `export` is an optional modifier on `function` declarations only (v1 does not export `set`/`var`/expressions). A non-exported function is private: usable within its own module, invisible to importers.
+**Export**: `export` is an optional modifier on `function` declarations only (v1 does not export `constant`/`variable`/expressions). A non-exported function is private: usable within its own module, invisible to importers.
 
 **Binding rules**:
 - Imported names live in the importing module's top-level scope alongside local functions.
@@ -168,7 +168,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 **Internals (non-user-visible)**:
 - Each module is assigned a sequential id `m0`, `m1`, … (`m0` = entry).
 - Function names are mangled to `<moduleId>::<name>` inside the emitted bytecode; imported names resolve to the defining module's mangled form. The VM only ever sees mangled names; compile and runtime errors still mention the user-facing unqualified name.
-- Top-level `set`/`var` bindings are also mangled by module to prevent cross-module collision. At runtime the `LOAD` op consults only the current frame and the bottom frame (frame[0] = combined module top-level), enforcing lexical scope. Imported-function closures reach their home-module top-level bindings via the mangled name in frame[0].
+- Top-level `constant`/`variable` bindings are also mangled by module to prevent cross-module collision. At runtime the `LOAD` op consults only the current frame and the bottom frame (frame[0] = combined module top-level), enforcing lexical scope. Imported-function closures reach their home-module top-level bindings via the mangled name in frame[0].
 - The combined `main` is the concatenation of every non-entry module's top-level instructions (in DFS post-order) followed by the entry's top-level. `JUMP`/`JUMP_IF_FALSE` targets are rewritten by the loader when blocks are concatenated. No new VM opcodes were needed.
 - Loader lives in `src/moduleLoader.ts`; entry point `loadProgram(entryFilePath) → BytecodeProgram`. `CLI` calls `loadProgram`.
 
@@ -179,11 +179,11 @@ One file = one module. The file path (normalized absolute) identifies the module
 - Stdlib modules participate in the same module graph (cycle detection, export checks, mangling). Relative `use` from inside a stdlib module resolves against the stdlib file's own directory. Stdlib modules are keyed in the loader's registry by the synthetic string `std:<NAME>` rather than their absolute filesystem path; because `std:` cannot appear in an absolute path, collisions with a coincidentally-named user file are impossible.
 - Placeholder module lives at `stdlib/placeholder.chatter` as proof-of-life. Real stdlib modules: `stdlib/strings.chatter` (e.g. `parse`), `stdlib/math.chatter` (`min`, `max`).
 
-**Not in v1 (deferred)**: `use X as Y` renaming, exporting `set`/`var`, package-style paths (no `./` or `../`), re-exports, dynamic imports, circular imports with partial-module semantics.
+**Not in v1 (deferred)**: `use X as Y` renaming, exporting `constant`/`variable`, package-style paths (no `./` or `../`), re-exports, dynamic imports, circular imports with partial-module semantics.
 
 ### File I/O (read-only, v1)
 - **`lines of file EXPR`** — expression form. `EXPR` must be `string` (compile error otherwise). Returns a fresh **mutable** `list of string`. Line-splitting: any `\n` or `\r\n` is a separator; exactly one trailing newline is stripped (so `"a\nb\n"` → `["a", "b"]`). Empty file → empty list. Leading/internal blank lines are preserved as empty strings.
-- **`read file EXPR`** — statement form, sugar for `set it to lines of file EXPR`. Updates `it` with the same list. Does NOT introduce a named binding.
+- **`read file EXPR`** — statement form, sugar for `constant it is lines of file EXPR`. Updates `it` with the same list. Does NOT introduce a named binding.
 - **Path resolution**: relative paths are resolved against `process.cwd()` at runtime (where the `chatter` CLI was invoked). Absolute paths work normally.
 - **Errors**: file not found, permission denied, etc. surface as runtime error `"could not read file '<path>': <code-or-message>"`.
 - **Writing files** is future work.
@@ -197,7 +197,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 - **`characters A to B of S`** — inclusive substring. `A > B` → `""`. `A < 1` or `B > length` → runtime error. Both `A` and `B` may use the `end` index sentinel (see below).
 - **`last character of S`** — sugar (parses to a dedicated AST node). Empty string → runtime error. Uses a compiler temp to avoid double-evaluating the target (parallel with `last item of`). (Note: there is no `first character of` sugar — use `character 1 of S` instead. `first` is an ordinary identifier.)
 - **Character primitives (Phase 1)**:
-  - **`code of S`** — expression form. Returns the Unicode code point (0..0x10FFFF) of a single-code-point string. Runtime error on empty or multi-code-point strings. `code` is **not** a reserved keyword — parsed contextually when followed by `of`; any existing user variable named `code` still works (e.g. `set code to 5` / `say code`). Compile error when `S` is statically non-string. Does NOT update `it`.
+  - **`code of S`** — expression form. Returns the Unicode code point (0..0x10FFFF) of a single-code-point string. Runtime error on empty or multi-code-point strings. `code` is **not** a reserved keyword — parsed contextually when followed by `of`; any existing user variable named `code` still works (e.g. `constant code is 5` / `say code`). Compile error when `S` is statically non-string. Does NOT update `it`.
   - **`character of N`** — expression form (parallel to the existing `character N of S`; disambiguated by `of` coming immediately after `character`). Returns a one-code-point string built from code point `N`. Runtime error on non-integer, negative, `> 0x10FFFF`, or surrogate halves `0xD800..0xDFFF`. Compile error when `N` is statically non-number. Does NOT update `it`.
   - **Char-class predicates** (infix at `is` precedence):
     - `S is a digit` — true iff `S` is a single-code-point string whose code point is in `'0'..'9'` (0x30..0x39).
@@ -236,17 +236,17 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
   - `change item EXPR of NAME to EXPR`
   - Element type mismatches: compile error when statically known; else runtime error. None update `it`.
 - **Iteration**: `repeat with x in L ... end [repeat]` — block-scoped, read-only per iteration; `change x to ...` → compile error; empty list → zero iterations. Implemented as an index-based desugared loop (LENGTH + LIST_GET) using `_rep_list_*`, `_rep_idx_*`, `_rep_len_*` temps.
-- **Reference semantics**: lists are references. `set b to a` aliases. Passing to a function aliases. Mutating through any alias is visible through all.
+- **Reference semantics**: lists are references. `constant b is a` aliases. Passing to a function aliases. Mutating through any alias is visible through all.
 - **Readonly rules** (compile-time only, never stored at runtime):
   - `readonly list of T` is only valid in param annotations.
   - Inside a function body, any of the 5 mutations targeting a readonly param → compile error.
-  - `set x to readonly_param` / `var x is readonly_param` / `change v to readonly_param` → compile error ("cannot bind a readonly-list reference").
+  - `constant x is readonly_param` / `variable x is readonly_param` / `change v to readonly_param` → compile error ("cannot bind a readonly-list reference").
   - `return readonly_param` from a typed function → compile error. Return types cannot be `readonly list of T` (parse error).
   - **Call-site matching**: `list of T` arg widens to `readonly list of T` param (OK). `readonly list of T` → `list of T` param rejected (compile error). Element type must match exactly.
 - **Internal type representation**: `ChatterType = {kind:'scalar', name} | {kind:'list', element, readonly} | {kind:'uniqueList', element, readonly:false}`. Used uniformly in bindings, signatures, param/return annotations, staticType. AST types: `TypeAnnotation` (same shape minus `kind`) for `FunctionParam.paramType` and `FunctionDeclaration.returnType`.
 
 ### Unique lists (v1)
-A **unique list** is a "set" data structure (no duplicate values) spelled `unique list of T` to avoid the keyword clash with the `set` binding form. Like lists, unique lists are mutable references; like sets, they enforce uniqueness via value equality and offer no random access. Element type `T` ∈ {`number`, `string`, `boolean`}. Insertion order is always preserved (iteration yields elements in the order they were first added).
+A **unique list** is a "set" data structure (no duplicate values) spelled `unique list of T` to avoid the keyword clash with the `constant` binding form. Like lists, unique lists are mutable references; like sets, they enforce uniqueness via value equality and offer no random access. Element type `T` ∈ {`number`, `string`, `boolean`}. Insertion order is always preserved (iteration yields elements in the order they were first added).
 
 - **Literals**:
   - `unique list of EXPR (, EXPR)*` — nonempty literal. Duplicate values in the literal are **silently dropped at creation time**, preserving the position of the first occurrence (so `unique list of 1, 2, 1, 3, 2` becomes `[1, 2, 3]`).
@@ -263,14 +263,14 @@ A **unique list** is a "set" data structure (no duplicate values) spelled `uniqu
   - `remove EXPR from NAME` — removes `EXPR` by value. **No-op if absent (no error).** Element-type mismatch is a compile error / runtime error like `add`. Targeting a `list` binding with `remove EXPR from …` → compile error pointing at `remove item N from NAME`.
   - The list-only mutations (`append`, `prepend`, `insert at`, `change item N of`) targeting a unique list → compile error mentioning unique list.
   - Neither `add` nor `remove EXPR from …` updates `it`.
-  - Both work on any binding kind (`set`, `var`, `param`) — the underlying unique list is mutable through aliases just like a regular list.
+  - Both work on any binding kind (`constant`, `variable`, `param`) — the underlying unique list is mutable through aliases just like a regular list.
 - **Equality** (`is` / `is not`) — extends to unique lists:
   - **unique list ↔ unique list**: equal iff same element type, same size, every element of one is contained in the other (order-independent set equality).
   - **unique list ↔ list** (either direction): equal iff same element type, same size, same elements **in same insertion / index order** (intersection of list and unique-list semantics).
   - **list ↔ list**: unchanged (reference equality).
   - Mismatched element types between aggregates → static compile error.
 - **Type compatibility**: `unique list of T` and `list of T` are **distinct kinds**. A `list of T` arg cannot be passed to a `unique list of T` param (compile error), and vice versa. Returning the wrong kind from a typed function → compile error.
-- **Reference semantics & aliasing**: identical to `list` — `set b to a`, function-arg passing, and storing in another binding all alias the same underlying `items` array. Mutations through any alias are visible everywhere.
+- **Reference semantics & aliasing**: identical to `list` — `constant b is a`, function-arg passing, and storing in another binding all alias the same underlying `items` array. Mutations through any alias are visible everywhere.
 - **Iteration during mutation**: undefined behavior (same as list).
 - **Formatting**: `say uniqueList` and `uniqueList & "..."` use the same `[1, 2, 3]` formatter as list. Users introspect via `length`, `contains`, and iteration.
 - **Static type checker**: arithmetic / comparison / logical / `not` / `if` / `while` / bare-`expect` operands of known unique-list type → compile error (parallel to existing list checks).
@@ -325,7 +325,7 @@ end struct
 **Out of scope (v2+)**: methods/dispatch, pattern matching/destructuring, optional fields/defaults, anonymous struct literals, mutation, recursive struct types (would require nullable/option types).
 
 ### Compile-time vs runtime checks
-- **Compile-time**: readonly enforcement, call-site arg/param type matching, readonly smuggling prevention, return-type matching (scalar and list kind/element/readonly), type-locked `var` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
+- **Compile-time**: readonly enforcement, call-site arg/param type matching, readonly smuggling prevention, return-type matching (scalar and list kind/element/readonly), type-locked `variable` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
 - **Compile-time (operator/control-flow type checks, when operand types are statically known)**:
   - Arithmetic (`+`, `-`, `*`, `/`, `**`, `mod`) — both operands must be `number`. Known non-number → `Type mismatch: arithmetic requires numbers, got X`.
   - Unary minus `-X` — `X` must be `number`.
@@ -358,7 +358,7 @@ end struct
 `EXPECT_FAIL_WITH_MSG` — pops a string; throws "expect failed: <string>". Throws "expect message must be a string, got X" if not a string. Emitted only on the failure branch of `expect PREDICATE, MSG_EXPR`.
 `DELETE` — removes a local from the current frame; used to scope loop variables.
 `LT` / `LE` / `GT` / `GE` — numeric comparison; RuntimeError on non-numbers.
-`STORE_VAR` — type-locked store for mutable `var` bindings. On first store in a frame it records the value's type (number/string/boolean/`list:<element>`); on subsequent stores (from `change` or the arithmetic sugar) it checks the value's type matches the locked type and throws a RuntimeError if not. Each call frame has its own varTypes map, so recursive calls re-lock per invocation.
+`STORE_VAR` — type-locked store for mutable `variable` bindings. On first store in a frame it records the value's type (number/string/boolean/`list:<element>`); on subsequent stores (from `change` or the arithmetic sugar) it checks the value's type matches the locked type and throws a RuntimeError if not. Each call frame has its own varTypes map, so recursive calls re-lock per invocation.
 
 ### List / string bytecode ops
 - `MAKE_LIST { count, elementType: 'number'|'string'|'boolean'|null }` — pops `count` values (order-preserving), pushes a new `ChatterList`. `elementType=null` means infer from the first element; all others must match. Used for nonempty list literals.
@@ -434,7 +434,7 @@ Existing golden cases:
 - **Hybrid paren rule** for `and`/`or` mixing (not standard precedence).
 - `print` does NOT update `it` — user wants this for debugging. (`print` was renamed to `say`.)
 - `it` is function-scoped (separate per frame).
-- `set` is strictly immutable (constants really).
+- `constant` is strictly immutable (constants really).
 - No shadowing of any kind.
 - Booleans strict: `if 5` is runtime error, not truthiness.
 - `and`/`or` are strict (eager) not short-circuit. Both sides always evaluated.
@@ -473,14 +473,14 @@ Existing golden cases:
 - **F2 (Rename Symbol) support in `vscode-chatter`.** Today the extension is declarative-only (TextMate grammar + language-configuration). To enable rename:
   - **Phase 1 — single-file local rename (MVP).**
     - Build a `resolveSymbol(source, line, col) → { defLoc, refLocs[], kind, isRenameable, reason? }` API in `src/` (probably new file `src/resolver.ts`). Walks the AST scope tree the same way the compiler does (function body, `repeat with i / x in L` loop body, if/else blocks).
-    - Covers: `set`, `var`, function parameters, loop variables (`repeat with i`, `repeat with x in L`).
+    - Covers: `constant`, `variable`, function parameters, loop variables (`repeat with i`, `repeat with x in L`).
     - Convert `vscode-chatter/` from declarative to a TS extension: `package.json` adds `main: ./out/extension.js`, build script, tsconfig; `src/extension.ts` registers `vscode.languages.registerRenameProvider`.
     - `prepareRename` validates the cursor is on a renameable local; `provideRenameEdits` returns a `WorkspaceEdit` against the current document only.
     - Bundle de compiled parser/resolver — easiest path is to publish `chatter-lang` as a workspace-local npm dep of de extension and re-export the resolver from `dist/`.
     - Validate `newName`: must be a valid IDENT, must not be a reserved keyword (reuse the lexer's KEYWORDS set), must not collide with another binding visible in the same scope.
     - Refuse (with a clear message) for anything outside Phase 1 scope.
   - **Phase 2 — module-scope locals.**
-    - Top-level `set`/`var` bindings (within one file).
+    - Top-level `constant`/`variable` bindings (within one file).
     - Non-exported function declarations (within one file).
     - Same single-file scope, larger surface area.
   - **Phase 3 — workspace-wide rename.**
@@ -490,7 +490,7 @@ Existing golden cases:
     - File-level renames (`.chatter` filename change → update every `from "..."` string) — usually delivered by VS Code's `onWillRenameFiles` rather dan F2. Sibling work.
   - **Required language plumbing dat doesn't exist yet:**
     - `IdentifierExpression` already carries line/col/length ✓.
-    - But binding sites (`SetStatement.name`, `VarDeclaration.name`, `FunctionParam.name`, repeat-with loop-var, `UseStatement.names[i]` already has `nameLocs[]`, `FunctionDeclaration.name`) need locations on de **name token specifically**, not just de statement. Some have it (UseStatement `nameLocs`), some don't. Audit and add as needed.
+    - But binding sites (`ConstantDeclaration.name`, `VarDeclaration.name`, `FunctionParam.name`, repeat-with loop-var, `UseStatement.names[i]` already has `nameLocs[]`, `FunctionDeclaration.name`) need locations on de **name token specifically**, not just de statement. Some have it (UseStatement `nameLocs`), some don't. Audit and add as needed.
     - `CallStatement` / call-expression target name needs a location too (currently only de statement has loc).
   - **Out of scope (later):** semantic highlighting, hover docs, go-to-definition, find-all-references as a standalone command. Once de resolver exists, all of dese fall out almost for free, but treat as separate roadmap items.
 - REPL.

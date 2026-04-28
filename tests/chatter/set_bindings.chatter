@@ -1,4 +1,4 @@
-set x to 10
-set y to 3
+constant x is 10
+constant y is 3
 say x + y
 say x * y

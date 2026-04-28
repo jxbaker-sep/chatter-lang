@@ -1,4 +1,4 @@
-set l to empty list of number
+constant l is empty list of number
 repeat with x in l
     say x
 end repeat

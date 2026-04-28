@@ -2,4 +2,4 @@ struct P
     number x
 end struct
 
-set p to make P with x "hi"
+constant p is make P with x "hi"

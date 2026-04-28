@@ -1,4 +1,4 @@
-set l to list of 2, 3
+constant l is list of 2, 3
 prepend 1 to l
 say length of l
 say item 1 of l

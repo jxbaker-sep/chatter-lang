@@ -1,4 +1,4 @@
-set i to 5
+constant i is 5
 repeat with i from 1 to 3
     say i
 end repeat

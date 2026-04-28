@@ -1,2 +1,2 @@
-set n to 5
-set m to n with x 1
+constant n is 5
+constant m is n with x 1

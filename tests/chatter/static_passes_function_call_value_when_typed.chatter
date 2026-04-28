@@ -1,5 +1,5 @@
 function five returns number is
     return 5
 end function
-set x to the result of five
+constant x is the result of five
 say x + 10

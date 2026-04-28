@@ -1,4 +1,4 @@
-var sum is 0
+variable sum is 0
 repeat with i from 1 to 10
   if i mod 2 is 1
     next repeat

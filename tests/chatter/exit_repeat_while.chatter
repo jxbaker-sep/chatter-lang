@@ -1,4 +1,4 @@
-var n is 0
+variable n is 0
 repeat while true
   add 1 to n
   if n is 3

@@ -7,7 +7,7 @@
 # Runtime error on empty input.
 export function min takes list of number xs returns number is
   expect xs to not be empty
-  var min is item 1 of xs
+  variable min is item 1 of xs
   repeat with x in xs
     if x is less than min
       change min to x
@@ -20,7 +20,7 @@ end function
 # Runtime error on empty input.
 export function max takes list of number xs returns number is
   expect xs to not be empty
-  var max is item 1 of xs
+  variable max is item 1 of xs
   repeat with x in xs
     if x is greater than max
       change max to x

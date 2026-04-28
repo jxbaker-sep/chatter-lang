@@ -1,4 +1,4 @@
-set xs to lines of file "tests/chatter/fixtures/greek.txt"
+constant xs is lines of file "tests/chatter/fixtures/greek.txt"
 say length of xs
 repeat with line in xs
     say line
@@ -9,16 +9,16 @@ say length of it
 say item 1 of it
 say last item of it
 
-set empty_lines to lines of file "tests/chatter/fixtures/empty.txt"
+constant empty_lines is lines of file "tests/chatter/fixtures/empty.txt"
 say length of empty_lines
 
-set crlf_lines to lines of file "tests/chatter/fixtures/crlf.txt"
+constant crlf_lines is lines of file "tests/chatter/fixtures/crlf.txt"
 say length of crlf_lines
 repeat with line in crlf_lines
     say line
 end repeat
 
-set blanks to lines of file "tests/chatter/fixtures/blanks.txt"
+constant blanks is lines of file "tests/chatter/fixtures/blanks.txt"
 say length of blanks
 say "[" & item 1 of blanks & "]"
 say "[" & item 4 of blanks & "]"

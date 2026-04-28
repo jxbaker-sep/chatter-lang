@@ -1,4 +1,4 @@
-var total is 0
+variable total is 0
 repeat with i from 1 to 5
     add i to total
 end repeat

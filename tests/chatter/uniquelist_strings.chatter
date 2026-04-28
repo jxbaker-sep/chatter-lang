@@ -1,4 +1,4 @@
-set s to unique list of "a", "b", "a"
+constant s is unique list of "a", "b", "a"
 add "c" to s
 say length of s
 say s contains "b"

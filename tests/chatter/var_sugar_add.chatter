@@ -1,4 +1,4 @@
-var n is 10
+variable n is 10
 add 3 to n
 say n
 add 2 + 2 to n

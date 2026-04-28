@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { lex } from '../src/lexer';
 import { parse } from '../src/parser';
-import { FunctionDeclaration, SetStatement, CallStatement, ReturnStatement, BinaryExpression } from '../src/ast';
+import { FunctionDeclaration, ConstantDeclaration, CallStatement, ReturnStatement, BinaryExpression } from '../src/ast';
 
 function parseSource(src: string) {
   return parse(lex(src));
@@ -19,9 +19,9 @@ describe('Parser', () => {
   });
 
   test('parses set statement', () => {
-    const ast = parseSource('set foo to 5');
+    const ast = parseSource('constant foo is 5');
     expect(ast.body[0]).toMatchObject({
-      type: 'SetStatement',
+      type: 'ConstantDeclaration',
       name: 'foo',
       value: { type: 'NumberLiteral', value: 5 },
     });
@@ -146,8 +146,8 @@ describe('Parser', () => {
   });
 
   test('operator precedence: + lower than *', () => {
-    const ast = parseSource('set x to 2 + 3 * 4');
-    const setStmt = ast.body[0] as SetStatement;
+    const ast = parseSource('constant x is 2 + 3 * 4');
+    const setStmt = ast.body[0] as ConstantDeclaration;
     // Should be 2 + (3 * 4)
     expect(setStmt.value).toMatchObject({
       type: 'BinaryExpression',
@@ -163,8 +163,8 @@ describe('Parser', () => {
   });
 
   test('operator precedence: ** higher than *', () => {
-    const ast = parseSource('set x to 2 * 3 ** 4');
-    const setStmt = ast.body[0] as SetStatement;
+    const ast = parseSource('constant x is 2 * 3 ** 4');
+    const setStmt = ast.body[0] as ConstantDeclaration;
     // Should be 2 * (3 ** 4)
     expect(setStmt.value).toMatchObject({
       type: 'BinaryExpression',
@@ -193,21 +193,21 @@ describe('Parser', () => {
     expect(funcNames).toEqual(['double', 'quadruple', 'raise']);
   });
 
-  test('set baz to it produces ItExpression', () => {
-    const ast = parseSource('set baz to it');
-    expect((ast.body[0] as SetStatement).value).toMatchObject({ type: 'ItExpression' });
+  test('constant baz is it produces ItExpression', () => {
+    const ast = parseSource('constant baz is it');
+    expect((ast.body[0] as ConstantDeclaration).value).toMatchObject({ type: 'ItExpression' });
   });
 
   describe('booleans, logical ops, equality, if', () => {
     test('true / false parse as BooleanLiteral', () => {
-      const ast = parseSource('set x to true\nset y to false');
-      expect((ast.body[0] as SetStatement).value).toMatchObject({ type: 'BooleanLiteral', value: true });
-      expect((ast.body[1] as SetStatement).value).toMatchObject({ type: 'BooleanLiteral', value: false });
+      const ast = parseSource('constant x is true\nconstant y is false');
+      expect((ast.body[0] as ConstantDeclaration).value).toMatchObject({ type: 'BooleanLiteral', value: true });
+      expect((ast.body[1] as ConstantDeclaration).value).toMatchObject({ type: 'BooleanLiteral', value: false });
     });
 
     test('`not a is b` parses as not (a is b) (equality binds tighter than not)', () => {
-      const ast = parseSource('set r to not a is b');
-      expect((ast.body[0] as SetStatement).value).toMatchObject({
+      const ast = parseSource('constant r is not a is b');
+      expect((ast.body[0] as ConstantDeclaration).value).toMatchObject({
         type: 'UnaryExpression',
         operator: 'not',
         operand: {
@@ -220,15 +220,15 @@ describe('Parser', () => {
     });
 
     test('chained `a and b and c` parses fine (flat)', () => {
-      expect(() => parseSource('set r to a and b and c')).not.toThrow();
+      expect(() => parseSource('constant r is a and b and c')).not.toThrow();
     });
 
     test('`(a and b) or c` parses fine (parens reset context)', () => {
-      expect(() => parseSource('set r to (a and b) or c')).not.toThrow();
+      expect(() => parseSource('constant r is (a and b) or c')).not.toThrow();
     });
 
     test('`a and b or c` raises ParseError mentioning parentheses', () => {
-      expect(() => parseSource('set r to a and b or c')).toThrow(/parentheses/);
+      expect(() => parseSource('constant r is a and b or c')).toThrow(/parentheses/);
     });
 
     test('if / else if / else / end produces correct AST', () => {
@@ -264,8 +264,8 @@ describe('Parser', () => {
     });
 
     test('`is not` produces BinaryExpression with operator !=', () => {
-      const ast = parseSource('set r to a is not b');
-      expect((ast.body[0] as SetStatement).value).toMatchObject({
+      const ast = parseSource('constant r is a is not b');
+      expect((ast.body[0] as ConstantDeclaration).value).toMatchObject({
         type: 'BinaryExpression',
         operator: '!=',
         left:  { type: 'IdentifierExpression', name: 'a' },
@@ -358,8 +358,8 @@ describe('Parser', () => {
   });
 
   describe('var / change / compound assign', () => {
-    test('var x is EXPR produces VarDeclaration', () => {
-      const ast = parseSource('var x is 5');
+    test('variable x is EXPR produces VarDeclaration', () => {
+      const ast = parseSource('variable x is 5');
       expect(ast.body[0]).toMatchObject({
         type: 'VarDeclaration',
         name: 'x',
@@ -368,7 +368,7 @@ describe('Parser', () => {
     });
 
     test('var without initializer is a parse error', () => {
-      expect(() => parseSource('var x')).toThrow();
+      expect(() => parseSource('variable x')).toThrow();
     });
 
     test('change x to EXPR produces ChangeStatement', () => {
@@ -524,9 +524,9 @@ describe('Parser', () => {
 
   describe('lists', () => {
     test('parses nonempty list literal', () => {
-      const ast = parseSource('set l to list of 1, 2, 3');
+      const ast = parseSource('constant l is list of 1, 2, 3');
       expect(ast.body[0]).toMatchObject({
-        type: 'SetStatement',
+        type: 'ConstantDeclaration',
         name: 'l',
         value: {
           type: 'ListLiteral',
@@ -541,15 +541,15 @@ describe('Parser', () => {
     });
 
     test('parses empty list literal with element type', () => {
-      const ast = parseSource('set l to empty list of string');
+      const ast = parseSource('constant l is empty list of string');
       expect(ast.body[0]).toMatchObject({
-        type: 'SetStatement',
+        type: 'ConstantDeclaration',
         value: { type: 'ListLiteral', kind: 'empty', elementType: { kind: 'scalar', name: 'string' }, elements: [] },
       });
     });
 
     test('rejects nested list type in literal', () => {
-      expect(() => parseSource('set l to list of list of 1, 2')).toThrow(/nested lists not supported/);
+      expect(() => parseSource('constant l is list of list of 1, 2')).toThrow(/nested lists not supported/);
     });
 
     test('rejects nested list in type annotation', () => {
@@ -575,8 +575,8 @@ describe('Parser', () => {
     });
 
     test('parses contains as binary operator', () => {
-      const ast = parseSource('set r to xs contains 3');
-      expect((ast.body[0] as SetStatement).value).toMatchObject({
+      const ast = parseSource('constant r is xs contains 3');
+      expect((ast.body[0] as ConstantDeclaration).value).toMatchObject({
         type: 'BinaryExpression',
         operator: 'contains',
       });
@@ -604,7 +604,7 @@ describe('Parser', () => {
     });
 
     test('rejects readonly outside parameter annotations', () => {
-      expect(() => parseSource('set l to readonly list of number')).toThrow(/readonly/);
+      expect(() => parseSource('constant l is readonly list of number')).toThrow(/readonly/);
     });
   });
 
@@ -664,17 +664,17 @@ describe('Parser', () => {
     });
 
     test('first is now usable as identifier', () => {
-      const ast = parseSource('var first is 0');
+      const ast = parseSource('variable first is 0');
       expect(ast.body[0]).toMatchObject({ type: 'VarDeclaration', name: 'first' });
     });
   });
 
   describe('the result of sugar', () => {
     test('parses set ... the result of CALL with precall', () => {
-      const src = 'function f takes number n returns number is\n    return n\nend function\nset x to the result of f 5';
+      const src = 'function f takes number n returns number is\n    return n\nend function\nconstant x is the result of f 5';
       const ast = parseSource(src);
       const setStmt = ast.body[1] as any;
-      expect(setStmt.type).toBe('SetStatement');
+      expect(setStmt.type).toBe('ConstantDeclaration');
       expect(setStmt.value).toMatchObject({ type: 'ItExpression' });
       expect(setStmt.precall).toMatchObject({
         type: 'CallStatement',
@@ -693,7 +693,7 @@ describe('Parser', () => {
     });
 
     test('does not trigger sugar when of is missing', () => {
-      const ast = parseSource('set the to 1\nset result to 2\nsay the\nsay result');
+      const ast = parseSource('constant the is 1\nconstant result is 2\nsay the\nsay result');
       expect((ast.body[0] as any).precall).toBeFalsy();
     });
   });
@@ -713,7 +713,7 @@ describe('Parser', () => {
     });
 
     test('parses make expression with comma-separated fields', () => {
-      const ast = parseSource('struct P\n    number x\nend struct\nset p to make P with x 5');
+      const ast = parseSource('struct P\n    number x\nend struct\nconstant p is make P with x 5');
       expect((ast.body[1] as any).value).toMatchObject({
         type: 'MakeStructExpression',
         structName: 'P',
@@ -722,7 +722,7 @@ describe('Parser', () => {
     });
 
     test('parses field access via IDENT of EXPR', () => {
-      const ast = parseSource('struct P\n    number x\nend struct\nset p to make P with x 5\nsay x of p');
+      const ast = parseSource('struct P\n    number x\nend struct\nconstant p is make P with x 5\nsay x of p');
       const sayStmt = ast.body[2] as any;
       expect(sayStmt.expressions[0]).toMatchObject({
         type: 'FieldAccessExpression',
@@ -732,7 +732,7 @@ describe('Parser', () => {
     });
 
     test('parses with-postfix update', () => {
-      const ast = parseSource('struct P\n    number x\nend struct\nset p to make P with x 1\nset q to p with x 9');
+      const ast = parseSource('struct P\n    number x\nend struct\nconstant p is make P with x 1\nconstant q is p with x 9');
       const setQ = ast.body[2] as any;
       expect(setQ.value).toMatchObject({
         type: 'StructWithExpression',

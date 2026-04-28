@@ -7,5 +7,5 @@ function origin returns Point is
     return make Point with x 0, y 0
 end function
 
-set o to the result of origin
+constant o is the result of origin
 say o

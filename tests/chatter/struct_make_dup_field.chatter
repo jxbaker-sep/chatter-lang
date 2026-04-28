@@ -3,4 +3,4 @@ struct P
     number y
 end struct
 
-set p to make P with x 1, x 2, y 3
+constant p is make P with x 1, x 2, y 3

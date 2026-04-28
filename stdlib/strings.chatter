@@ -8,10 +8,10 @@
 # Range: within Chatter's safe integer range (±(2^53 - 1)).
 # Runtime error on anything else: empty, whitespace, '+' sign, decimal, non-digit chars, lone '-'.
 export function parse takes string input returns number is
-  var result is 0
-  set zero to code of "0"
-  var start is 1
-  var sign is 1
+  variable result is 0
+  constant zero is code of "0"
+  variable start is 1
+  variable sign is 1
   expect length of input to be at least 1, "expected a number but got an empty string"
   if character 1 of input is "-"
     change start to 2
@@ -20,9 +20,9 @@ export function parse takes string input returns number is
   expect start to be at most length of input, "expected a number but got " & input
   repeat with i from start to length of input
     multiply result by 10
-    set c to character i of input
+    constant c is character i of input
     expect c to be a digit, "expected a number but got " & input
-    set digit_value to code of c - zero
+    constant digit_value is code of c - zero
     add digit_value to result
   end repeat
   return result * sign
@@ -36,8 +36,8 @@ export function trim takes string input returns string is
   if input is empty
     return ""  # avoid out-of-bounds access
   end if
-  var forward is 1
-  var backward is length of input
+  variable forward is 1
+  variable backward is length of input
   repeat while character forward of input is whitespace
     add 1 to forward
     if forward is greater than length of input
@@ -75,11 +75,11 @@ end function
 # input   on ""   -> runtime error (empty separator)
 export function split takes string input on string separator returns list of string is
   expect separator is not empty, "split: separator cannot be empty"
-  set result to empty list of string
-  var tail is 1
+  constant result is empty list of string
+  variable tail is 1
   repeat while true
     find separator in input from tail
-    set match to it
+    constant match is it
     if match is 0
       append characters tail to end of input to result
       exit repeat
@@ -106,7 +106,7 @@ export function find takes string needle in string haystack from number start re
   end if
   repeat with i from start to length of haystack - length of needle + 1
     if character i of haystack is character 1 of needle
-      var found is true
+      variable found is true
       repeat with j from 2 to length of needle
         if character i + j - 1 of haystack is not character j of needle
           change found to false

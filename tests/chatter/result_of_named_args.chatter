@@ -2,5 +2,5 @@ function combine takes number a to number b returns number is
   return a + b
 end function
 
-set x to the result of combine 1 to 2
+constant x is the result of combine 1 to 2
 say x

@@ -1,4 +1,4 @@
-var found is 0
+variable found is 0
 repeat with x in list of 1, 2, 3, 4, 5
   if x is 3
     change found to x

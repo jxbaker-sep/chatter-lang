@@ -2,5 +2,5 @@ function double takes number n returns number is
   return n * 2
 end function
 
-var x is the result of double 5
+variable x is the result of double 5
 say x

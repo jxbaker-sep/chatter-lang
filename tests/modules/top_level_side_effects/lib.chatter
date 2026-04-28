@@ -1,5 +1,5 @@
 say "loading"
-set prefix to "hello, "
+constant prefix is "hello, "
 
 export function greet is
     say prefix & "world"

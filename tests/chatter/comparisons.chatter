@@ -1,4 +1,4 @@
-set x to 5
+constant x is 5
 
 if x is less than 10
     say "lt-ok"

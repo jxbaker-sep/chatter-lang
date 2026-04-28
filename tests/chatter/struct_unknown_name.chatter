@@ -1,1 +1,1 @@
-set p to make Nope with x 1
+constant p is make Nope with x 1

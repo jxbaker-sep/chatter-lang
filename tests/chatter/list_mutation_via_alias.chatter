@@ -1,4 +1,4 @@
-set a to list of 1, 2, 3
-set b to a
+constant a is list of 1, 2, 3
+constant b is a
 append 4 to a
 say length of b

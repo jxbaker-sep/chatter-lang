@@ -1,4 +1,4 @@
-set x to 5
+constant x is 5
 function double takes number a returns number is
     return a * 2
 end function

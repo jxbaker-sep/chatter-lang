@@ -23,11 +23,11 @@ describe('Lexer', () => {
     expect(tokens[1]).toMatchObject({ type: 'STRING', value: 'Hello World' });
   });
 
-  test('set foo to 5 produces correct tokens', () => {
-    const tokens = lex('set foo to 5');
-    expect(tokens[0]).toMatchObject({ type: 'KEYWORD', value: 'set' });
+  test('constant foo is 5 produces correct tokens', () => {
+    const tokens = lex('constant foo is 5');
+    expect(tokens[0]).toMatchObject({ type: 'KEYWORD', value: 'constant' });
     expect(tokens[1]).toMatchObject({ type: 'IDENT',   value: 'foo' });
-    expect(tokens[2]).toMatchObject({ type: 'KEYWORD', value: 'to' });
+    expect(tokens[2]).toMatchObject({ type: 'KEYWORD', value: 'is' });
     expect(tokens[3]).toMatchObject({ type: 'NUMBER',  value: '5' });
     expect(tokens[4]).toMatchObject({ type: 'NEWLINE' });
   });
@@ -58,19 +58,19 @@ describe('Lexer', () => {
   });
 
   test('number literals tokenised', () => {
-    const tokens = lex('set x to 42');
+    const tokens = lex('constant x is 42');
     expect(tokens.some(t => t.type === 'NUMBER' && t.value === '42')).toBe(true);
   });
 
   test('numbers may use _ as digit separator', () => {
-    const tokens = lex('set x to 10_000');
+    const tokens = lex('constant x is 10_000');
     const nums = tokens.filter(t => t.type === 'NUMBER');
     expect(nums).toHaveLength(1);
     expect(nums[0].value).toBe('10000');
   });
 
   test('multi-group _ separator (1_000_000)', () => {
-    const tokens = lex('set x to 1_000_000');
+    const tokens = lex('constant x is 1_000_000');
     const nums = tokens.filter(t => t.type === 'NUMBER');
     expect(nums).toHaveLength(1);
     expect(nums[0].value).toBe('1000000');
@@ -129,16 +129,16 @@ describe('Lexer', () => {
   });
 
   test('var/change/add/subtract/multiply/divide/by tokenize as KEYWORDs', () => {
-    const src = 'var x is 1\nchange x to 2\nadd 1 to x\nsubtract 1 from x\nmultiply x by 2\ndivide x by 2';
+    const src = 'variable x is 1\nchange x to 2\nadd 1 to x\nsubtract 1 from x\nmultiply x by 2\ndivide x by 2';
     const tokens = lex(src);
     const kws = new Set(tokens.filter(t => t.type === 'KEYWORD').map(t => t.value));
-    for (const w of ['var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by']) {
+    for (const w of ['variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'by']) {
       expect(kws.has(w)).toBe(true);
     }
   });
 
   test('list-related keywords tokenize as KEYWORDs', () => {
-    const src = 'set l to list of 1, 2\nempty list of number\nlast item of l\nlength of l\nl contains 1\nappend 1 to l\nprepend 1 to l\ninsert 1 at 1 in l\nremove item 1 from l\nrepeat with x in l\n    say x\nend repeat\nreadonly list of number';
+    const src = 'constant l is list of 1, 2\nempty list of number\nlast item of l\nlength of l\nl contains 1\nappend 1 to l\nprepend 1 to l\ninsert 1 at 1 in l\nremove item 1 from l\nrepeat with x in l\n    say x\nend repeat\nreadonly list of number';
     const tokens = lex(src);
     const kws = new Set(tokens.filter(t => t.type === 'KEYWORD').map(t => t.value));
     for (const w of ['list', 'of', 'empty', 'item', 'last', 'length', 'contains', 'append', 'prepend', 'insert', 'in', 'remove', 'readonly']) {

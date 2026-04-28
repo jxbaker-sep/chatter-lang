@@ -2,6 +2,6 @@ function addOne takes unique list of number xs is
     add 1 to xs
 end function
 
-set s to unique list of 10, 20
+constant s is unique list of 10, 20
 addOne s
 say s

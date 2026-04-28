@@ -1,2 +1,2 @@
-set l to list of 1, 2, 3
+constant l is list of 1, 2, 3
 change item 2 of l to "hi"

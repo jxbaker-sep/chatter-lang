@@ -1,4 +1,4 @@
-var x is 1
+variable x is 1
 if true
     change x to 42
 end if

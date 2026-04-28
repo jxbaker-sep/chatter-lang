@@ -7,6 +7,6 @@ struct Inner
     number a
 end struct
 
-set o to make Outer with inner (make Inner with a 5), n 9
+constant o is make Outer with inner (make Inner with a 5), n 9
 say a of (inner of o)
 say n of o

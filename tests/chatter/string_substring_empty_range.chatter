@@ -1,2 +1,2 @@
-set s to characters 3 to 2 of "hello"
+constant s is characters 3 to 2 of "hello"
 say length of s

@@ -6,7 +6,7 @@ function quad takes number a returns number is
     return a * 4
 end function
 
-set x to 5
+constant x is 5
 if x is 5
     say "five"
 end if

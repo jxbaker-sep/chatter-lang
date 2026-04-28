@@ -8,7 +8,7 @@ function quadruple takes number a returns number is
     return it
 end function
 
-set x to 5
+constant x is 5
 quadruple x
 say it
 # outer 'it' should still be 20 (from quadruple's return), but let's verify

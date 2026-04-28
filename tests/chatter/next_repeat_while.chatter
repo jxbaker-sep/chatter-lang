@@ -1,5 +1,5 @@
-var n is 10
-var kept is 0
+variable n is 10
+variable kept is 0
 repeat while n is greater than 0
   subtract 1 from n
   if n mod 2 is 1

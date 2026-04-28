@@ -23,11 +23,11 @@ export interface Token {
 }
 
 const KEYWORDS = new Set([
-  'say', 'set', 'to', 'function', 'takes', 'returns', 'is', 'end', 'return',
+  'say', 'constant', 'to', 'function', 'takes', 'returns', 'is', 'end', 'return',
   'true', 'false', 'not', 'and', 'or', 'if', 'else',
   'repeat', 'times', 'with', 'from', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
-  'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
+  'variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
   'list', 'of', 'readonly', 'empty', 'unique',
   'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',

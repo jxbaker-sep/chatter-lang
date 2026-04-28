@@ -1,2 +1,2 @@
-set l to empty list of number
+constant l is empty list of number
 say length of l

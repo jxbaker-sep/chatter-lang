@@ -2,7 +2,7 @@ import { Token, TokenType } from './lexer';
 import { ChatterError, SourceLocation } from './errors';
 import {
   Program, Statement, Expression,
-  SayStatement, SetStatement, FunctionDeclaration, FunctionParam,
+  SayStatement, ConstantDeclaration, FunctionDeclaration, FunctionParam,
   CallStatement, ReturnStatement,
   BinaryExpression, UnaryExpression, IdentifierExpression,
   NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
@@ -38,10 +38,10 @@ export class ParseError extends ChatterError {
 // These start new statements or form expression operators.
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
-  'true', 'false', 'is', 'say', 'set', 'function', 'takes', 'returns', 'return',
+  'true', 'false', 'is', 'say', 'constant', 'function', 'takes', 'returns', 'return',
   'repeat', 'times', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
-  'var', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
+  'variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
   'list', 'of', 'readonly', 'empty', 'unique',
   'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'remove',
@@ -154,8 +154,8 @@ export function parse(tokens: Token[], source?: string): Program {
     if (tok.type === 'KEYWORD') {
       switch (tok.value) {
         case 'say':      return parseSayStatement();
-        case 'set':      return parseSetStatement();
-        case 'var':      return parseVarDeclaration();
+        case 'constant': return parseConstantStatement();
+        case 'variable': return parseVarDeclaration();
         case 'change':   return parseChangeStatement();
         case 'add':      return parseAddStatement();
         case 'subtract': return parseSubtractStatement();
@@ -385,22 +385,22 @@ export function parse(tokens: Token[], source?: string): Program {
     return null;
   }
 
-  function parseSetStatement(): SetStatement {
-    consume('KEYWORD', 'set');
+  function parseConstantStatement(): ConstantDeclaration {
+    consume('KEYWORD', 'constant');
     const nameTok = consume('IDENT');
-    consume('KEYWORD', 'to');
+    consume('KEYWORD', 'is');
     const precall = tryConsumeTheResultOf();
     if (precall) {
       const itExpr: Expression = { type: 'ItExpression' };
-      return { type: 'SetStatement', name: nameTok.value, value: itExpr, precall };
+      return { type: 'ConstantDeclaration', name: nameTok.value, value: itExpr, precall };
     }
     const value = parseExpression();
     consumeNewline();
-    return { type: 'SetStatement', name: nameTok.value, value };
+    return { type: 'ConstantDeclaration', name: nameTok.value, value };
   }
 
   function parseVarDeclaration(): VarDeclaration {
-    consume('KEYWORD', 'var');
+    consume('KEYWORD', 'variable');
     const nameTok = consume('IDENT');
     consume('KEYWORD', 'is');
     const precall = tryConsumeTheResultOf();

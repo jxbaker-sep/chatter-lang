@@ -1,4 +1,4 @@
-set s to unique list of 1, 2, 3
+constant s is unique list of 1, 2, 3
 add 2 to s
 say length of s
 say s

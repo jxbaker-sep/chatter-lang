@@ -1,4 +1,4 @@
-set xs to list of 1, 2, 3
-var i is 2
+constant xs is list of 1, 2, 3
+variable i is 2
 change item i of xs to 99
 say xs

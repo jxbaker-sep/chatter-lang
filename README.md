@@ -5,8 +5,8 @@
 Chatter is a small, HyperTalk-inspired programming language. Its goal is to read more like English than like code, while still being strict enough to catch mistakes early.
 
 ```chatter
-set foo to 5
-set bar to 6
+constant foo is 5
+constant bar is 6
 
 function double takes number a returns number is
     return a * 2
@@ -25,13 +25,13 @@ raise foo to bar
 ## Design philosophy
 
 ### 1. Read like English, not like code
-Chatter takes its cue from HyperTalk: `say "hello"`, `if x is 5`, `set foo to 10`, `raise foo to bar`. Verbs come first, named arguments match parameter names verbatim, and block closers can spell themselves out (`end if`, `end function`). Code should narrate what it does.
+Chatter takes its cue from HyperTalk: `say "hello"`, `if x is 5`, `constant foo is 10`, `raise foo to bar`. Verbs come first, named arguments match parameter names verbatim, and block closers can spell themselves out (`end if`, `end function`). Code should narrate what it does.
 
 ### 2. Explicit beats clever
 When ambiguity creeps in, we pick the path that forces the author to clarify:
 
 - Mixing `and` with `or` at the same level? **Compile error, use parens.**
-- Mutating a `set` binding? **Compile error.**
+- Mutating a `constant` binding? **Compile error.**
 - Shadowing an outer variable with a parameter? **Compile error.**
 - Non-boolean in an `if` condition? **Runtime error** (no truthiness).
 - Comparing a number to a string? **Runtime error** (strict equality).
@@ -39,7 +39,7 @@ When ambiguity creeps in, we pick the path that forces the author to clarify:
 We'd rather annoy the author at write-time than confuse the reader at read-time.
 
 ### 3. Immutability by default
-`set` creates immutable bindings, not variables. Once you know what a name means, it means that forever in its scope. No reassignment tricks.
+`constant` creates immutable bindings, not variables. Once you know what a name means, it means that forever in its scope. No reassignment tricks.
 
 ### 4. `it` is sugar, not a crutch
 The function-scoped `it` register captures "the thing we just made" so short pipelines read naturally:

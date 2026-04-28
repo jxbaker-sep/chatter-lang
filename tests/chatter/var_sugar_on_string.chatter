@@ -1,3 +1,3 @@
-var s is "hi"
+variable s is "hi"
 add 1 to s
 say s

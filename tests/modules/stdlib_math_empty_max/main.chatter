@@ -1,3 +1,3 @@
 use max from "std:math"
-set xs to empty list of number
+constant xs is empty list of number
 max xs

@@ -17,7 +17,7 @@ function runSource(source: string): Error {
 
 describe('formatError', () => {
   test('ParseError points at offending token', () => {
-    const source = 'say\nset 5 to 1\n';
+    const source = 'say\nconstant 5 is 1\n';
     const err = runSource(source);
     expect(err).toBeInstanceOf(ParseError);
     const out = formatError(err, source, 'x.chatter');
@@ -31,25 +31,25 @@ describe('formatError', () => {
   });
 
   test('ParseError with explicit token location', () => {
-    const source = 'set 5 to 1\n';
+    const source = 'constant 5 is 1\n';
     const err = runSource(source);
     expect(err).toBeInstanceOf(ParseError);
     const out = formatError(err, source, 'p.chatter');
     // `set` consumes, then expects IDENT but gets NUMBER '5' at col 4
-    expect(out).toContain('--> p.chatter:1:5');
-    expect(out).toContain('1 | set 5 to 1');
-    // caret at column 5 (col+1 = 5, i.e. 4 leading spaces before ^)
-    expect(out).toMatch(/\n\s+\|\s{5}\^/);
+    expect(out).toContain('--> p.chatter:1:10');
+    expect(out).toContain('1 | constant 5 is 1');
+    // caret at column 10
+    expect(out).toMatch(/\n\s+\|\s{10}\^/);
   });
 
   test('CompileError for statement-level error points at statement start', () => {
-    const source = 'set x to 1\nset x to 2\n';
+    const source = 'constant x is 1\nconstant x is 2\n';
     const err = runSource(source);
     expect(err).toBeInstanceOf(CompileError);
     const out = formatError(err, source, 'dup.chatter');
-    expect(out).toContain("error: Duplicate binding: 'x' is already set");
+    expect(out).toContain("error: Duplicate binding: 'x' is already declared");
     expect(out).toContain('--> dup.chatter:2:1');
-    expect(out).toContain('2 | set x to 2');
+    expect(out).toContain('2 | constant x is 2');
     // caret starts at col 1 (no leading spaces before ^)
     expect(out).toMatch(/\n\s+\|\s*\^/);
   });
@@ -84,8 +84,8 @@ describe('formatError', () => {
   test('Multi-digit line number gutter aligns', () => {
     // Construct 12 lines, error on line 12.
     const lines = [];
-    for (let i = 0; i < 11; i++) lines.push('set x' + i + ' to 1');
-    lines.push('set x0 to 2'); // duplicate of x0 on line 12
+    for (let i = 0; i < 11; i++) lines.push('constant x' + i + ' is 1');
+    lines.push('constant x0 is 2'); // duplicate of x0 on line 12
     const source = lines.join('\n') + '\n';
     const err = runSource(source);
     const out = formatError(err, source, 'm.chatter');
@@ -102,17 +102,17 @@ describe('formatError', () => {
 
 describe('formatError golden shape', () => {
   test('full formatted ParseError output matches spec', () => {
-    const source = 'set x to 5\nset x to 6\n';
+    const source = 'constant x is 5\nconstant x is 6\n';
     const err = runSource(source);
     const out = formatError(err, source, 'examples/dup.chatter');
     // Compile error (duplicate set) shows spec-shaped output.
     expect(out).toBe(
       [
-        "error: Duplicate binding: 'x' is already set",
+        "error: Duplicate binding: 'x' is already declared",
         ' --> examples/dup.chatter:2:1',
         '  |',
-        '2 | set x to 6',
-        '  | ^^^',
+        '2 | constant x is 6',
+        '  | ^^^^^^^^',
       ].join('\n'),
     );
   });

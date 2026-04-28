@@ -1,4 +1,4 @@
-set x to 3
+constant x is 3
 if x + 2 is at least 5
     say "ok"
 end if

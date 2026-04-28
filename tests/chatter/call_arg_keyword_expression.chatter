@@ -2,6 +2,6 @@ function plusOne takes number n returns number is
     return n + 1
 end function
 
-set nums to list of 10, 20, 30
+constant nums is list of 10, 20, 30
 plusOne length of nums
 say it

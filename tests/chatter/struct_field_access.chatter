@@ -3,6 +3,6 @@ struct Point
     number y
 end struct
 
-set p to make Point with x 7, y 11
+constant p is make Point with x 7, y 11
 say x of p
 say y of p

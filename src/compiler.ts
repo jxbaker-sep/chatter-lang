@@ -1,6 +1,6 @@
 import {
   Program, Statement, Expression, Located,
-  SayStatement, SetStatement, FunctionDeclaration,
+  SayStatement, ConstantDeclaration, FunctionDeclaration,
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
   IfStatement, RepeatStatement,
   VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
@@ -101,7 +101,7 @@ interface StructInfo {
   imported: boolean;
 }
 
-type BindingKind = 'set' | 'var' | 'param' | 'loop';
+type BindingKind = 'constant' | 'var' | 'param' | 'loop';
 
 interface BindingInfo {
   kind: BindingKind;
@@ -377,7 +377,7 @@ export class Compiler {
         this.functionMangled.set(stmt.name, mangled);
         this.localFunctions.set(stmt.name, stmt);
       }
-      if (stmt.type === 'SetStatement' || stmt.type === 'VarDeclaration') {
+      if (stmt.type === 'ConstantDeclaration' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
       }
     }
@@ -453,7 +453,7 @@ export class Compiler {
       case 'SayStatement':
         this.compileSay(stmt, out, bindings);
         break;
-      case 'SetStatement':
+      case 'ConstantDeclaration':
         this.compileSet(stmt, out, bindings);
         break;
       case 'VarDeclaration':
@@ -663,25 +663,25 @@ export class Compiler {
   }
 
   private compileSet(
-    stmt: SetStatement,
+    stmt: ConstantDeclaration,
     out: Instruction[],
     bindings: Bindings,
   ): void {
     if (bindings.has(stmt.name)) {
-      throw new CompileError(`Duplicate binding: '${stmt.name}' is already set`, this.currentLoc);
+      throw new CompileError(`Duplicate binding: '${stmt.name}' is already declared`, this.currentLoc);
     }
     if (stmt.precall) {
       const rt = this.compilePrecall(stmt.precall, out, bindings);
       this.compileExpr(stmt.value, out, bindings);
       this.emit(out, { op: 'STORE', name: stmt.name });
-      bindings.set(stmt.name, { kind: 'set', type: rt });
+      bindings.set(stmt.name, { kind: 'constant', type: rt });
       return;
     }
-    this.checkNotReadonlySmuggle(stmt.value, bindings, 'set');
+    this.checkNotReadonlySmuggle(stmt.value, bindings, 'constant');
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'STORE', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
-    bindings.set(stmt.name, { kind: 'set', type: st ?? undefined });
+    bindings.set(stmt.name, { kind: 'constant', type: st ?? undefined });
   }
 
   private compileVarDecl(
@@ -706,7 +706,7 @@ export class Compiler {
       bindings.set(stmt.name, { kind: 'var', type: rt });
       return;
     }
-    this.checkNotReadonlySmuggle(stmt.value, bindings, 'var');
+    this.checkNotReadonlySmuggle(stmt.value, bindings, 'variable');
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'STORE_VAR', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
@@ -726,7 +726,7 @@ export class Compiler {
     }
     if (info.kind !== 'var') {
       throw new CompileError(
-        `Cannot change '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
+        `Cannot change '${stmt.name}': it is a ${info.kind === 'constant' ? "'constant' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'variable'`,
       this.currentLoc);
     }
     if (stmt.precall) {
@@ -980,7 +980,7 @@ export class Compiler {
     }
     if (info.kind !== 'var') {
       throw new CompileError(
-        `Cannot ${stmt.op} '${stmt.name}': it is a ${info.kind === 'set' ? "'set' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'var'`,
+        `Cannot ${stmt.op} '${stmt.name}': it is a ${info.kind === 'constant' ? "'constant' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'variable'`,
       this.currentLoc);
     }
     if (info.type !== undefined && !(info.type.kind === 'scalar' && info.type.name === 'number')) {

@@ -2,6 +2,6 @@ function countSize takes readonly list of number nums returns number is
     return length of nums
 end function
 
-set l to list of 1, 2, 3, 4
+constant l is list of 1, 2, 3, 4
 countSize l
 say it

@@ -1,7 +1,7 @@
 # This is a comment
 say "Hello World"
-set foo to 5
-set bar to 6
+constant foo is 5
+constant bar is 6
 
 function double takes number a returns number is
     return a * 2
@@ -23,7 +23,7 @@ function raise takes number a to number to returns number is
     return a ** to
 end function
 
-set baz to it
+constant baz is it
 # baz is now 10
 raise foo to bar
 # Meta-syntactic variable "it" always stores the result of the last statement

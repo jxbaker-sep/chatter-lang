@@ -1,4 +1,4 @@
-set million to 1_000_000
+constant million is 1_000_000
 say million
 say 10_000 + 5
 say -1_234

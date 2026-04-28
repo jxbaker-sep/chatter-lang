@@ -1,2 +1,2 @@
-set l to list of 1, 2
+constant l is list of 1, 2
 insert 99 at 10 in l

@@ -115,15 +115,15 @@ describe('VM', () => {
   // ── SET / LOAD ─────────────────────────────────────────────────────────────
   describe('set and LOAD', () => {
     test('set then print', () => {
-      expect(runSource('set x to 99\nsay x')).toEqual(['99']);
+      expect(runSource('constant x is 99\nsay x')).toEqual(['99']);
     });
 
     test('set used in expression', () => {
-      expect(runSource('set x to 7\nsay x + 3')).toEqual(['10']);
+      expect(runSource('constant x is 7\nsay x + 3')).toEqual(['10']);
     });
 
     test('LOAD of undefined variable throws RuntimeError', () => {
-      const program = compile(parse(lex('set x to 1')));
+      const program = compile(parse(lex('constant x is 1')));
       // Manually inject a LOAD for an undefined name
       program.main.push({ op: 'LOAD', name: 'doesNotExist' });
       expect(() => new VM(program).run()).toThrow(RuntimeError);
@@ -173,7 +173,7 @@ describe('VM', () => {
 
     test('it in outer frame stays at 10 while inner quadruple runs', () => {
       // After double foo (=10), call quadruple which modifies its own it
-      // outer it should still be 10 before set baz to it
+      // outer it should still be 10 before constant baz is it
       const src = [
         'function double takes number a returns number is',
         '    return a * 2',
@@ -185,7 +185,7 @@ describe('VM', () => {
         'end function',
         'double 5',
         // outer it = 10
-        'set baz to it',
+        'constant baz is it',
         'say baz',
         // now call quadruple which internally modifies its own it
         'quadruple 3',
@@ -294,7 +294,7 @@ describe('VM', () => {
       expect(output).toEqual(['Hello World']);
     });
 
-    test('set baz to it captures outer it=10 from double foo', () => {
+    test('constant baz is it captures outer it=10 from double foo', () => {
       // Augmented version that prints baz to verify
       const source = fs.readFileSync(
         path.join(__dirname, '../examples/hello_world.chatter'),
@@ -497,29 +497,29 @@ describe('VM', () => {
 
   describe('var / change / compound assign', () => {
     test('var declares and stores a value readable by identifier', () => {
-      expect(runSource('var x is 42\nsay x')).toEqual(['42']);
+      expect(runSource('variable x is 42\nsay x')).toEqual(['42']);
     });
 
     test('change reassigns a var', () => {
-      expect(runSource('var x is 1\nchange x to 2\nsay x')).toEqual(['2']);
+      expect(runSource('variable x is 1\nchange x to 2\nsay x')).toEqual(['2']);
     });
 
     test('change to a different type throws a RuntimeError mentioning the name and types', () => {
-      const program = compile(parse(lex('var x is 5\nchange x to "hi"')));
+      const program = compile(parse(lex('variable x is 5\nchange x to "hi"')));
       expect(() => new VM(program).run()).toThrow(/Type mismatch.*x.*number.*string/);
     });
 
     test('add/subtract/multiply/divide mutate a numeric var', () => {
-      expect(runSource('var n is 10\nadd 5 to n\nsay n')).toEqual(['15']);
-      expect(runSource('var n is 10\nsubtract 3 from n\nsay n')).toEqual(['7']);
-      expect(runSource('var n is 10\nmultiply n by 3\nsay n')).toEqual(['30']);
-      expect(runSource('var n is 10\ndivide n by 2\nsay n')).toEqual(['5']);
+      expect(runSource('variable n is 10\nadd 5 to n\nsay n')).toEqual(['15']);
+      expect(runSource('variable n is 10\nsubtract 3 from n\nsay n')).toEqual(['7']);
+      expect(runSource('variable n is 10\nmultiply n by 3\nsay n')).toEqual(['30']);
+      expect(runSource('variable n is 10\ndivide n by 2\nsay n')).toEqual(['5']);
     });
 
     test('var is function-local (each call reinitialises)', () => {
       const src = [
         'function f returns number is',
-        '    var x is 1',
+        '    variable x is 1',
         '    add 1 to x',
         '    return x',
         'end function',
@@ -537,7 +537,7 @@ describe('VM', () => {
         '    return 7',
         'end function',
         'f',
-        'var x is 99',
+        'variable x is 99',
         'change x to 100',
         'add 1 to x',
         'say it',
@@ -549,7 +549,7 @@ describe('VM', () => {
     test('factorial using var + repeat range', () => {
       const src = [
         'function fact takes number n returns number is',
-        '    var result is 1',
+        '    variable result is 1',
         '    repeat with i from 2 to n',
         '        multiply result by i',
         '    end repeat',
@@ -655,30 +655,30 @@ describe('VM', () => {
 
   describe('lists', () => {
     test('basic literal + length + item access', () => {
-      expect(runSource('set l to list of 10, 20, 30\nsay length of l\nsay item 2 of l'))
+      expect(runSource('constant l is list of 10, 20, 30\nsay length of l\nsay item 2 of l'))
         .toEqual(['3', '20']);
     });
 
     test('empty list length is 0', () => {
-      expect(runSource('set l to empty list of number\nsay length of l')).toEqual(['0']);
+      expect(runSource('constant l is empty list of number\nsay length of l')).toEqual(['0']);
     });
 
     test('item OOB runtime error', () => {
-      expectRuntimeError('set l to list of 1, 2\nsay item 5 of l');
+      expectRuntimeError('constant l is list of 1, 2\nsay item 5 of l');
     });
 
     test('item 1 / last item of empty → runtime error', () => {
-      expectRuntimeError('set l to empty list of number\nsay item 1 of l');
-      expectRuntimeError('set l to empty list of string\nsay last item of l');
+      expectRuntimeError('constant l is empty list of number\nsay item 1 of l');
+      expectRuntimeError('constant l is empty list of string\nsay last item of l');
     });
 
     test('contains predicate', () => {
-      expect(runSource('set l to list of 1, 2, 3\nsay l contains 2')).toEqual(['true']);
-      expect(runSource('set l to list of 1, 2, 3\nsay l contains 99')).toEqual(['false']);
+      expect(runSource('constant l is list of 1, 2, 3\nsay l contains 2')).toEqual(['true']);
+      expect(runSource('constant l is list of 1, 2, 3\nsay l contains 99')).toEqual(['false']);
     });
 
     test('reference semantics via alias', () => {
-      const src = 'set a to list of 1, 2, 3\nset b to a\nappend 4 to a\nsay length of b';
+      const src = 'constant a is list of 1, 2, 3\nconstant b is a\nappend 4 to a\nsay length of b';
       expect(runSource(src)).toEqual(['4']);
     });
 
@@ -687,7 +687,7 @@ describe('VM', () => {
         'function push takes list of number xs is',
         '    append 42 to xs',
         'end function',
-        'set l to list of 1, 2',
+        'constant l is list of 1, 2',
         'push l',
         'say length of l',
         'say last item of l',
@@ -697,7 +697,7 @@ describe('VM', () => {
 
     test('insert/remove/change item basic', () => {
       const src = [
-        'set l to list of 1, 3',
+        'constant l is list of 1, 3',
         'insert 2 at 2 in l',
         'change item 3 of l to 99',
         'remove item 1 from l',
@@ -709,17 +709,17 @@ describe('VM', () => {
     });
 
     test('insert at length+1 == append position', () => {
-      const src = 'set l to list of 1, 2\ninsert 3 at 3 in l\nsay last item of l';
+      const src = 'constant l is list of 1, 2\ninsert 3 at 3 in l\nsay last item of l';
       expect(runSource(src)).toEqual(['3']);
     });
 
     test('insert OOB runtime error', () => {
-      expectRuntimeError('set l to list of 1\ninsert 9 at 5 in l');
+      expectRuntimeError('constant l is list of 1\ninsert 9 at 5 in l');
     });
 
     test('iteration sums elements', () => {
       const src = [
-        'var total is 0',
+        'variable total is 0',
         'repeat with x in list of 1, 2, 3, 4',
         '    add x to total',
         'end repeat',
@@ -730,8 +730,8 @@ describe('VM', () => {
 
     test('iteration over empty list does zero iterations', () => {
       const src = [
-        'var count is 0',
-        'set l to empty list of number',
+        'variable count is 0',
+        'constant l is empty list of number',
         'repeat with x in l',
         '    add 1 to count',
         'end repeat',
@@ -786,7 +786,7 @@ describe('VM', () => {
     });
 
     test('substring with A > B returns empty string', () => {
-      expect(runSource('set s to characters 3 to 2 of "hello"\nsay length of s')).toEqual(['0']);
+      expect(runSource('constant s is characters 3 to 2 of "hello"\nsay length of s')).toEqual(['0']);
     });
 
     test('last character of S returns last char', () => {

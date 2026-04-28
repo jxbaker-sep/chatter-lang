@@ -1,2 +1,2 @@
-set l to list of 1, 2
+constant l is list of 1, 2
 say item 5 of l

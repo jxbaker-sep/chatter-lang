@@ -1,2 +1,2 @@
-set xs to lines of file 42
+constant xs is lines of file 42
 say xs

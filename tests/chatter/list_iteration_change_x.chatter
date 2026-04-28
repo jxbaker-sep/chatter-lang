@@ -1,4 +1,4 @@
-var counter is 0
+variable counter is 0
 repeat with x in list of 1, 2, 3
     change x to 99
 end repeat

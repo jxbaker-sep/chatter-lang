@@ -1,2 +1,2 @@
-set c to "x"
+constant c is "x"
 expect c is a digit, "expected digit, got " & c

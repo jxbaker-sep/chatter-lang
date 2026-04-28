@@ -1,4 +1,4 @@
-set l to list of 1, 2, 3
+constant l is list of 1, 2, 3
 if not (l contains 99)
     say "missing"
 end if

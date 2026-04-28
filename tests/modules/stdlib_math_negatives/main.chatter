@@ -1,5 +1,5 @@
 use min, max from "std:math"
-set xs to list of -5, -1, -9, -3
+constant xs is list of -5, -1, -9, -3
 min xs
 say it
 max xs

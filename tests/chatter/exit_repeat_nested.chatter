@@ -1,5 +1,5 @@
-var outer is 0
-var inner_total is 0
+variable outer is 0
+variable inner_total is 0
 repeat with i from 1 to 3
   change outer to i
   repeat with j from 1 to 10

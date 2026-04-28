@@ -1,4 +1,4 @@
-set s to unique list of 10, 20, 30
+constant s is unique list of 10, 20, 30
 repeat with x in s
     say x
 end repeat

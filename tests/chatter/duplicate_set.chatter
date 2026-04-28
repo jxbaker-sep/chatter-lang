@@ -1,2 +1,2 @@
-set x to 5
-set x to 6
+constant x is 5
+constant x is 6

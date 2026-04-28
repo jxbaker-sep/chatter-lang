@@ -2,7 +2,7 @@ repeat while false
     say "never"
 end repeat
 
-set x to 5
+constant x is 5
 repeat while x is not 5
     say "never again"
 end repeat

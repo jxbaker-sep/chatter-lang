@@ -1,2 +1,2 @@
-set x to 5
+constant x is 5
 expect x is greater than 10

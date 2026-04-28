@@ -1,2 +1,2 @@
-set name to "Alice"
+constant name is "Alice"
 say "User " & name & " has " & length of name & " chars"

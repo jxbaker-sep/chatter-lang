@@ -1,1 +1,1 @@
-set x to the result of length "hi"
+constant x is the result of length "hi"

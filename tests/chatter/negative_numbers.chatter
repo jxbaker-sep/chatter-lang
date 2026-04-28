@@ -1,13 +1,13 @@
 say -1
 say -0
-set x to 5
+constant x is 5
 say -x
-var n is 3
+variable n is 3
 multiply n by -1
 say n
 say -2 + 5
 say 10 - -3
 say -2 ** 2
-set xs to list of -1, -2, -3
+constant xs is list of -1, -2, -3
 say xs
 say item 2 of xs

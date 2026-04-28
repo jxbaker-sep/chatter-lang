@@ -1,4 +1,4 @@
-var n is 10
+variable n is 10
 subtract 3 from n
 say n
 subtract 1 + 1 from n

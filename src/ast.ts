@@ -53,7 +53,7 @@ export interface EndIndexSentinel {
 export type Statement = (
 
   | SayStatement
-  | SetStatement
+  | ConstantDeclaration
   | VarDeclaration
   | ChangeStatement
   | ChangeItemStatement
@@ -152,8 +152,8 @@ export interface SayStatement {
   expressions: Expression[];  // nonempty invariant
 }
 
-export interface SetStatement {
-  type: 'SetStatement';
+export interface ConstantDeclaration {
+  type: 'ConstantDeclaration';
   name: string;
   value: Expression;
   precall?: CallStatement | null;

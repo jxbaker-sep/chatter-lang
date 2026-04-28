@@ -3,5 +3,5 @@ struct Person
     number age
 end struct
 
-set p to make Person with name "Gambit", age 35
+constant p is make Person with name "Gambit", age 35
 say p

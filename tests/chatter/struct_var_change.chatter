@@ -3,6 +3,6 @@ struct Point
     number y
 end struct
 
-var p is make Point with x 1, y 2
+variable p is make Point with x 1, y 2
 change p to (p with x 10)
 say p

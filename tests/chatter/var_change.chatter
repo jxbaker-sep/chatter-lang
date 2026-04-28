@@ -1,4 +1,4 @@
-var x is 10
+variable x is 10
 say x
 change x to 20
 say x

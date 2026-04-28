@@ -2,7 +2,7 @@ function a is
    say line
 end function
 function b is
-   set line to "123"
+   constant line is "123"
    a
 end function
 b

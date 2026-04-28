@@ -1,4 +1,4 @@
-set xs to list of 10, 20, 30
+constant xs is list of 10, 20, 30
 say the length of xs
 say the item 2 of xs
 say the last item of xs

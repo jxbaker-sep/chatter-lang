@@ -1,6 +1,6 @@
-set s to "   hello"
-var i is 1
-var found is 0
+constant s is "   hello"
+variable i is 1
+variable found is 0
 repeat while i is at most length of s
   if character i of s is whitespace
     add 1 to i

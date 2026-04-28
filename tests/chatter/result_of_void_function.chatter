@@ -2,4 +2,4 @@ function noop is
   say "hi"
 end function
 
-set x to the result of noop
+constant x is the result of noop

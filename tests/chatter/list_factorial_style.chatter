@@ -1,5 +1,5 @@
-set factorials to empty list of number
-var running is 1
+constant factorials is empty list of number
+variable running is 1
 repeat with i from 1 to 5
     multiply running by i
     append running to factorials

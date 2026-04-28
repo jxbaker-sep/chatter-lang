@@ -71,7 +71,7 @@
         },
         {
           "name": "storage.type.declaration.chatter",
-          "match": "\\b(function|takes|returns|var|set|change)\\b"
+          "match": "\\b(function|takes|returns|variable|constant|change)\\b"
         }
       ]
     },

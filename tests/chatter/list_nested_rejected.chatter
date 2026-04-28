@@ -1,1 +1,1 @@
-set l to list of list of 1, 2
+constant l is list of list of 1, 2

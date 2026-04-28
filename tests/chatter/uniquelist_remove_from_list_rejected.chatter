@@ -1,2 +1,2 @@
-set my_list to list of 1, 2, 3
+constant my_list is list of 1, 2, 3
 remove 2 from my_list

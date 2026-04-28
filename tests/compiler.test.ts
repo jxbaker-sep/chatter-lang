@@ -18,13 +18,13 @@ describe('Compiler', () => {
   });
 
   test('compiles set statement', () => {
-    const bc = compileSource('set foo to 5');
+    const bc = compileSource('constant foo is 5');
     expect(bc.main).toContainEqual({ op: 'PUSH_INT', value: 5 });
     expect(bc.main).toContainEqual({ op: 'STORE', name: 'foo' });
   });
 
   test('compiles set with it expression', () => {
-    const bc = compileSource('set baz to it');
+    const bc = compileSource('constant baz is it');
     expect(bc.main).toContainEqual({ op: 'LOAD_IT' });
     expect(bc.main).toContainEqual({ op: 'STORE', name: 'baz' });
   });
@@ -139,11 +139,11 @@ describe('Compiler', () => {
   });
 
   test('throws CompileError on duplicate set', () => {
-    expect(() => compileSource('set foo to 5\nset foo to 6')).toThrow(CompileError);
+    expect(() => compileSource('constant foo is 5\nconstant foo is 6')).toThrow(CompileError);
   });
 
   test('throws CompileError when param shadows outer binding', () => {
-    const src = 'set foo to 5\nfunction f takes number foo is\n    return foo\nend function';
+    const src = 'constant foo is 5\nfunction f takes number foo is\n    return foo\nend function';
     expect(() => compileSource(src)).toThrow(CompileError);
   });
 
@@ -163,11 +163,11 @@ describe('Compiler', () => {
     expect(bc.main[0]).toMatchObject({ op: 'PUSH_STR', value: 'Hello World' });
     expect(bc.main[1]).toMatchObject({ op: 'SAY' });
 
-    // set foo to 5
+    // constant foo is 5
     expect(bc.main).toContainEqual({ op: 'PUSH_INT', value: 5 });
     expect(bc.main).toContainEqual({ op: 'STORE', name: 'foo' });
 
-    // set bar to 6
+    // constant bar is 6
     expect(bc.main).toContainEqual({ op: 'PUSH_INT', value: 6 });
     expect(bc.main).toContainEqual({ op: 'STORE', name: 'bar' });
 
@@ -227,7 +227,7 @@ describe('Compiler', () => {
     });
 
     test('loop variable shadowing outer set raises CompileError', () => {
-      const src = 'set i to 5\nrepeat with i from 1 to 3\n    say i\nend repeat';
+      const src = 'constant i is 5\nrepeat with i from 1 to 3\n    say i\nend repeat';
       expect(() => compileSource(src)).toThrow(CompileError);
       expect(() => compileSource(src)).toThrow(/shadow/);
     });
@@ -255,10 +255,10 @@ describe('Compiler', () => {
       expect(() => compileSource(src)).toThrow(CompileError);
     });
 
-    test('`set i to X` inside loop body raises CompileError (duplicate binding)', () => {
+    test('`constant i is X` inside loop body raises CompileError (duplicate binding)', () => {
       const src = [
         'repeat with i from 1 to 3',
-        '    set i to 99',
+        '    constant i is 99',
         'end repeat',
       ].join('\n');
       expect(() => compileSource(src)).toThrow(CompileError);
@@ -297,20 +297,20 @@ describe('Compiler', () => {
   });
 
   describe('var / change / compound assign', () => {
-    test('var x is 5 emits STORE_VAR', () => {
-      const bc = compileSource('var x is 5');
+    test('variable x is 5 emits STORE_VAR', () => {
+      const bc = compileSource('variable x is 5');
       expect(bc.main).toContainEqual({ op: 'PUSH_INT', value: 5 });
       expect(bc.main).toContainEqual({ op: 'STORE_VAR', name: 'x' });
     });
 
     test('change x to 6 emits STORE_VAR', () => {
-      const bc = compileSource('var x is 5\nchange x to 6');
+      const bc = compileSource('variable x is 5\nchange x to 6');
       const storeVars = bc.main.filter(i => i.op === 'STORE_VAR' && (i as any).name === 'x');
       expect(storeVars).toHaveLength(2);
     });
 
     test('add N to x emits LOAD, PUSH, ADD, STORE_VAR', () => {
-      const bc = compileSource('var x is 5\nadd 3 to x');
+      const bc = compileSource('variable x is 5\nadd 3 to x');
       const tail = bc.main.slice(-4);
       expect(tail).toEqual([
         { op: 'LOAD', name: 'x' },
@@ -321,7 +321,7 @@ describe('Compiler', () => {
     });
 
     test('multiply x by 2 emits LOAD, PUSH, MUL, STORE_VAR', () => {
-      const bc = compileSource('var x is 5\nmultiply x by 2');
+      const bc = compileSource('variable x is 5\nmultiply x by 2');
       const tail = bc.main.slice(-4);
       expect(tail).toEqual([
         { op: 'LOAD', name: 'x' },
@@ -332,7 +332,7 @@ describe('Compiler', () => {
     });
 
     test('change targeting a set binding is a compile error', () => {
-      expect(() => compileSource('set x to 5\nchange x to 6')).toThrow(CompileError);
+      expect(() => compileSource('constant x is 5\nchange x to 6')).toThrow(CompileError);
     });
 
     test('change targeting an undeclared name is a compile error', () => {
@@ -340,33 +340,33 @@ describe('Compiler', () => {
     });
 
     test('var redeclaring a set is a compile error', () => {
-      expect(() => compileSource('set x to 5\nvar x is 6')).toThrow(CompileError);
+      expect(() => compileSource('constant x is 5\nvariable x is 6')).toThrow(CompileError);
     });
 
     test('var redeclaring a var is a compile error', () => {
-      expect(() => compileSource('var x is 5\nvar x is 6')).toThrow(CompileError);
+      expect(() => compileSource('variable x is 5\nvariable x is 6')).toThrow(CompileError);
     });
 
     test('set after var is a compile error', () => {
-      expect(() => compileSource('var x is 5\nset x to 6')).toThrow(CompileError);
+      expect(() => compileSource('variable x is 5\nconstant x is 6')).toThrow(CompileError);
     });
 
     test('add on a string-locked var is a compile error', () => {
-      expect(() => compileSource('var s is "hi"\nadd 1 to s')).toThrow(/not number/);
+      expect(() => compileSource('variable s is "hi"\nadd 1 to s')).toThrow(/not number/);
     });
 
     test('add on a boolean-locked var is a compile error', () => {
-      expect(() => compileSource('var b is true\nadd 1 to b')).toThrow(/not number/);
+      expect(() => compileSource('variable b is true\nadd 1 to b')).toThrow(/not number/);
     });
 
     test('var inside a function does not leak to siblings; sibling function can reuse the name', () => {
       const src = [
         'function f returns number is',
-        '    var x is 1',
+        '    variable x is 1',
         '    return x',
         'end function',
         'function g returns number is',
-        '    var x is 2',
+        '    variable x is 2',
         '    return x',
         'end function',
       ].join('\n');
@@ -375,9 +375,9 @@ describe('Compiler', () => {
 
     test('var shadowing an outer (top-level) set is a compile error inside a function', () => {
       const src = [
-        'set x to 1',
+        'constant x is 1',
         'function f returns number is',
-        '    var x is 2',
+        '    variable x is 2',
         '    return x',
         'end function',
       ].join('\n');
@@ -407,7 +407,7 @@ describe('Compiler', () => {
       // f has var x; g is a sibling that tries to change x — should fail.
       const src = [
         'function f returns number is',
-        '    var x is 1',
+        '    variable x is 1',
         '    return x',
         'end function',
         'function g returns number is',
@@ -516,7 +516,7 @@ describe('Compiler', () => {
     });
 
     test('void function used as value in set → compile error', () => {
-      const src = 'function greet is\n    say "hi"\nend function\nset x to greet';
+      const src = 'function greet is\n    say "hi"\nend function\nconstant x is greet';
       expect(() => compileSource(src)).toThrow(
         /void function 'greet' cannot be used as a value/,
       );
@@ -530,21 +530,21 @@ describe('Compiler', () => {
 
   describe('lists', () => {
     test('emits MAKE_LIST for nonempty literal', () => {
-      const bc = compileSource('set l to list of 1, 2, 3');
+      const bc = compileSource('constant l is list of 1, 2, 3');
       expect(bc.main).toContainEqual({ op: 'MAKE_LIST', count: 3, elementType: 'number' });
     });
 
     test('emits MAKE_EMPTY_LIST with element type', () => {
-      const bc = compileSource('set l to empty list of boolean');
+      const bc = compileSource('constant l is empty list of boolean');
       expect(bc.main).toContainEqual({ op: 'MAKE_EMPTY_LIST', elementType: 'boolean' });
     });
 
     test('mixed static types in literal → compile error', () => {
-      expect(() => compileSource('set l to list of 1, "hi"')).toThrow(/mixed element types/);
+      expect(() => compileSource('constant l is list of 1, "hi"')).toThrow(/mixed element types/);
     });
 
     test('append to non-list var → compile error', () => {
-      expect(() => compileSource('set x to 5\nappend 1 to x')).toThrow(/not a list/);
+      expect(() => compileSource('constant x is 5\nappend 1 to x')).toThrow(/not a list/);
     });
 
     test('append inside function with readonly param → compile error', () => {
@@ -557,18 +557,18 @@ describe('Compiler', () => {
       expect(() => compileSource(src)).toThrow(/readonly/);
     });
 
-    test('set x to readonly param → compile error (no smuggling)', () => {
-      const src = 'function f takes readonly list of number xs is\n    set other to xs\n    say length of other\nend function';
+    test('constant x is readonly param → compile error (no smuggling)', () => {
+      const src = 'function f takes readonly list of number xs is\n    constant other is xs\n    say length of other\nend function';
       expect(() => compileSource(src)).toThrow(/readonly-list reference/);
     });
 
-    test('var other is readonly param → compile error', () => {
-      const src = 'function f takes readonly list of number xs is\n    var other is xs\nend function';
+    test('variable other is readonly param → compile error', () => {
+      const src = 'function f takes readonly list of number xs is\n    variable other is xs\nend function';
       expect(() => compileSource(src)).toThrow(/readonly-list reference/);
     });
 
     test('widening: mutable arg → readonly param OK', () => {
-      const src = 'function f takes readonly list of number xs returns number is\n    return length of xs\nend function\nset l to list of 1, 2\nf l\nsay it';
+      const src = 'function f takes readonly list of number xs returns number is\n    return length of xs\nend function\nconstant l is list of 1, 2\nf l\nsay it';
       expect(() => compileSource(src)).not.toThrow();
     });
 
@@ -595,12 +595,12 @@ describe('Compiler', () => {
     });
 
     test('change var list to different element type → compile error', () => {
-      const src = 'var l is list of 1, 2\nchange l to list of "a", "b"';
+      const src = 'variable l is list of 1, 2\nchange l to list of "a", "b"';
       expect(() => compileSource(src)).toThrow(/Type mismatch/);
     });
 
     test('append wrong-type literal → compile error', () => {
-      const src = 'set l to list of 1, 2\nappend "hi" to l';
+      const src = 'constant l is list of 1, 2\nappend "hi" to l';
       expect(() => compileSource(src)).toThrow(/cannot append string to list of number/);
     });
 
@@ -610,7 +610,7 @@ describe('Compiler', () => {
     });
 
     test('contains compiles to CONTAINS', () => {
-      const bc = compileSource('set l to list of 1, 2\nsay l contains 1');
+      const bc = compileSource('constant l is list of 1, 2\nsay l contains 1');
       expect(bc.main).toContainEqual({ op: 'CONTAINS' });
     });
   });
@@ -641,19 +641,19 @@ describe('Compiler', () => {
     });
 
     test('character N of non-string → compile error', () => {
-      expect(() => compileSource('set n to 5\nsay character 1 of n')).toThrow(/character/);
+      expect(() => compileSource('constant n is 5\nsay character 1 of n')).toThrow(/character/);
     });
 
     test('last character of non-string → compile error', () => {
-      expect(() => compileSource('set n to 5\nsay last character of n')).toThrow(/character/);
+      expect(() => compileSource('constant n is 5\nsay last character of n')).toThrow(/character/);
     });
 
     test('characters A to B of non-string → compile error', () => {
-      expect(() => compileSource('set n to 5\nsay characters 1 to 2 of n')).toThrow(/string/);
+      expect(() => compileSource('constant n is 5\nsay characters 1 to 2 of n')).toThrow(/string/);
     });
 
     test('length of on boolean → compile error', () => {
-      expect(() => compileSource('set b to true\nsay length of b')).toThrow(/list or string/);
+      expect(() => compileSource('constant b is true\nsay length of b')).toThrow(/list or string/);
     });
 
     test('& always returns string (staticType via use in function return)', () => {
@@ -665,7 +665,7 @@ describe('Compiler', () => {
 
   describe('the result of sugar', () => {
     test('emits call then STORE_IT then LOAD_IT then STORE for set', () => {
-      const src = 'function f takes number n returns number is\n    return n\nend function\nset x to the result of f 5';
+      const src = 'function f takes number n returns number is\n    return n\nend function\nconstant x is the result of f 5';
       const bc = compileSource(src);
       const main = bc.main;
       const callIdx = main.findIndex(i => i.op === 'CALL' && (i as any).name === 'f');
@@ -676,12 +676,12 @@ describe('Compiler', () => {
     });
 
     test('void function in the result of → compile error', () => {
-      const src = 'function noop is\n    say "hi"\nend function\nset x to the result of noop';
+      const src = 'function noop is\n    say "hi"\nend function\nconstant x is the result of noop';
       expect(() => compileSource(src)).toThrow(/void/);
     });
 
     test('unknown function in the result of → compile error', () => {
-      expect(() => compileSource('set x to the result of nope 5')).toThrow(/unknown function/);
+      expect(() => compileSource('constant x is the result of nope 5')).toThrow(/unknown function/);
     });
   });
 

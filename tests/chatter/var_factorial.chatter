@@ -1,5 +1,5 @@
 function fact takes number n returns number is
-    var result is 1
+    variable result is 1
     repeat with i from 2 to n
         multiply result by i
     end repeat

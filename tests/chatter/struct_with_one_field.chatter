@@ -3,7 +3,7 @@ struct Point
     number y
 end struct
 
-set p to make Point with x 1, y 2
-set q to p with x 99
+constant p is make Point with x 1, y 2
+constant q is p with x 99
 say x of q, y of q
 say x of p, y of p
