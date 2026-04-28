@@ -18,7 +18,8 @@ export interface ChatterList {
 export interface ChatterUniqueList {
   kind: 'uniqueList';
   element: string;  // same encoding as ChatterList.element
-  items: ChatterValue[];
+  items: Map<string, ChatterValue>;  // key = canonicalKey(value); insertion order preserved
+  _iterCache?: ChatterValue[];       // materialized values; invalidated on mutation
 }
 
 export interface ChatterStruct {
@@ -43,6 +44,33 @@ function isStruct(v: ChatterValue): v is ChatterStruct {
 
 function isAnyList(v: ChatterValue): v is ChatterList | ChatterUniqueList {
   return isList(v) || isUniqueList(v);
+}
+
+// Canonical string key for hashing scalar/struct values into a unique-list backing Map.
+// Recursive for structs (matches structural equality used by EQ).
+// Strings are escaped so that `"a|b"` and `"a","b"` cannot collide.
+function canonicalKey(v: ChatterValue): string {
+  if (typeof v === 'number') return 'n:' + v;
+  if (typeof v === 'string') return 's:' + v.length + ':' + v;
+  if (typeof v === 'boolean') return v ? 'b:1' : 'b:0';
+  if (isStruct(v)) {
+    const parts: string[] = [];
+    for (const [fname, fval] of v.fields) parts.push(fname + '=' + canonicalKey(fval));
+    return 'S:' + v.typeName + '{' + parts.join(',') + '}';
+  }
+  // Lists are forbidden as elements; this branch should never be reached.
+  return 'L?';
+}
+
+// Return the values of a unique list as an indexed array, populating a lazy cache.
+function uniqueListValues(u: ChatterUniqueList): ChatterValue[] {
+  if (u._iterCache === undefined) u._iterCache = Array.from(u.items.values());
+  return u._iterCache;
+}
+
+// Invalidate the iteration cache after any mutation.
+function invalidateUniqueListCache(u: ChatterUniqueList): void {
+  u._iterCache = undefined;
 }
 
 // Strip module prefix `mN::Name` → `Name` for user-facing display.
@@ -98,7 +126,15 @@ function formatValue(v: ChatterValue): string {
     }
     return `${tname}(${parts.join(', ')})`;
   }
-  if (isAnyList(v)) {
+  if (isUniqueList(v)) {
+    return '[' + uniqueListValues(v).map(e => {
+      if (isAnyList(e)) return formatValue(e);
+      if (isStruct(e)) return formatValue(e);
+      if (typeof e === 'string') return `"${e}"`;
+      return formatScalar(e);
+    }).join(', ') + ']';
+  }
+  if (isList(v)) {
     return '[' + v.items.map(e => {
       if (isAnyList(e)) return formatValue(e);
       if (isStruct(e)) return formatValue(e);
@@ -512,10 +548,11 @@ export class VM {
             instr.loc);
           }
         }
-        // Dedupe in-place, preserving insertion order — uses structural equality.
-        const items: ChatterValue[] = [];
+        // Dedupe via canonical key — Map preserves insertion order naturally.
+        const items = new Map<string, ChatterValue>();
         for (const e of elems) {
-          if (!items.some(x => this.aggregateEquals(x, e))) items.push(e);
+          const k = canonicalKey(e);
+          if (!items.has(k)) items.set(k, e);
         }
         const uList: ChatterUniqueList = { kind: 'uniqueList', element: elementType, items };
         this.stack.push(uList);
@@ -523,7 +560,7 @@ export class VM {
       }
 
       case 'MAKE_EMPTY_UNIQUE_LIST': {
-        const uList: ChatterUniqueList = { kind: 'uniqueList', element: instr.elementType, items: [] };
+        const uList: ChatterUniqueList = { kind: 'uniqueList', element: instr.elementType, items: new Map() };
         this.stack.push(uList);
         break;
       }
@@ -539,8 +576,10 @@ export class VM {
             `Type mismatch: cannot add ${describe(value)} to unique list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
-        if (!list.items.some(x => this.aggregateEquals(x, value))) {
-          list.items.push(value);
+        const k = canonicalKey(value);
+        if (!list.items.has(k)) {
+          list.items.set(k, value);
+          invalidateUniqueListCache(list);
         }
         break;
       }
@@ -556,8 +595,9 @@ export class VM {
             `Type mismatch: cannot remove ${describe(value)} from unique list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
-        const idx = list.items.findIndex(x => this.aggregateEquals(x, value));
-        if (idx >= 0) list.items.splice(idx, 1);
+        if (list.items.delete(canonicalKey(value))) {
+          invalidateUniqueListCache(list);
+        }
         break;
       }
 
@@ -570,10 +610,12 @@ export class VM {
         if (typeof idx !== 'number') {
           throw new RuntimeError(`Type mismatch: list index must be a number, got ${typeof idx}`, instr.loc);
         }
-        if (idx < 1 || idx > list.items.length) {
-          throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
+        const len = isUniqueList(list) ? list.items.size : list.items.length;
+        if (idx < 1 || idx > len) {
+          throw new RuntimeError(`List index out of range: ${idx} (list has ${len} items)`, instr.loc);
         }
-        this.stack.push(list.items[idx - 1]);
+        const arr = isUniqueList(list) ? uniqueListValues(list) : list.items;
+        this.stack.push(arr[idx - 1]);
         break;
       }
 
@@ -601,7 +643,11 @@ export class VM {
 
       case 'LENGTH': {
         const v = this.pop();
-        if (isAnyList(v)) {
+        if (isUniqueList(v)) {
+          this.stack.push(v.items.size);
+          break;
+        }
+        if (isList(v)) {
           this.stack.push(v.items.length);
           break;
         }
@@ -631,6 +677,10 @@ export class VM {
           throw new RuntimeError(
             `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${elementCodeToHuman(left.element)}`,
           instr.loc);
+        }
+        if (isUniqueList(left)) {
+          this.stack.push(left.items.has(canonicalKey(value)));
+          break;
         }
         let found = false;
         for (const e of left.items) {
@@ -850,7 +900,11 @@ export class VM {
           this.stack.push(v.length === 0);
           break;
         }
-        if (isAnyList(v)) {
+        if (isUniqueList(v)) {
+          this.stack.push(v.items.size === 0);
+          break;
+        }
+        if (isList(v)) {
           this.stack.push(v.items.length === 0);
           break;
         }
@@ -946,23 +1000,26 @@ export class VM {
         loc,
       );
     }
-    // unique-list <-> unique-list: order-independent set equality (structural for elements).
+    // unique-list <-> unique-list: order-independent set equality via canonical keys.
     if (isUniqueList(a) && isUniqueList(b)) {
       if (a.element !== b.element) return false;
-      if (a.items.length !== b.items.length) return false;
-      for (const x of a.items) {
-        if (!b.items.some(y => this.aggregateEquals(x, y, loc))) return false;
+      if (a.items.size !== b.items.size) return false;
+      for (const k of a.items.keys()) {
+        if (!b.items.has(k)) return false;
       }
       return true;
     }
-    // unique-list <-> list (either direction): same element type, same length, same order.
+    // unique-list <-> list (either direction): same element type, same length, same order
+    // (insertion order, as preserved by the unique list's backing Map).
     if ((isUniqueList(a) && isList(b)) || (isList(a) && isUniqueList(b))) {
-      const ua = a as ChatterUniqueList | ChatterList;
-      const ub = b as ChatterUniqueList | ChatterList;
-      if (ua.element !== ub.element) return false;
-      if (ua.items.length !== ub.items.length) return false;
-      for (let i = 0; i < ua.items.length; i++) {
-        if (!this.aggregateEquals(ua.items[i], ub.items[i], loc)) return false;
+      const ua = isUniqueList(a) ? uniqueListValues(a) : a.items;
+      const ub = isUniqueList(b) ? uniqueListValues(b) : (b as ChatterList).items;
+      const aElem = (a as ChatterList | ChatterUniqueList).element;
+      const bElem = (b as ChatterList | ChatterUniqueList).element;
+      if (aElem !== bElem) return false;
+      if (ua.length !== ub.length) return false;
+      for (let i = 0; i < ua.length; i++) {
+        if (!this.aggregateEquals(ua[i], ub[i], loc)) return false;
       }
       return true;
     }

@@ -272,7 +272,7 @@ A **unique list** is a "set" data structure (no duplicate values) spelled `uniqu
 - **Iteration during mutation**: undefined behavior (same as list).
 - **Formatting**: `say uniqueList` and `uniqueList & "..."` use the same `[1, 2, 3]` formatter as list. Users introspect via `length`, `contains`, and iteration.
 - **Static type checker**: arithmetic / comparison / logical / `not` / `if` / `while` / bare-`expect` operands of known unique-list type → compile error (parallel to existing list checks).
-- **Internal**: `ChatterUniqueList = { kind:'uniqueList'; element; items: ChatterValue[] }`. Uniqueness enforced by linear scan on add (insertion-order array, not a JS `Set`). Var type-locking records `uniqueList:T` (parallel to `list:T`).
+- **Internal**: `ChatterUniqueList = { kind:'uniqueList'; element; items: Map<string, ChatterValue>; _iterCache?: ChatterValue[] }`. Uniqueness enforced via a canonical-key hash (O(1) `add` / `remove` / `contains`). Map insertion order is preserved by the JS spec, so iteration order remains "first-add-wins". A lazy `_iterCache` materializes values into an indexed array for `LIST_GET`-based iteration; mutations clear the cache. Var type-locking records `uniqueList:T` (parallel to `list:T`).
 
 ### Structs (v1)
 Plain-old-data aggregates: named fields, no methods, **immutable** (copy-on-update via `with`).
@@ -363,7 +363,7 @@ end struct
 - `MAKE_EMPTY_LIST { elementType }` — push a fresh empty list with explicit element type.
 - `MAKE_UNIQUE_LIST { count, elementType }` — pops `count` values, dedupes preserving insertion order (silent), pushes a new `ChatterUniqueList`. Used for nonempty unique-list literals.
 - `MAKE_EMPTY_UNIQUE_LIST { elementType }` — push a fresh empty unique list with explicit element type.
-- `UNIQUE_LIST_ADD` — pop value, pop unique list, append the value if not already present (linear scan); element-type check.
+- `UNIQUE_LIST_ADD` — pop value, pop unique list, add the value if not already present (O(1) hashed by canonical key); element-type check.
 - `UNIQUE_LIST_REMOVE` — pop value, pop unique list, remove the value if present (linear scan, no-op if absent); element-type check.
 - `LIST_GET` — pop index, pop list, push element (1-indexed). Errors: non-list, non-number index, OOB.
 - `LIST_SET` — pop value, pop index, pop list, mutate element in place (1-indexed). Element-type check.
