@@ -337,16 +337,49 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
   }
 
-  function tryConsumeTheResultOf(): CallStatement | null {
+  function consumeOptionalTheBeforeNoun(): void {
+    // Cosmetic article `the` accepted in front of any noun-phrase form
+    // (length/item/last/character/characters/lines of …, code of …,
+    // FIELDNAME of struct, result of f arg). `the` is contextual, not a
+    // reserved keyword: `set the to 5` still works.
     const t0 = tokens[pos];
+    if (!(t0?.type === 'IDENT' && t0.value === 'the')) return;
     const t1 = tokens[pos + 1];
+    if (!t1) return;
+    if (t1.type === 'KEYWORD' && (
+      t1.value === 'length' ||
+      t1.value === 'item' ||
+      t1.value === 'last' ||
+      t1.value === 'character' ||
+      t1.value === 'characters' ||
+      t1.value === 'lines'
+    )) {
+      advance();
+      return;
+    }
+    // IDENT-followed-by-`of`: `code of EXPR`, `FIELD of EXPR` (struct),
+    // and `result of f ...` in precall positions. Disabled inside an
+    // index slot to mirror the existing field-access guard.
     const t2 = tokens[pos + 2];
     if (
-      t0 && t0.type === 'IDENT' && t0.value === 'the' &&
-      t1 && t1.type === 'IDENT' && t1.value === 'result' &&
-      t2 && t2.type === 'KEYWORD' && t2.value === 'of'
+      indexSlotDepth === 0 &&
+      t1.type === 'IDENT' &&
+      t2?.type === 'KEYWORD' && t2.value === 'of'
     ) {
-      advance(); advance(); advance();
+      advance();
+      return;
+    }
+  }
+
+  function tryConsumeTheResultOf(): CallStatement | null {
+    // Accepts either `the result of f ...` or `result of f ...`.
+    let p = pos;
+    if (tokens[p]?.type === 'IDENT' && tokens[p]?.value === 'the') p++;
+    if (
+      tokens[p]?.type === 'IDENT' && tokens[p]?.value === 'result' &&
+      tokens[p + 1]?.type === 'KEYWORD' && tokens[p + 1]?.value === 'of'
+    ) {
+      pos = p + 2;
       return parseCallStatement();
     }
     return null;
@@ -1216,6 +1249,7 @@ export function parse(tokens: Token[], source?: string): Program {
   }
 
   function parsePrimary(): Expression {
+    consumeOptionalTheBeforeNoun();
     const tok = peek();
 
     // `end` as index-slot sentinel — only inside the index slot of

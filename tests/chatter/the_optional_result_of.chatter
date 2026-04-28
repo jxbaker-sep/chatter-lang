@@ -1,0 +1,7 @@
+function double takes number n returns number is
+  return n * 2
+end function
+set v to result of double 7
+say v
+set w to the result of double 9
+say w
