@@ -14,7 +14,7 @@
     ["\"", "\""]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(function\\b.*\\bis\\b|function\\b.*[^.]\\bis\\s*$|if\\b.*|else\\s+if\\b.*|else\\s*$|repeat\\b.*)$",
+    "increaseIndentPattern": "^\\s*(function\\b.*\\bis\\b|function\\b.*[^.]\\bis\\s*$|if\\b.*|else\\s+if\\b.*|else\\s*$|repeat\\b.*|struct\\b.*)$",
     "decreaseIndentPattern": "^\\s*(end|else|else\\s+if\\b.*)\\b"
   }
 }

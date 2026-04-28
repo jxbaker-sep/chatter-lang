@@ -7,13 +7,14 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#numbers" },
+    { "include": "#operators-word" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#constants" },
-    { "include": "#operators-word" },
     { "include": "#builtins" },
     { "include": "#operators-symbol" },
     { "include": "#function-def" },
+    { "include": "#struct-def" },
     { "include": "#function-call" },
     { "include": "#identifiers" }
   ],
@@ -38,7 +39,7 @@
     "numbers": {
       "patterns": [{
         "name": "constant.numeric.chatter",
-        "match": "\\b[0-9]+\\b"
+        "match": "\\b[0-9][0-9_]*\\b"
       }]
     },
     "constants": {
@@ -56,22 +57,22 @@
     "types": {
       "patterns": [{
         "name": "storage.type.chatter",
-        "match": "\\b(number|string|boolean|list|readonly)\\b"
+        "match": "\\b(number|string|boolean|list|unique|readonly|struct)\\b"
       }]
     },
     "keywords": {
       "patterns": [
         {
           "name": "keyword.control.chatter",
-          "match": "\\b(if|else|repeat|times|while|end|return)\\b"
+          "match": "\\b(if|else|repeat|times|while|end|return|expect|exit\\s+repeat|next\\s+repeat)\\b"
         },
         {
           "name": "keyword.control.loop.chatter",
-          "match": "\\b(with|from|to|in|by)\\b"
+          "match": "\\b(with|from|to|in|by|of)\\b"
         },
         {
           "name": "storage.type.declaration.chatter",
-          "match": "\\b(function|takes|returns|variable|constant|change)\\b"
+          "match": "\\b(function|takes|returns|variable|constant|change|make|export|use)\\b"
         }
       ]
     },
@@ -83,7 +84,7 @@
         },
         {
           "name": "keyword.operator.comparison.chatter",
-          "match": "\\b(is\\s+not|is\\s+less\\s+than\\s+or\\s+equal\\s+to|is\\s+greater\\s+than\\s+or\\s+equal\\s+to|is\\s+less\\s+than|is\\s+greater\\s+than|is\\s+at\\s+least|is\\s+at\\s+most|is|contains|equal)\\b"
+          "match": "\\b(is\\s+less\\s+than\\s+or\\s+equal\\s+to|is\\s+greater\\s+than\\s+or\\s+equal\\s+to|is\\s+less\\s+than|is\\s+greater\\s+than|is\\s+at\\s+least|is\\s+at\\s+most|is\\s+not\\s+empty|is\\s+empty|is\\s+a\\s+digit|is\\s+a\\s+letter|is\\s+whitespace|is\\s+not|is|contains)\\b"
         },
         {
           "name": "keyword.operator.word.chatter",
@@ -99,7 +100,7 @@
         },
         {
           "name": "support.function.collection.chatter",
-          "match": "\\b(length\\s+of|first\\s+item\\s+of|last\\s+item\\s+of|first\\s+character\\s+of|last\\s+character\\s+of|item|characters|character|of|empty|first|last|length|lines)\\b"
+          "match": "\\b(length\\s+of|last\\s+item\\s+of|last\\s+character\\s+of|code\\s+of|character\\s+of|item|characters|character|code|empty|last|length|lines)\\b"
         },
         {
           "name": "support.function.mutation.chatter",
@@ -119,6 +120,15 @@
         "captures": {
           "1": { "name": "storage.type.declaration.chatter" },
           "2": { "name": "entity.name.function.chatter" }
+        }
+      }]
+    },
+    "struct-def": {
+      "patterns": [{
+        "match": "\\b(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+        "captures": {
+          "1": { "name": "storage.type.chatter" },
+          "2": { "name": "entity.name.type.chatter" }
         }
       }]
     },

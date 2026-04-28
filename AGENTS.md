@@ -107,9 +107,9 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - Equality: `is`, `is not` — value + type comparison. Type mismatch = runtime error (Path A). Lower precedence than arithmetic, higher than logical. (`==` and `!=` are **not** tokens; they cause a tokenisation error.)
 - Comparison (numbers only, same precedence as `is`/`is not`):
   - `a is less than b` → `<`
-  - `a is at most b` → `<=`
+  - `a is at most b` → `<=` (also spelled `a is less than or equal to b`)
   - `a is greater than b` → `>`
-  - `a is at least b` → `>=`
+  - `a is at least b` → `>=` (also spelled `a is greater than or equal to b`)
   - Non-number operands → RuntimeError ("Type mismatch: comparison requires numbers"). Positive forms only (no `is not less than` etc. yet).
   - Reserved keywords added: `less`, `greater`, `than`, `at`, `least`, `most`.
 - Logical: `not` (unary), `and`, `or`. Precedence: `is`/`is not` > `not` > `and`/`or`.
