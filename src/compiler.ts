@@ -1607,6 +1607,13 @@ export class Compiler {
             `void function '${expr.name}' cannot be used as a value`,
           this.currentLoc);
         }
+        if (!this.functionReturnTypes.has(expr.name)
+            && !bindings.has(expr.name)
+            && !this.outerBindings.has(expr.name)) {
+          throw new CompileError(
+            `Undefined variable: '${expr.name}'`,
+          this.currentLoc);
+        }
         this.emit(out, { op: 'LOAD', name: expr.name });
         break;
       case 'ItExpression':

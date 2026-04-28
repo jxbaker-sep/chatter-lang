@@ -208,12 +208,16 @@ export class VM {
         break;
 
       case 'LOAD': {
-        // Search current frame first, then walk up the call stack.
-        for (let i = this.callStack.length - 1; i >= 0; i--) {
-          if (this.callStack[i].locals.has(instr.name)) {
-            this.stack.push(this.callStack[i].locals.get(instr.name)!);
-            return;
-          }
+        // Lexical scoping: check current frame, then the top-level (frame 0).
+        // Intermediate caller frames are NOT consulted.
+        const top = this.callStack[this.callStack.length - 1];
+        if (top.locals.has(instr.name)) {
+          this.stack.push(top.locals.get(instr.name)!);
+          return;
+        }
+        if (this.callStack.length > 1 && this.callStack[0].locals.has(instr.name)) {
+          this.stack.push(this.callStack[0].locals.get(instr.name)!);
+          return;
         }
         throw new RuntimeError(`Undefined variable: '${instr.name}'`, instr.loc);
       }

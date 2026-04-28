@@ -460,7 +460,7 @@ describe('VM', () => {
     });
 
     test('loop variable not visible after loop', () => {
-      expectRuntimeError('repeat with i from 1 to 2\n    say i\nend repeat\nsay i');
+      expect(() => compile(parse(lex('repeat with i from 1 to 2\n    say i\nend repeat\nsay i')))).toThrow(/Undefined variable: 'i'/);
     });
   });
 

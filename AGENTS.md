@@ -118,7 +118,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 
 ### Scoping
 - `set` bindings are immutable; `var` bindings are mutable but type-locked.
-- Functions can read outer-scope `set`/`var` bindings (closures), but `change`/sugar can only target `var`s declared in the **same** function body.
+- **Lexical scoping.** A function body sees only: its own params/locals, and **module top-level** `set`/`var` bindings. It does NOT see locals of any caller frame. A reference to an unknown name is a compile error (`Undefined variable: 'X'`). `change`/sugar can only target `var`s declared in the **same** function body.
 - Param names **cannot shadow** outer bindings — compile error.
 - `var` **cannot shadow** outer bindings (inside a function) — compile error. Redeclaring a name already bound via `set`/`var` in the same scope — compile error.
 
@@ -166,7 +166,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 **Internals (non-user-visible)**:
 - Each module is assigned a sequential id `m0`, `m1`, … (`m0` = entry).
 - Function names are mangled to `<moduleId>::<name>` inside the emitted bytecode; imported names resolve to the defining module's mangled form. The VM only ever sees mangled names; compile and runtime errors still mention the user-facing unqualified name.
-- Top-level `set`/`var` bindings are also mangled by module to prevent cross-module collision while still allowing imported-function closures to reach their home-module bindings via the stack-walking `LOAD` rule.
+- Top-level `set`/`var` bindings are also mangled by module to prevent cross-module collision. At runtime the `LOAD` op consults only the current frame and the bottom frame (frame[0] = combined module top-level), enforcing lexical scope. Imported-function closures reach their home-module top-level bindings via the mangled name in frame[0].
 - The combined `main` is the concatenation of every non-entry module's top-level instructions (in DFS post-order) followed by the entry's top-level. `JUMP`/`JUMP_IF_FALSE` targets are rewritten by the loader when blocks are concatenated. No new VM opcodes were needed.
 - Loader lives in `src/moduleLoader.ts`; entry point `loadProgram(entryFilePath) → BytecodeProgram`. `CLI` calls `loadProgram`.
 

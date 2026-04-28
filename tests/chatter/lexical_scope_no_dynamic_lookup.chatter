@@ -1,0 +1,8 @@
+function a is
+   say line
+end function
+function b is
+   set line to "123"
+   a
+end function
+b
