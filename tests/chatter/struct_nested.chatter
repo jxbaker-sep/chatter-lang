@@ -1,0 +1,11 @@
+struct Inner
+    number a
+end struct
+
+struct Outer
+    Inner inner
+    number n
+end struct
+
+set o to make Outer with inner (make Inner with a 5), n 9
+say o

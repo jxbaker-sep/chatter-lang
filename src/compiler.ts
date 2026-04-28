@@ -7,13 +7,15 @@ import {
   ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
-  TypeAnnotation, ScalarTypeName,
+  TypeAnnotation, ScalarTypeName, ElementTypeAnnotation,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement,
   ExitRepeatStatement, NextRepeatStatement,
+  StructDeclaration, StructField,
+  MakeStructExpression, FieldAccessExpression, StructWithExpression,
 } from './ast';
 import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
 import { ChatterError, SourceLocation } from './errors';
@@ -38,7 +40,6 @@ function containsEndSentinel(expr: Expression | null | undefined): boolean {
       return containsEndSentinel(expr.left) || containsEndSentinel(expr.right);
     case 'UnaryExpression':
       return containsEndSentinel(expr.operand);
-    // Stop at nested indexable forms: their index slots have their own scope.
     case 'CharacterAccessExpression':
     case 'ItemAccessExpression':
     case 'SubstringExpression':
@@ -50,8 +51,19 @@ function containsEndSentinel(expr: Expression | null | undefined): boolean {
 
 export type ChatterType =
   | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: ScalarTypeName; readonly: boolean }
-  | { kind: 'uniqueList'; element: ScalarTypeName; readonly: false };
+  | { kind: 'list'; element: string; readonly: boolean }       // element string-encoded
+  | { kind: 'uniqueList'; element: string; readonly: false }
+  | { kind: 'struct'; mangled: string };
+
+function unmangle(s: string): string {
+  const idx = s.indexOf('::');
+  return idx === -1 ? s : s.slice(idx + 2);
+}
+
+function elementHuman(code: string): string {
+  if (code.startsWith('struct:')) return 'struct ' + unmangle(code.slice(7));
+  return code;
+}
 
 function typesEqual(a: ChatterType, b: ChatterType): boolean {
   if (a.kind !== b.kind) return false;
@@ -62,19 +74,31 @@ function typesEqual(a: ChatterType, b: ChatterType): boolean {
   if (a.kind === 'uniqueList' && b.kind === 'uniqueList') {
     return a.element === b.element;
   }
+  if (a.kind === 'struct' && b.kind === 'struct') {
+    return a.mangled === b.mangled;
+  }
   return false;
 }
 
 function typeToString(t: ChatterType): string {
   if (t.kind === 'scalar') return t.name;
-  if (t.kind === 'uniqueList') return 'unique list of ' + t.element;
-  return (t.readonly ? 'readonly list of ' : 'list of ') + t.element;
+  if (t.kind === 'struct') return 'struct ' + unmangle(t.mangled);
+  if (t.kind === 'uniqueList') return 'unique list of ' + elementHuman(t.element);
+  return (t.readonly ? 'readonly list of ' : 'list of ') + elementHuman(t.element);
 }
 
-function fromAnnotation(a: TypeAnnotation): ChatterType {
-  if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
-  if (a.kind === 'uniqueList') return { kind: 'uniqueList', element: a.element, readonly: false };
-  return { kind: 'list', element: a.element, readonly: a.readonly };
+function elementCode(t: ChatterType | null): string | null {
+  if (t === null) return null;
+  if (t.kind === 'scalar') return t.name;
+  if (t.kind === 'struct') return 'struct:' + t.mangled;
+  return null;
+}
+
+interface StructInfo {
+  mangled: string;
+  fields: Array<{ name: string; type: ChatterType }>;
+  exported: boolean;
+  imported: boolean;
 }
 
 type BindingKind = 'set' | 'var' | 'param' | 'loop';
@@ -93,15 +117,22 @@ export interface ImportedFunction {
   paramNames: string[];
 }
 
+export interface ImportedStruct {
+  mangled: string;
+  fields: Array<{ name: string; type: ChatterType }>;
+}
+
 export interface CompileOptions {
   moduleId?: string;
   imports?: Map<string, ImportedFunction>;
+  structImports?: Map<string, ImportedStruct>;
 }
 
 export interface CompiledModule {
   functions: Map<string, FunctionDef>;      // keyed by mangled names
   topLevel: Instruction[];                  // module top-level instructions
   exports: Map<string, ImportedFunction>;   // local name -> info (for loader)
+  structExports: Map<string, ImportedStruct>;
 }
 
 export class Compiler {
@@ -119,6 +150,10 @@ export class Compiler {
   private imports: Map<string, ImportedFunction> = new Map();
   private localFunctions = new Map<string, FunctionDeclaration>();
   private endLenTmpStack: string[] = [];
+  // Struct registry: local name -> info (mangled, fields). Includes both
+  // local declarations (resolved fully) and imported structs.
+  private structs = new Map<string, StructInfo>();
+  private localStructDecls = new Map<string, StructDeclaration & Located>();
 
   // Loop control stack: each entry records pending JUMP instruction indices
   // that must be patched to the loop's continue / exit targets.
@@ -134,8 +169,6 @@ export class Compiler {
   private emit(out: Instruction[], instr: InstructionKind): void {
     const withLoc = instr as Instruction;
     if (withLoc.loc === undefined && this.currentLoc !== undefined) {
-      // Attach loc as a non-enumerable property so deep-equality checks in
-      // tests (e.g. toContainEqual) ignore it while the VM can still read it.
       Object.defineProperty(withLoc, 'loc', {
         value: this.currentLoc,
         enumerable: false,
@@ -166,6 +199,44 @@ export class Compiler {
     return name;
   }
 
+  // Resolve a TypeAnnotation to a ChatterType using the struct registry.
+  // Throws CompileError for unknown struct names.
+  private fromAnnotation(a: TypeAnnotation, loc?: SourceLocation): ChatterType {
+    if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
+    if (a.kind === 'struct') {
+      const info = this.structs.get(a.name);
+      if (!info) {
+        throw new CompileError(`unknown struct '${a.name}'`, loc ?? this.currentLoc);
+      }
+      return { kind: 'struct', mangled: info.mangled };
+    }
+    // list/uniqueList
+    const elem = a.element;
+    let elemCode: string;
+    if (elem.kind === 'scalar') {
+      elemCode = elem.name;
+    } else {
+      const info = this.structs.get(elem.name);
+      if (!info) {
+        throw new CompileError(`unknown struct '${elem.name}'`, loc ?? this.currentLoc);
+      }
+      elemCode = 'struct:' + info.mangled;
+    }
+    if (a.kind === 'uniqueList') {
+      return { kind: 'uniqueList', element: elemCode, readonly: false };
+    }
+    return { kind: 'list', element: elemCode, readonly: a.readonly };
+  }
+
+  private elementAnnotationToCode(e: ElementTypeAnnotation, loc?: SourceLocation): string {
+    if (e.kind === 'scalar') return e.name;
+    const info = this.structs.get(e.name);
+    if (!info) {
+      throw new CompileError(`unknown struct '${e.name}'`, loc ?? this.currentLoc);
+    }
+    return 'struct:' + info.mangled;
+  }
+
   compile(program: Program): BytecodeProgram {
     const m = this.compileModule(program, {});
     return { functions: m.functions, main: m.topLevel };
@@ -174,8 +245,112 @@ export class Compiler {
   compileModule(program: Program, opts: CompileOptions): CompiledModule {
     this.moduleId = opts.moduleId ?? null;
     this.imports = opts.imports ?? new Map();
+    const structImports = opts.structImports ?? new Map<string, ImportedStruct>();
 
-    // Seed signatures / returnTypes from imports (they're callable by local name)
+    // Pass 1a: register all structs (local + imported) by local name.
+    // Imported structs first.
+    for (const [localName, info] of structImports) {
+      this.structs.set(localName, {
+        mangled: info.mangled,
+        fields: info.fields,
+        exported: false,
+        imported: true,
+      });
+    }
+
+    // Local struct declarations: collect names with mangled, fields filled later.
+    for (const stmt of program.body) {
+      if (stmt.type !== 'StructDeclaration') continue;
+      if (this.structs.has(stmt.name)) {
+        throw new CompileError(
+          `name '${stmt.name}' is already defined`,
+          locOf(stmt),
+        );
+      }
+      const mangled = this.moduleId ? `${this.moduleId}::${stmt.name}` : stmt.name;
+      // Validate empty / duplicate fields here (don't need full type resolution).
+      if (stmt.fields.length === 0) {
+        throw new CompileError(
+          `struct '${stmt.name}' must have at least one field`,
+          locOf(stmt),
+        );
+      }
+      const seen = new Set<string>();
+      for (const f of stmt.fields) {
+        if (seen.has(f.name)) {
+          throw new CompileError(
+            `duplicate field '${f.name}' in struct ${stmt.name}`,
+            locOf(stmt),
+          );
+        }
+        seen.add(f.name);
+      }
+      this.structs.set(stmt.name, {
+        mangled,
+        fields: [],  // resolved next
+        exported: stmt.exported,
+        imported: false,
+      });
+      this.localStructDecls.set(stmt.name, stmt);
+    }
+
+    // Pass 1b: resolve each local struct's field types (forward refs OK now).
+    for (const [localName, decl] of this.localStructDecls) {
+      const info = this.structs.get(localName)!;
+      const fields: Array<{ name: string; type: ChatterType }> = [];
+      for (const f of decl.fields) {
+        const ft = this.fromAnnotation(f.fieldType, locOf(decl));
+        fields.push({ name: f.name, type: ft });
+      }
+      info.fields = fields;
+    }
+
+    // Pass 1c: cycle detection on local structs (DFS through struct fields
+    // and struct elements inside list/uniqueList fields).
+    {
+      const WHITE = 0, GRAY = 1, BLACK = 2;
+      const color = new Map<string, number>();
+      const stack: string[] = [];
+      const dfs = (mangled: string, friendlyChain: string[]): void => {
+        const c = color.get(mangled) ?? WHITE;
+        if (c === BLACK) return;
+        if (c === GRAY) {
+          // cycle
+          const startIdx = friendlyChain.lastIndexOf(unmangle(mangled));
+          const cycle = startIdx >= 0
+            ? friendlyChain.slice(startIdx).concat(unmangle(mangled))
+            : friendlyChain.concat(unmangle(mangled));
+          throw new CompileError(
+            `circular struct: ${cycle.join(' → ')}`,
+          );
+        }
+        // Find local info by mangled name (only local matters for cycles).
+        let local: StructInfo | undefined;
+        for (const v of this.structs.values()) {
+          if (v.mangled === mangled && !v.imported) { local = v; break; }
+        }
+        if (!local) { color.set(mangled, BLACK); return; }
+        color.set(mangled, GRAY);
+        stack.push(unmangle(mangled));
+        for (const f of local.fields) {
+          let next: string | null = null;
+          if (f.type.kind === 'struct') next = f.type.mangled;
+          else if ((f.type.kind === 'list' || f.type.kind === 'uniqueList')
+                   && f.type.element.startsWith('struct:')) {
+            next = f.type.element.slice(7);
+          }
+          if (next !== null) dfs(next, stack.slice());
+        }
+        stack.pop();
+        color.set(mangled, BLACK);
+      };
+      for (const info of this.structs.values()) {
+        if (info.imported) continue;
+        dfs(info.mangled, []);
+      }
+    }
+
+    // Seed signatures / returnTypes from imports (callable by local name)
     for (const [localName, info] of this.imports) {
       this.functionSignatures.set(localName, info.signature);
       this.functionReturnTypes.set(localName, info.returnType);
@@ -184,7 +359,7 @@ export class Compiler {
     // First pass: collect local function signatures, return types, outer bindings
     for (const stmt of program.body) {
       if (stmt.type === 'FunctionDeclaration') {
-        if (this.imports.has(stmt.name)) {
+        if (this.imports.has(stmt.name) || this.structs.has(stmt.name)) {
           throw new CompileError(
             `name '${stmt.name}' is already defined`,
             locOf(stmt),
@@ -192,11 +367,11 @@ export class Compiler {
         }
         this.functionSignatures.set(
           stmt.name,
-          stmt.params.map(p => ({ name: p.name, label: p.label, type: fromAnnotation(p.paramType) })),
+          stmt.params.map(p => ({ name: p.name, label: p.label, type: this.fromAnnotation(p.paramType, locOf(stmt)) })),
         );
         this.functionReturnTypes.set(
           stmt.name,
-          stmt.returnType === null ? null : fromAnnotation(stmt.returnType),
+          stmt.returnType === null ? null : this.fromAnnotation(stmt.returnType, locOf(stmt)),
         );
         const mangled = this.moduleId ? `${this.moduleId}::${stmt.name}` : stmt.name;
         this.functionMangled.set(stmt.name, mangled);
@@ -212,7 +387,8 @@ export class Compiler {
     this.topLevelBindings = bindings;
 
     for (const stmt of program.body) {
-      if (stmt.type === 'UseStatement') continue;  // loader handled these
+      if (stmt.type === 'UseStatement') continue;
+      if (stmt.type === 'StructDeclaration') continue;  // already processed in pass 1
       this.compileStatement(stmt, topLevel, bindings);
     }
 
@@ -243,7 +419,16 @@ export class Compiler {
       });
     }
 
-    return { functions: this.functions, topLevel, exports };
+    const structExports = new Map<string, ImportedStruct>();
+    for (const [localName, info] of this.structs) {
+      if (info.imported || !info.exported) continue;
+      structExports.set(localName, {
+        mangled: info.mangled,
+        fields: info.fields,
+      });
+    }
+
+    return { functions: this.functions, topLevel, exports, structExports };
   }
 
   private compileStatement(
@@ -609,9 +794,10 @@ export class Compiler {
         this.currentLoc);
       }
       const rhs = this.staticType(stmt.value, bindings);
-      if (rhs && rhs.kind === 'scalar' && rhs.name !== info.type.element) {
+      const rc = elementCode(rhs);
+      if (rc !== null && rc !== info.type.element) {
         throw new CompileError(
-          `Type mismatch: cannot assign ${rhs.name} to list of ${info.type.element}`,
+          `Type mismatch: cannot assign ${elementHuman(rc)} to list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
     }
@@ -653,14 +839,15 @@ export class Compiler {
   ): void {
     if (listType && listType.kind === 'list') {
       const rhs = this.staticType(value, bindings);
-      if (rhs && rhs.kind === 'scalar' && rhs.name !== listType.element) {
+      const rc = elementCode(rhs);
+      if (rc !== null && rc !== listType.element) {
         throw new CompileError(
-          `Type mismatch: cannot ${op} ${rhs.name} to list of ${listType.element}`,
+          `Type mismatch: cannot ${op} ${elementHuman(rc)} to list of ${elementHuman(listType.element)}`,
         this.currentLoc);
       }
-      if (rhs && rhs.kind === 'list') {
+      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList')) {
         throw new CompileError(
-          `Type mismatch: cannot ${op} a list value to list of ${listType.element}`,
+          `Type mismatch: cannot ${op} a list value to list of ${elementHuman(listType.element)}`,
         this.currentLoc);
       }
     }
@@ -738,14 +925,15 @@ export class Compiler {
       }
       // Element-type check.
       const rhs = this.staticType(stmt.value, bindings);
-      if (rhs && rhs.kind === 'scalar' && rhs.name !== info.type.element) {
+      const rc = elementCode(rhs);
+      if (rc !== null && rc !== info.type.element) {
         throw new CompileError(
-          `Type mismatch: cannot remove ${rhs.name} from unique list of ${info.type.element}`,
+          `Type mismatch: cannot remove ${elementHuman(rc)} from unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
-      if (rhs && rhs.kind !== 'scalar') {
+      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList')) {
         throw new CompileError(
-          `Type mismatch: cannot remove ${typeToString(rhs)} from unique list of ${info.type.element}`,
+          `Type mismatch: cannot remove ${typeToString(rhs)} from unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
     }
@@ -768,14 +956,15 @@ export class Compiler {
     // `add EXPR to NAME` is overloaded: for unique-list bindings, route to UNIQUE_LIST_ADD.
     if (stmt.op === 'add' && info.type && info.type.kind === 'uniqueList') {
       const rhs = this.staticType(stmt.value, bindings);
-      if (rhs && rhs.kind === 'scalar' && rhs.name !== info.type.element) {
+      const rc = elementCode(rhs);
+      if (rc !== null && rc !== info.type.element) {
         throw new CompileError(
-          `Type mismatch: cannot add ${rhs.name} to unique list of ${info.type.element}`,
+          `Type mismatch: cannot add ${elementHuman(rc)} to unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
-      if (rhs && rhs.kind !== 'scalar') {
+      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList')) {
         throw new CompileError(
-          `Type mismatch: cannot add ${typeToString(rhs)} to unique list of ${info.type.element}`,
+          `Type mismatch: cannot add ${typeToString(rhs)} to unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
       this.emit(out, { op: 'LOAD', name: stmt.name });
@@ -827,7 +1016,7 @@ export class Compiler {
     if (stmt.returnType !== null) {
       if (!blockTerminates(stmt.body)) {
         throw new CompileError(
-          `missing return in typed function '${stmt.name}'; every path must return a ${typeToString(fromAnnotation(stmt.returnType))}`,
+          `missing return in typed function '${stmt.name}'; every path must return a ${typeToString(this.fromAnnotation(stmt.returnType))}`,
         this.currentLoc);
       }
     }
@@ -841,12 +1030,12 @@ export class Compiler {
     for (const p of stmt.params) {
       funcBindings.set(p.name, {
         kind: 'param',
-        type: fromAnnotation(p.paramType),
+        type: this.fromAnnotation(p.paramType),
       });
     }
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
-    this.currentFuncReturnType = stmt.returnType === null ? null : fromAnnotation(stmt.returnType);
+    this.currentFuncReturnType = stmt.returnType === null ? null : this.fromAnnotation(stmt.returnType);
     this.currentFuncName = stmt.name;
     try {
       for (const bodyStmt of stmt.body) {
@@ -1199,7 +1388,9 @@ export class Compiler {
             `'repeat with x in ...' requires a list or unique list, got ${typeToString(lt)}`,
           this.currentLoc);
         }
-        elemType = { kind: 'scalar', name: lt.element };
+        elemType = lt.element.startsWith('struct:')
+          ? { kind: 'struct', mangled: lt.element.slice(7) }
+          : { kind: 'scalar', name: lt.element as ScalarTypeName };
       }
 
       const listTmp = this.freshName('list');
@@ -1671,6 +1862,118 @@ export class Compiler {
         this.emit(out, { op: 'IS_EMPTY' });
         break;
       }
+      case 'MakeStructExpression': {
+        const info = this.structs.get(expr.structName);
+        if (!info) {
+          throw new CompileError(`unknown struct '${expr.structName}'`, this.currentLoc);
+        }
+        // Validate fields: every declared field provided, no unknown, no duplicates.
+        const provided = new Map<string, Expression>();
+        for (const f of expr.fields) {
+          if (provided.has(f.name)) {
+            throw new CompileError(
+              `duplicate field '${f.name}' in make ${expr.structName}`,
+            this.currentLoc);
+          }
+          provided.set(f.name, f.value);
+        }
+        for (const f of expr.fields) {
+          if (!info.fields.find(d => d.name === f.name)) {
+            throw new CompileError(
+              `struct '${expr.structName}' has no field '${f.name}'`,
+            this.currentLoc);
+          }
+        }
+        for (const decl of info.fields) {
+          if (!provided.has(decl.name)) {
+            throw new CompileError(
+              `make ${expr.structName} missing field '${decl.name}'`,
+            this.currentLoc);
+          }
+        }
+        // Type-check each value statically.
+        for (const decl of info.fields) {
+          const v = provided.get(decl.name)!;
+          const vt = this.staticType(v, bindings);
+          if (vt !== null && !typesEqual(vt, decl.type)) {
+            throw new CompileError(
+              `Type mismatch: field '${decl.name}' of struct '${expr.structName}' expects ${typeToString(decl.type)}, got ${typeToString(vt)}`,
+            this.currentLoc);
+          }
+        }
+        // Emit values in declaration order.
+        const fieldNames: string[] = [];
+        for (const decl of info.fields) {
+          this.compileExpr(provided.get(decl.name)!, out, bindings);
+          fieldNames.push(decl.name);
+        }
+        this.emit(out, { op: 'MAKE_STRUCT', typeName: info.mangled, fieldNames });
+        break;
+      }
+      case 'FieldAccessExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && tt.kind !== 'struct') {
+          throw new CompileError(
+            `field access requires a struct, got ${typeToString(tt)}`,
+          this.currentLoc);
+        }
+        if (tt && tt.kind === 'struct') {
+          // Look up info by mangled to validate field exists.
+          let info: StructInfo | undefined;
+          for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }
+          if (info && !info.fields.find(d => d.name === expr.fieldName)) {
+            throw new CompileError(
+              `struct '${unmangle(tt.mangled)}' has no field '${expr.fieldName}'`,
+            this.currentLoc);
+          }
+        }
+        this.compileExpr(expr.target, out, bindings);
+        this.emit(out, { op: 'STRUCT_GET', fieldName: expr.fieldName });
+        break;
+      }
+      case 'StructWithExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && tt.kind !== 'struct') {
+          throw new CompileError(
+            `'with' requires a struct, got ${typeToString(tt)}`,
+          this.currentLoc);
+        }
+        let info: StructInfo | undefined;
+        if (tt && tt.kind === 'struct') {
+          for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }
+        }
+        const seenU = new Set<string>();
+        for (const u of expr.updates) {
+          if (seenU.has(u.name)) {
+            throw new CompileError(
+              `duplicate update for field '${u.name}'`,
+            this.currentLoc);
+          }
+          seenU.add(u.name);
+          if (info) {
+            const decl = info.fields.find(d => d.name === u.name);
+            if (!decl) {
+              throw new CompileError(
+                `struct '${unmangle(info.mangled)}' has no field '${u.name}'`,
+              this.currentLoc);
+            }
+            const vt = this.staticType(u.value, bindings);
+            if (vt !== null && !typesEqual(vt, decl.type)) {
+              throw new CompileError(
+                `Type mismatch: field '${u.name}' expects ${typeToString(decl.type)}, got ${typeToString(vt)}`,
+              this.currentLoc);
+            }
+          }
+        }
+        this.compileExpr(expr.target, out, bindings);
+        const fieldNames: string[] = [];
+        for (const u of expr.updates) {
+          this.compileExpr(u.value, out, bindings);
+          fieldNames.push(u.name);
+        }
+        this.emit(out, { op: 'STRUCT_WITH', fieldNames });
+        break;
+      }
     }
   }
 
@@ -1680,21 +1983,22 @@ export class Compiler {
     bindings: Bindings,
   ): void {
     if (expr.kind === 'empty') {
-      this.emit(out, { op: 'MAKE_EMPTY_UNIQUE_LIST', elementType: expr.elementType! });
+      this.emit(out, { op: 'MAKE_EMPTY_UNIQUE_LIST', elementType: this.elementAnnotationToCode(expr.elementType!) });
       return;
     }
-    let inferred: ScalarTypeName | null = null;
+    let inferred: string | null = null;
     let allKnown = true;
     for (const e of expr.elements) {
       const t = this.staticType(e, bindings);
       if (t === null) { allKnown = false; continue; }
-      if (t.kind !== 'scalar') {
+      const c = elementCode(t);
+      if (c === null) {
         throw new CompileError(`nested lists not supported`, this.currentLoc);
       }
-      if (inferred === null) inferred = t.name;
-      else if (inferred !== t.name) {
+      if (inferred === null) inferred = c;
+      else if (inferred !== c) {
         throw new CompileError(
-          `Type mismatch in unique list literal: mixed element types (${inferred} and ${t.name})`,
+          `Type mismatch in unique list literal: mixed element types (${elementHuman(inferred)} and ${elementHuman(c)})`,
         this.currentLoc);
       }
     }
@@ -1714,22 +2018,22 @@ export class Compiler {
     bindings: Bindings,
   ): void {
     if (expr.kind === 'empty') {
-      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: expr.elementType! });
+      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: this.elementAnnotationToCode(expr.elementType!) });
       return;
     }
-    // Nonempty: static type check when knowable.
-    let inferred: ScalarTypeName | null = null;
+    let inferred: string | null = null;
     let allKnown = true;
     for (const e of expr.elements) {
       const t = this.staticType(e, bindings);
       if (t === null) { allKnown = false; continue; }
-      if (t.kind !== 'scalar') {
+      const c = elementCode(t);
+      if (c === null) {
         throw new CompileError(`nested lists not supported`, this.currentLoc);
       }
-      if (inferred === null) inferred = t.name;
-      else if (inferred !== t.name) {
+      if (inferred === null) inferred = c;
+      else if (inferred !== c) {
         throw new CompileError(
-          `Type mismatch in list literal: mixed element types (${inferred} and ${t.name})`,
+          `Type mismatch in list literal: mixed element types (${elementHuman(inferred)} and ${elementHuman(c)})`,
         this.currentLoc);
       }
     }
@@ -1762,14 +2066,14 @@ export class Compiler {
           `'contains' requires a list or string on the left, got ${typeToString(lt)}`,
         this.currentLoc);
       } else if (lt !== null && (lt.kind === 'list' || lt.kind === 'uniqueList')) {
-        // Existing list element-type check, also applies to unique list.
         const rt = this.staticType(expr.right, bindings);
-        if (rt && rt.kind === 'scalar' && rt.name !== lt.element) {
+        const rc = elementCode(rt);
+        if (rc !== null && rc !== lt.element) {
           throw new CompileError(
-            `Type mismatch: 'contains' value type ${rt.name} does not match list element type ${lt.element}`,
+            `Type mismatch: 'contains' value type ${elementHuman(rc)} does not match list element type ${elementHuman(lt.element)}`,
           this.currentLoc);
         }
-        if (rt && rt.kind !== 'scalar') {
+        if (rt && (rt.kind === 'list' || rt.kind === 'uniqueList')) {
           throw new CompileError(
             `Type mismatch: 'contains' value cannot be a list`,
           this.currentLoc);
@@ -1819,7 +2123,8 @@ export class Compiler {
           (lt.kind === 'list' && rt.kind === 'list' && lt.element === rt.element) ||
           (lt.kind === 'uniqueList' && rt.kind === 'uniqueList' && lt.element === rt.element) ||
           (lt.kind === 'list' && rt.kind === 'uniqueList' && lt.element === rt.element) ||
-          (lt.kind === 'uniqueList' && rt.kind === 'list' && lt.element === rt.element);
+          (lt.kind === 'uniqueList' && rt.kind === 'list' && lt.element === rt.element) ||
+          (lt.kind === 'struct' && rt.kind === 'struct' && lt.mangled === rt.mangled);
         if (!compatible) {
           throw new CompileError(
             `Type mismatch: cannot compare ${typeToString(lt)} and ${typeToString(rt)}`,
@@ -1889,31 +2194,39 @@ export class Compiler {
       }
       case 'ListLiteral': {
         if (expr.kind === 'empty') {
-          return { kind: 'list', element: expr.elementType!, readonly: false };
+          const code = this.elementAnnotationToCode(expr.elementType!);
+          return { kind: 'list', element: code, readonly: false };
         }
-        // Try to infer from first element with known type.
-        let inferred: ScalarTypeName | null = null;
+        let inferred: string | null = null;
         for (const e of expr.elements) {
           const t = this.staticType(e, bindings);
-          if (t && t.kind === 'scalar') { inferred = t.name; break; }
+          const c = elementCode(t);
+          if (c !== null) { inferred = c; break; }
         }
-        return inferred ? { kind: 'list', element: inferred, readonly: false } : null;
+        return inferred !== null ? { kind: 'list', element: inferred, readonly: false } : null;
       }
       case 'UniqueListLiteral': {
         if (expr.kind === 'empty') {
-          return { kind: 'uniqueList', element: expr.elementType!, readonly: false };
+          const code = this.elementAnnotationToCode(expr.elementType!);
+          return { kind: 'uniqueList', element: code, readonly: false };
         }
-        let inferred: ScalarTypeName | null = null;
+        let inferred: string | null = null;
         for (const e of expr.elements) {
           const t = this.staticType(e, bindings);
-          if (t && t.kind === 'scalar') { inferred = t.name; break; }
+          const c = elementCode(t);
+          if (c !== null) { inferred = c; break; }
         }
-        return inferred ? { kind: 'uniqueList', element: inferred, readonly: false } : null;
+        return inferred !== null ? { kind: 'uniqueList', element: inferred, readonly: false } : null;
       }
       case 'ItemAccessExpression':
       case 'LastItemExpression': {
         const tt = this.staticType((expr as any).target, bindings);
-        if (tt && (tt.kind === 'list' || tt.kind === 'uniqueList')) return { kind: 'scalar', name: tt.element };
+        if (tt && (tt.kind === 'list' || tt.kind === 'uniqueList')) {
+          if (tt.element.startsWith('struct:')) {
+            return { kind: 'struct', mangled: tt.element.slice(7) };
+          }
+          return { kind: 'scalar', name: tt.element as ScalarTypeName };
+        }
         return null;
       }
       case 'LengthExpression':
@@ -1934,6 +2247,23 @@ export class Compiler {
         return { kind: 'scalar', name: 'boolean' };
       case 'IsEmptyExpression':
         return { kind: 'scalar', name: 'boolean' };
+      case 'MakeStructExpression': {
+        const info = this.structs.get(expr.structName);
+        if (!info) return null;
+        return { kind: 'struct', mangled: info.mangled };
+      }
+      case 'FieldAccessExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt && tt.kind === 'struct') {
+          let info: StructInfo | undefined;
+          for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }
+          const f = info?.fields.find(d => d.name === expr.fieldName);
+          return f?.type ?? null;
+        }
+        return null;
+      }
+      case 'StructWithExpression':
+        return this.staticType(expr.target, bindings);
       default:
         return null;
     }

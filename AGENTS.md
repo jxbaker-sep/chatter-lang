@@ -274,6 +274,54 @@ A **unique list** is a "set" data structure (no duplicate values) spelled `uniqu
 - **Static type checker**: arithmetic / comparison / logical / `not` / `if` / `while` / bare-`expect` operands of known unique-list type → compile error (parallel to existing list checks).
 - **Internal**: `ChatterUniqueList = { kind:'uniqueList'; element; items: ChatterValue[] }`. Uniqueness enforced by linear scan on add (insertion-order array, not a JS `Set`). Var type-locking records `uniqueList:T` (parallel to `list:T`).
 
+### Structs (v1)
+Plain-old-data aggregates: named fields, no methods, **immutable** (copy-on-update via `with`).
+
+**Declaration**:
+```
+struct Point
+    number x
+    number y
+end struct
+```
+- Body is an indented block of `TYPE FIELDNAME` lines (struct fields use the same type annotation grammar as params, including `list of T`, `unique list of T`, and other structs).
+- At least one field is required (`ERROR: must have at least one field`). Duplicate field names → compile error. Empty body (no INDENT) is permitted by the parser but rejected by the compiler.
+- `export struct Name ... end struct` exports the struct (parallel to `export function`).
+- Forward references are allowed within a module: `struct Outer` may reference a `struct Inner` declared later in the same file.
+- Self- and mutually-recursive struct types are rejected: `ERROR: circular struct: A → B → A` (DFS through both `struct` field types and `struct:` elements inside list/uniqueList fields).
+
+**Type annotations**: a struct is referenced by its bare name in any type position (param, return, struct field, list element). Both `Point` and `struct Point` parse as the same struct reference.
+
+**Construction** — `make NAME with FIELD VALUE (, FIELD VALUE)*`:
+- Every declared field must be provided exactly once. Missing → `make X missing field 'F'`. Unknown field → `struct 'X' has no field 'F'`. Duplicate → `duplicate field 'F' in make X`.
+- Values are statically type-checked when knowable.
+- Greedy parse: comma-separated pairs are part of the same `make`. Without a comma, the parser closes the make and applies any further `with` as a postfix update on the result.
+
+**Field access** — `FIELD of EXPR` (e.g. `x of p`). Parsed contextually when an `IDENT of EXPR` appears outside an indexing slot. Unknown field on a known-struct target → compile error.
+
+**Update sugar** — `EXPR with FIELD VALUE (, FIELD VALUE)*` returns a fresh struct copy with the listed fields replaced. Original value is unchanged. Unknown field, type mismatch, or duplicate update field → compile error. `with` on a known-non-struct LHS → compile error.
+
+**Equality**: same-struct compare → field-by-field equality (recursively, struct/list/scalar). Cross-struct compare known statically → compile error (`Type mismatch: cannot compare struct A and struct B`). Cross-type runtime compare → runtime `Type mismatch`.
+
+**Display / `say` / `&` concat**: format is `Type(F: V, F: V, …)`. String fields are quoted (`"..."`), numbers/booleans bare, nested lists/structs recursively formatted. Same formatter used by `say` and string concat (`&`).
+
+**Operators that reject structs (statically when possible)**:
+- Arithmetic (`+ - * / ** mod`) → CE `arithmetic requires numbers, got struct X`.
+- Comparison (`<`, `<=`, `>`, `>=`) → CE `comparison requires numbers, got struct X`.
+- Logical (`and`/`or`/`not`) → CE.
+- `if` / `while` / `expect` predicate → CE.
+- `is empty` / `length of` / `contains` → CE (struct is neither a string nor a list).
+
+**In collections**: `list of P`, `unique list of P`, `readonly list of P` all work. Unique-list dedup uses recursive struct equality. Iteration (`repeat with x in ps`) binds `x` to a value of struct type so field access works inside the body.
+
+**Modules**: `export struct` makes a struct available to importers. Importing an unexported struct → `module "PATH" does not export 'X'`. Imports use the same `use Name from "..."` form for both functions and structs (resolved by what the dep exports).
+
+**Internal representation**: structs carry a mangled type name `<moduleId>::<Name>`. The compiler emits the mangled form in `MAKE_STRUCT { typeName, fieldNames }`; the VM stores fields as an insertion-ordered list of `[name, value]` pairs (`ChatterStruct`). List/uniqueList element types of struct kind are encoded as the string `"struct:<moduleId>::<Name>"` in bytecode metadata. The `formatValue` printer un-mangles for display.
+
+**Bytecode ops** (already documented in "Bytecode instructions" below): `MAKE_STRUCT`, `STRUCT_GET`, `STRUCT_WITH`. Equality is handled by the existing polymorphic `EQ`/`NEQ` ops via `aggregateEquals`.
+
+**Out of scope (v2+)**: methods/dispatch, pattern matching/destructuring, optional fields/defaults, anonymous struct literals, mutation, recursive struct types (would require nullable/option types).
+
 ### Compile-time vs runtime checks
 - **Compile-time**: readonly enforcement, call-site arg/param type matching, readonly smuggling prevention, return-type matching (scalar and list kind/element/readonly), type-locked `var` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
 - **Compile-time (operator/control-flow type checks, when operand types are statically known)**:
@@ -410,7 +458,6 @@ Existing golden cases:
 - **Chatter-native test framework**: write tests in Chatter (`assert x is 10`) once assertions exist.
 - **Maps**: independent built-in key-value type. Mutable. Also need a read-only variant.
 - **Sets**: delivered as `unique list of T` (see "Unique lists (v1)" above). A readonly variant is not yet supported.
-- **Structs**: independent built-in "plain old data" aggregate — named fields, no methods. **Immutable.** Should have syntactic sugar for "copy with specific fields changed" (like Rust's struct update syntax or a `with` clause). Not objects — pure data containers.
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
 
 ### Natural follow-ups

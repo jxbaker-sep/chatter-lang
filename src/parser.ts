@@ -11,13 +11,15 @@ import {
   ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
-  TypeAnnotation, ScalarTypeName,
+  TypeAnnotation, ScalarTypeName, ElementTypeAnnotation,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement, UseStatement,
   ExitRepeatStatement, NextRepeatStatement,
+  StructDeclaration, StructField,
+  MakeStructExpression, FieldAccessExpression, StructWithExpression,
 } from './ast';
 
 function locOfToken(t: Token): SourceLocation {
@@ -46,7 +48,8 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'character', 'characters',
   'expect',
   'use', 'export',
-]);
+  'struct', 'make',
+]);;
 
 // Keywords that legally begin an expression (see parsePrimary / parseLogicalNot).
 const EXPRESSION_START_KEYWORDS = new Set([
@@ -60,6 +63,7 @@ const EXPRESSION_START_KEYWORDS = new Set([
   'list',
   'unique',
   'lines',
+  'make',
 ]);
 
 function canStartExpression(tok: Token): boolean {
@@ -159,6 +163,7 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'divide':   return parseDivideStatement();
         case 'function': return parseFunctionDeclaration(false);
         case 'export':   return parseExportStatement();
+        case 'struct':   return parseStructDeclaration(false);
         case 'use':      return parseUseStatement();
         case 'return':   return parseReturnStatement();
         case 'if':       return parseIfStatement();
@@ -463,29 +468,43 @@ export function parse(tokens: Token[], source?: string): Program {
       advance(); // list
       consume('KEYWORD', 'of');
       const inner = parseTypeAnnotation(false);
-      if (inner.kind !== 'scalar') {
+      if (inner.kind === 'list' || inner.kind === 'uniqueList') {
         throw new ParseError(`nested lists not supported`, tok);
       }
-      return { kind: 'list', element: inner.name, readonly: true };
+      const elem: ElementTypeAnnotation = inner.kind === 'scalar'
+        ? { kind: 'scalar', name: inner.name }
+        : { kind: 'struct', name: inner.name };
+      return { kind: 'list', element: elem, readonly: true };
     }
     if (tok.type === 'KEYWORD' && tok.value === 'unique') {
       advance();
       consume('KEYWORD', 'list');
       consume('KEYWORD', 'of');
       const inner = parseTypeAnnotation(false);
-      if (inner.kind !== 'scalar') {
+      if (inner.kind === 'list' || inner.kind === 'uniqueList') {
         throw new ParseError(`nested lists not supported`, tok);
       }
-      return { kind: 'uniqueList', element: inner.name, readonly: false };
+      const elem: ElementTypeAnnotation = inner.kind === 'scalar'
+        ? { kind: 'scalar', name: inner.name }
+        : { kind: 'struct', name: inner.name };
+      return { kind: 'uniqueList', element: elem, readonly: false };
     }
     if (tok.type === 'KEYWORD' && tok.value === 'list') {
       advance();
       consume('KEYWORD', 'of');
       const inner = parseTypeAnnotation(false);
-      if (inner.kind !== 'scalar') {
+      if (inner.kind === 'list' || inner.kind === 'uniqueList') {
         throw new ParseError(`nested lists not supported`, tok);
       }
-      return { kind: 'list', element: inner.name, readonly: false };
+      const elem: ElementTypeAnnotation = inner.kind === 'scalar'
+        ? { kind: 'scalar', name: inner.name }
+        : { kind: 'struct', name: inner.name };
+      return { kind: 'list', element: elem, readonly: false };
+    }
+    if (tok.type === 'KEYWORD' && tok.value === 'struct') {
+      advance();
+      const nameTok = consume('IDENT');
+      return { kind: 'struct', name: nameTok.value };
     }
     if (tok.type === 'TYPE') {
       advance();
@@ -493,6 +512,12 @@ export function parse(tokens: Token[], source?: string): Program {
         throw new ParseError(`Invalid type '${tok.value}'`, tok);
       }
       return { kind: 'scalar', name: tok.value as ScalarTypeName };
+    }
+    if (tok.type === 'IDENT') {
+      // Bare IDENT in a type annotation position is treated as a struct
+      // reference (resolved at compile time).
+      advance();
+      return { kind: 'struct', name: tok.value };
     }
     throw new ParseError(
       `Expected type annotation, got ${tok.type} '${tok.value}'`,
@@ -610,11 +635,19 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'FunctionDeclaration', name: nameTok.value, params, returnType, body, exported };
   }
 
-  function parseExportStatement(): FunctionDeclaration {
+  function parseExportStatement(): FunctionDeclaration | StructDeclaration {
     const exportTok = consume('KEYWORD', 'export');
+    if (peek().type === 'KEYWORD' && peek().value === 'struct') {
+      const sd = parseStructDeclaration(true);
+      (sd as any).line = exportTok.line;
+      (sd as any).col = exportTok.col;
+      (sd as any).length = Math.max(1, exportTok.value.length);
+      (sd as any).file = exportTok.file;
+      return sd;
+    }
     if (peek().type !== 'KEYWORD' || peek().value !== 'function') {
       throw new ParseError(
-        `'export' must be followed by 'function'`,
+        `'export' must be followed by 'function' or 'struct'`,
         peek(),
       );
     }
@@ -624,6 +657,38 @@ export function parse(tokens: Token[], source?: string): Program {
     (fn as any).length = Math.max(1, exportTok.value.length);
     (fn as any).file = exportTok.file;
     return fn;
+  }
+
+  function parseStructDeclaration(exported: boolean): StructDeclaration {
+    const structTok = consume('KEYWORD', 'struct');
+    const nameTok = consume('IDENT');
+    consumeNewline();
+    const fields: StructField[] = [];
+    if (peek().type === 'INDENT') {
+      consume('INDENT');
+      while (peek().type !== 'DEDENT' && peek().type !== 'EOF') {
+        if (peek().type === 'NEWLINE') { advance(); continue; }
+        const fieldType = parseTypeAnnotation(false);
+        const fieldNameTok = consume('IDENT');
+        fields.push({ name: fieldNameTok.value, fieldType });
+        consumeNewline();
+      }
+      consume('DEDENT');
+    }
+    consume('KEYWORD', 'end');
+    consume('KEYWORD', 'struct');
+    consumeNewline();
+    const node: StructDeclaration = {
+      type: 'StructDeclaration',
+      name: nameTok.value,
+      fields,
+      exported,
+    };
+    (node as any).line = structTok.line;
+    (node as any).col = structTok.col;
+    (node as any).length = Math.max(1, structTok.value.length);
+    (node as any).file = structTok.file;
+    return node;
   }
 
   function parseUseStatement(): UseStatement {
@@ -720,7 +785,7 @@ export function parse(tokens: Token[], source?: string): Program {
 
     // First positional arg (optional): anything that can start an expression.
     if (canStartExpression(peek())) {
-      args.push({ name: null, value: parseExpression() });
+      args.push({ name: null, value: parseExpressionNoWith() });
     }
 
     // Named args: (IDENT | allowed KEYWORD) followed by an expression.
@@ -728,13 +793,13 @@ export function parse(tokens: Token[], source?: string): Program {
       const tok = peek();
       if (tok.type === 'IDENT') {
         const paramName = advance().value;
-        const value = parseExpression();
+        const value = parseExpressionNoWith();
         args.push({ name: paramName, value });
         continue;
       }
       if (tok.type === 'KEYWORD' && !NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
         const paramName = advance().value;
-        const value = parseExpression();
+        const value = parseExpressionNoWith();
         args.push({ name: paramName, value });
         continue;
       }
@@ -926,6 +991,45 @@ export function parse(tokens: Token[], source?: string): Program {
   // --- Expression parsing with precedence ---
 
   function parseExpression(): Expression {
+    const startTok = peek();
+    let expr = parseLogical();
+    if ((expr as any).line === undefined) withLoc(expr, startTok);
+    // With-postfix: greedy `with FIELD EXPR (, FIELD EXPR)*` chain.
+    while (peek().type === 'KEYWORD' && peek().value === 'with') {
+      advance();
+      const updates: Array<{ name: string; value: Expression }> = [];
+      const parsePair = () => {
+        const fnTok = peek();
+        if (fnTok.type !== 'IDENT') {
+          throw new ParseError(
+            `Expected field name after 'with', got ${fnTok.type} '${fnTok.value}'`,
+            fnTok,
+          );
+        }
+        advance();
+        const value = parseLogical();
+        updates.push({ name: fnTok.value, value });
+      };
+      parsePair();
+      while (peek().type === 'COMMA' && tokens[pos + 1]?.type === 'IDENT') {
+        advance();
+        parsePair();
+      }
+      const node: StructWithExpression = {
+        type: 'StructWithExpression',
+        target: expr,
+        updates,
+      };
+      withLoc(node, startTok);
+      expr = node;
+    }
+    return expr;
+  }
+
+  // parseExpression without the trailing `with`-postfix — used inside
+  // `make X with F1 V1, F2 V2 ...` to keep `with` semantics greedy
+  // for the make-construction clause.
+  function parseExpressionNoWith(): Expression {
     const startTok = peek();
     const expr = parseLogical();
     if ((expr as any).line === undefined) withLoc(expr, startTok);
@@ -1178,35 +1282,49 @@ export function parse(tokens: Token[], source?: string): Program {
           advance();
           consume('KEYWORD', 'list');
           consume('KEYWORD', 'of');
+          let elemAnno: ElementTypeAnnotation;
           const tTok = peek();
-          if (tTok.type !== 'TYPE') {
+          if (tTok.type === 'KEYWORD' && tTok.value === 'struct') {
+            advance();
+            const idn = consume('IDENT');
+            elemAnno = { kind: 'struct', name: idn.value };
+          } else if (tTok.type === 'TYPE') {
+            advance();
+            if (tTok.value === 'list' || tTok.value === 'readonly' || tTok.value === 'unique') {
+              throw new ParseError(`nested lists not supported`, tTok);
+            }
+            elemAnno = { kind: 'scalar', name: tTok.value as ScalarTypeName };
+          } else {
             throw new ParseError(`Expected element type after 'empty unique list of'`, tTok);
-          }
-          advance();
-          if (tTok.value === 'list' || tTok.value === 'readonly' || tTok.value === 'unique') {
-            throw new ParseError(`nested lists not supported`, tTok);
           }
           return {
             type: 'UniqueListLiteral',
             kind: 'empty',
-            elementType: tTok.value as ScalarTypeName,
+            elementType: elemAnno,
             elements: [],
           } as UniqueListLiteral;
         }
         consume('KEYWORD', 'list');
         consume('KEYWORD', 'of');
+        let elemAnno: ElementTypeAnnotation;
         const tTok = peek();
-        if (tTok.type !== 'TYPE') {
+        if (tTok.type === 'KEYWORD' && tTok.value === 'struct') {
+          advance();
+          const idn = consume('IDENT');
+          elemAnno = { kind: 'struct', name: idn.value };
+        } else if (tTok.type === 'TYPE') {
+          advance();
+          if (tTok.value === 'list' || tTok.value === 'readonly') {
+            throw new ParseError(`nested lists not supported`, tTok);
+          }
+          elemAnno = { kind: 'scalar', name: tTok.value as ScalarTypeName };
+        } else {
           throw new ParseError(`Expected element type after 'empty list of'`, tTok);
-        }
-        advance();
-        if (tTok.value === 'list' || tTok.value === 'readonly') {
-          throw new ParseError(`nested lists not supported`, tTok);
         }
         return {
           type: 'ListLiteral',
           kind: 'empty',
-          elementType: tTok.value as ScalarTypeName,
+          elementType: elemAnno,
           elements: [],
         } as ListLiteral;
       }
@@ -1277,6 +1395,48 @@ export function parse(tokens: Token[], source?: string): Program {
         const path = parsePrimary();
         return { type: 'ReadFileLinesExpression', path } as ReadFileLinesExpression;
       }
+      if (tok.value === 'make') {
+        // `make NAME with FIELD EXPR (, FIELD EXPR)*`
+        const makeTok = advance();
+        const nameTok = consume('IDENT');
+        if (!(peek().type === 'KEYWORD' && peek().value === 'with')) {
+          throw new ParseError(`Expected 'with' after 'make ${nameTok.value}'`, peek());
+        }
+        advance(); // 'with'
+        const fields: Array<{ name: string; value: Expression; nameLine?: number; nameCol?: number; nameLength?: number; nameFile?: string }> = [];
+        // Parse first FIELD EXPR pair.
+        const parsePair = () => {
+          const fnTok = peek();
+          if (fnTok.type !== 'IDENT') {
+            throw new ParseError(
+              `Expected field name after 'with' in 'make ${nameTok.value}', got ${fnTok.type} '${fnTok.value}'`,
+              fnTok,
+            );
+          }
+          advance();
+          const value = parseExpressionNoWith();
+          fields.push({
+            name: fnTok.value,
+            value,
+            nameLine: fnTok.line,
+            nameCol: fnTok.col,
+            nameLength: fnTok.value.length,
+            nameFile: fnTok.file,
+          });
+        };
+        parsePair();
+        while (peek().type === 'COMMA' && tokens[pos + 1]?.type === 'IDENT') {
+          advance();
+          parsePair();
+        }
+        const node: MakeStructExpression = {
+          type: 'MakeStructExpression',
+          structName: nameTok.value,
+          fields,
+        };
+        withLoc(node, makeTok);
+        return node;
+      }
     }
 
     if (tok.type === 'NUMBER') {
@@ -1290,14 +1450,29 @@ export function parse(tokens: Token[], source?: string): Program {
     }
 
     if (tok.type === 'IDENT') {
-      // Contextual `code of EXPR` — new expression primitive (code point of a single-char string).
-      // `code` is NOT a reserved keyword: only fires when followed by `of`, so user variables
-      // named `code` still work.
+      // Contextual `code of EXPR` — code-point of single-char string.
       if (tok.value === 'code' && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
         advance(); // consume 'code'
         advance(); // consume 'of'
         const target = parsePrimary();
         return { type: 'CodeOfExpression', target } as any;
+      }
+      // `IDENT of EXPR` → field access on a struct.
+      // Disabled inside an index slot to avoid stealing the `of` from
+      // `item N of L`, `character N of S`, `characters A to B of S`.
+      if (indexSlotDepth === 0
+          && tok.value !== 'it'
+          && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
+        advance(); // IDENT (field name)
+        advance(); // 'of'
+        const target = parsePrimary();
+        const node: FieldAccessExpression = {
+          type: 'FieldAccessExpression',
+          fieldName: tok.value,
+          target,
+        };
+        withLoc(node, tok);
+        return node;
       }
       advance();
       if (tok.value === 'it') {

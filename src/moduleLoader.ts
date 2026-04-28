@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { lex } from './lexer';
 import { parse } from './parser';
-import { Compiler, CompileError, CompiledModule, ImportedFunction } from './compiler';
+import { Compiler, CompileError, CompiledModule, ImportedFunction, ImportedStruct } from './compiler';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 import { Program, UseStatement } from './ast';
 import { SourceLocation } from './errors';
@@ -179,31 +179,39 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
 
     // Now all deps are compiled (post-order). Compile this module with imports.
     const imports = new Map<string, ImportedFunction>();
+    const structImports = new Map<string, ImportedStruct>();
     for (const stmt of ast.body) {
       if (stmt.type !== 'UseStatement') continue;
       const depInfo = depModules.get(stmt.path)!;
       const depExports = depInfo.compiled!.exports;
+      const depStructExports = depInfo.compiled!.structExports;
       for (let i = 0; i < stmt.names.length; i++) {
         const n = stmt.names[i];
         const nameLoc = nameLocation(stmt, i);
-        if (!depExports.has(n)) {
+        const isFunc = depExports.has(n);
+        const isStruct = depStructExports.has(n);
+        if (!isFunc && !isStruct) {
           throw new CompileError(
             `module "${stmt.path}" does not export '${n}'`,
             nameLoc,
           );
         }
-        if (imports.has(n)) {
+        if (imports.has(n) || structImports.has(n)) {
           throw new CompileError(
             `name '${n}' is already defined`,
             nameLoc,
           );
         }
-        imports.set(n, depExports.get(n)!);
+        if (isFunc) {
+          imports.set(n, depExports.get(n)!);
+        } else {
+          structImports.set(n, depStructExports.get(n)!);
+        }
       }
     }
 
     const compiler = new Compiler();
-    const compiled = compiler.compileModule(ast, { moduleId, imports });
+    const compiled = compiler.compileModule(ast, { moduleId, imports, structImports });
     info.compiled = compiled;
 
     loading.delete(registryKey);

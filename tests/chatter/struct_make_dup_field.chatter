@@ -1,0 +1,6 @@
+struct P
+    number x
+    number y
+end struct
+
+set p to make P with x 1, x 2, y 3

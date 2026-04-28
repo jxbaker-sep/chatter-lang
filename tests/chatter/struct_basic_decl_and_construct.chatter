@@ -1,0 +1,7 @@
+struct Point
+    number x
+    number y
+end struct
+
+set p to make Point with x 3, y 4
+say p

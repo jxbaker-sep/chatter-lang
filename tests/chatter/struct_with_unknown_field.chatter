@@ -1,0 +1,6 @@
+struct P
+    number x
+end struct
+
+set p to make P with x 1
+set q to p with z 5

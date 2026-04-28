@@ -1,0 +1,11 @@
+struct Point
+    number x
+    number y
+end struct
+
+set a to make Point with x 1, y 2
+set b to make Point with x 1, y 2
+set c to make Point with x 1, y 99
+say a is b
+say a is c
+say a is not c

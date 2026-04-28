@@ -1,0 +1,11 @@
+struct A
+    number x
+end struct
+
+struct B
+    number x
+end struct
+
+set a to make A with x 1
+set b to make B with x 1
+say a is b

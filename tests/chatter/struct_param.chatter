@@ -1,0 +1,10 @@
+struct Point
+    number x
+    number y
+end struct
+
+function describe takes Point p is
+    say x of p, y of p
+end function
+
+describe (make Point with x 9, y 8)

@@ -1,0 +1,7 @@
+struct Person
+    string name
+    number age
+end struct
+
+set p to make Person with name "Gambit", age 35
+say p

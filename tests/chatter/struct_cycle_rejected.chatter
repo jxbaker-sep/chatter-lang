@@ -1,0 +1,7 @@
+struct A
+    B b
+end struct
+
+struct B
+    A a
+end struct

@@ -1,0 +1,4 @@
+use Hidden from "private"
+
+set h to make Hidden with x 1
+say h

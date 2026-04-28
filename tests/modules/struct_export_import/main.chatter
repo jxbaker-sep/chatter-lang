@@ -1,0 +1,5 @@
+use Point from "shapes"
+
+set p to make Point with x 3, y 4
+say p
+say x of p, y of p

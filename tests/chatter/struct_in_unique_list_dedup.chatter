@@ -1,0 +1,9 @@
+struct Point
+    number x
+    number y
+end struct
+
+set s to unique list of make Point with x 1, y 2
+add (make Point with x 1, y 2) to s
+add (make Point with x 3, y 4) to s
+say length of s

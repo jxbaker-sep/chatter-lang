@@ -34,10 +34,10 @@ export type InstructionKind =
   | { op: 'SAY_MULTI'; count: number }
   | { op: 'DROP' }  // pops and discards stack top; used at void call sites to ignore the implicit 0 left by the callee
   | { op: 'CHECK_TYPE'; expected: 'number' | 'string' | 'boolean'; context: string }  // peeks stack top; throws if type mismatches; used to enforce typed-function return types when the static type is unknown
-  | { op: 'MAKE_LIST'; count: number; elementType: 'number' | 'string' | 'boolean' | null }  // pop count values, push list; elementType=null means infer from first
-  | { op: 'MAKE_EMPTY_LIST'; elementType: 'number' | 'string' | 'boolean' }
-  | { op: 'MAKE_UNIQUE_LIST'; count: number; elementType: 'number' | 'string' | 'boolean' | null }  // pop count values, dedupe (preserve insertion order), push unique list
-  | { op: 'MAKE_EMPTY_UNIQUE_LIST'; elementType: 'number' | 'string' | 'boolean' }
+  | { op: 'MAKE_LIST'; count: number; elementType: string | null }  // 'number'|'string'|'boolean'|'struct:<mangled>'|null (infer)
+  | { op: 'MAKE_EMPTY_LIST'; elementType: string }
+  | { op: 'MAKE_UNIQUE_LIST'; count: number; elementType: string | null }
+  | { op: 'MAKE_EMPTY_UNIQUE_LIST'; elementType: string }
   | { op: 'UNIQUE_LIST_ADD' }    // pop value, pop unique-list, append if not already present
   | { op: 'UNIQUE_LIST_REMOVE' } // pop value, pop unique-list, remove if present (no-op otherwise)
   | { op: 'LIST_GET' }        // pop index, pop list, push element
@@ -61,6 +61,9 @@ export type InstructionKind =
   | { op: 'EXPECT'; source: string }
   | { op: 'EXPECT_BOOL_CHECK' }       // peeks top; throws "expect requires a boolean, got X" if not boolean
   | { op: 'EXPECT_FAIL_WITH_MSG' }    // pops string message; throws "expect failed: <msg>"
+  | { op: 'MAKE_STRUCT'; typeName: string; fieldNames: string[] }   // typeName is mangled
+  | { op: 'STRUCT_GET'; fieldName: string }
+  | { op: 'STRUCT_WITH'; fieldNames: string[] }
   | { op: 'ERROR'; message: string };
 
 export type Instruction = InstructionKind & { loc?: SourceLocation };

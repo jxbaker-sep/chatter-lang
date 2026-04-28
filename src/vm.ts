@@ -11,17 +11,23 @@ export class RuntimeError extends ChatterError {
 
 export interface ChatterList {
   kind: 'list';
-  element: 'number' | 'string' | 'boolean';
+  element: string;  // 'number'|'string'|'boolean'|'struct:<mangled>'
   items: ChatterValue[];
 }
 
 export interface ChatterUniqueList {
   kind: 'uniqueList';
-  element: 'number' | 'string' | 'boolean';
+  element: string;  // same encoding as ChatterList.element
   items: ChatterValue[];
 }
 
-export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList;
+export interface ChatterStruct {
+  kind: 'struct';
+  typeName: string;             // mangled
+  fields: Map<string, ChatterValue>;  // insertion order = declaration order
+}
+
+export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct;
 
 function isList(v: ChatterValue): v is ChatterList {
   return typeof v === 'object' && v !== null && (v as any).kind === 'list';
@@ -31,13 +37,36 @@ function isUniqueList(v: ChatterValue): v is ChatterUniqueList {
   return typeof v === 'object' && v !== null && (v as any).kind === 'uniqueList';
 }
 
+function isStruct(v: ChatterValue): v is ChatterStruct {
+  return typeof v === 'object' && v !== null && (v as any).kind === 'struct';
+}
+
 function isAnyList(v: ChatterValue): v is ChatterList | ChatterUniqueList {
   return isList(v) || isUniqueList(v);
 }
 
+// Strip module prefix `mN::Name` → `Name` for user-facing display.
+function unmangleStructName(mangled: string): string {
+  const idx = mangled.indexOf('::');
+  return idx === -1 ? mangled : mangled.slice(idx + 2);
+}
+
+// Encode the element-type code for a value (used for list/unique-list element checks).
+function valueElementCode(v: ChatterValue): string | null {
+  if (isStruct(v)) return 'struct:' + v.typeName;
+  if (isAnyList(v)) return null;  // lists never appear as elements (nested lists rejected)
+  return typeof v as string;
+}
+
+function elementCodeToHuman(code: string): string {
+  if (code.startsWith('struct:')) return 'struct ' + unmangleStructName(code.slice(7));
+  return code;
+}
+
 function describe(v: ChatterValue): string {
-  if (isUniqueList(v)) return `unique list of ${v.element}`;
-  if (isList(v)) return `list of ${v.element}`;
+  if (isStruct(v)) return 'struct ' + unmangleStructName(v.typeName);
+  if (isUniqueList(v)) return 'unique list of ' + elementCodeToHuman(v.element);
+  if (isList(v)) return 'list of ' + elementCodeToHuman(v.element);
   return typeof v;
 }
 
@@ -58,9 +87,21 @@ function formatScalar(v: number | string | boolean): string {
 }
 
 function formatValue(v: ChatterValue): string {
+  if (isStruct(v)) {
+    const tname = unmangleStructName(v.typeName);
+    const parts: string[] = [];
+    for (const [fname, fval] of v.fields) {
+      const formatted = typeof fval === 'string'
+        ? `"${fval}"`
+        : formatValue(fval);
+      parts.push(`${fname}: ${formatted}`);
+    }
+    return `${tname}(${parts.join(', ')})`;
+  }
   if (isAnyList(v)) {
     return '[' + v.items.map(e => {
       if (isAnyList(e)) return formatValue(e);
+      if (isStruct(e)) return formatValue(e);
       if (typeof e === 'string') return `"${e}"`;
       return formatScalar(e);
     }).join(', ') + ']';
@@ -148,11 +189,11 @@ export class VM {
 
       case 'STORE_VAR': {
         const val = this.pop();
-        const valType = isUniqueList(val)
-          ? `uniqueList:${val.element}`
-          : isList(val)
-            ? `list:${val.element}`
-            : (typeof val as string);
+        let valType: string;
+        if (isStruct(val)) valType = 'struct:' + val.typeName;
+        else if (isUniqueList(val)) valType = `uniqueList:${val.element}`;
+        else if (isList(val)) valType = `list:${val.element}`;
+        else valType = typeof val as string;
         const existing = frame.varTypes.get(instr.name);
         if (existing === undefined) {
           frame.varTypes.set(instr.name, valType);
@@ -408,21 +449,25 @@ export class VM {
         if (instr.count === 0) {
           throw new RuntimeError('MAKE_LIST with zero elements (use MAKE_EMPTY_LIST)', instr.loc);
         }
-        let elementType: 'number' | 'string' | 'boolean';
+        let elementType: string;
         if (instr.elementType !== null) {
           elementType = instr.elementType;
         } else {
           const first = elems[0];
-          if (isList(first)) {
+          if (isAnyList(first)) {
             throw new RuntimeError('nested lists not supported', instr.loc);
           }
-          elementType = typeof first as 'number' | 'string' | 'boolean';
+          const code = valueElementCode(first);
+          if (code === null) {
+            throw new RuntimeError('nested lists not supported', instr.loc);
+          }
+          elementType = code;
         }
         for (let i = 0; i < elems.length; i++) {
           const e = elems[i];
-          if (isList(e) || typeof e !== elementType) {
+          if (isAnyList(e) || valueElementCode(e) !== elementType) {
             throw new RuntimeError(
-              `Type mismatch: list element ${i + 1} has type ${describe(e)}, expected ${elementType}`,
+              `Type mismatch: list element ${i + 1} has type ${describe(e)}, expected ${elementCodeToHuman(elementType)}`,
             instr.loc);
           }
         }
@@ -445,7 +490,7 @@ export class VM {
         if (instr.count === 0) {
           throw new RuntimeError('MAKE_UNIQUE_LIST with zero elements (use MAKE_EMPTY_UNIQUE_LIST)', instr.loc);
         }
-        let elementType: 'number' | 'string' | 'boolean';
+        let elementType: string;
         if (instr.elementType !== null) {
           elementType = instr.elementType;
         } else {
@@ -453,20 +498,24 @@ export class VM {
           if (isAnyList(first)) {
             throw new RuntimeError('nested lists not supported', instr.loc);
           }
-          elementType = typeof first as 'number' | 'string' | 'boolean';
+          const code = valueElementCode(first);
+          if (code === null) {
+            throw new RuntimeError('nested lists not supported', instr.loc);
+          }
+          elementType = code;
         }
         for (let i = 0; i < elems.length; i++) {
           const e = elems[i];
-          if (isAnyList(e) || typeof e !== elementType) {
+          if (isAnyList(e) || valueElementCode(e) !== elementType) {
             throw new RuntimeError(
-              `Type mismatch: unique list element ${i + 1} has type ${describe(e)}, expected ${elementType}`,
+              `Type mismatch: unique list element ${i + 1} has type ${describe(e)}, expected ${elementCodeToHuman(elementType)}`,
             instr.loc);
           }
         }
-        // Dedupe in-place, preserving insertion order.
+        // Dedupe in-place, preserving insertion order — uses structural equality.
         const items: ChatterValue[] = [];
         for (const e of elems) {
-          if (!items.some(x => x === e)) items.push(e);
+          if (!items.some(x => this.aggregateEquals(x, e))) items.push(e);
         }
         const uList: ChatterUniqueList = { kind: 'uniqueList', element: elementType, items };
         this.stack.push(uList);
@@ -485,12 +534,12 @@ export class VM {
         if (!isUniqueList(list)) {
           throw new RuntimeError(`Type mismatch: 'add' target must be a unique list, got ${describe(list)}`, instr.loc);
         }
-        if (isAnyList(value) || typeof value !== list.element) {
+        if (isAnyList(value) || valueElementCode(value) !== list.element) {
           throw new RuntimeError(
-            `Type mismatch: cannot add ${describe(value)} to unique list of ${list.element}`,
+            `Type mismatch: cannot add ${describe(value)} to unique list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
-        if (!list.items.some(x => x === value)) {
+        if (!list.items.some(x => this.aggregateEquals(x, value))) {
           list.items.push(value);
         }
         break;
@@ -502,12 +551,12 @@ export class VM {
         if (!isUniqueList(list)) {
           throw new RuntimeError(`Type mismatch: 'remove' target must be a unique list, got ${describe(list)}`, instr.loc);
         }
-        if (isAnyList(value) || typeof value !== list.element) {
+        if (isAnyList(value) || valueElementCode(value) !== list.element) {
           throw new RuntimeError(
-            `Type mismatch: cannot remove ${describe(value)} from unique list of ${list.element}`,
+            `Type mismatch: cannot remove ${describe(value)} from unique list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
-        const idx = list.items.findIndex(x => x === value);
+        const idx = list.items.findIndex(x => this.aggregateEquals(x, value));
         if (idx >= 0) list.items.splice(idx, 1);
         break;
       }
@@ -541,9 +590,9 @@ export class VM {
         if (idx < 1 || idx > list.items.length) {
           throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
-        if (isList(value) || typeof value !== list.element) {
+        if (isAnyList(value) || valueElementCode(value) !== list.element) {
           throw new RuntimeError(
-            `Type mismatch: cannot assign ${describe(value)} to list of ${list.element}`,
+            `Type mismatch: cannot assign ${describe(value)} to list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
         list.items[idx - 1] = value;
@@ -578,14 +627,14 @@ export class VM {
         if (!isAnyList(left)) {
           throw new RuntimeError(`Type mismatch: 'contains' requires a list or string on the left, got ${describe(left)}`, instr.loc);
         }
-        if (isAnyList(value) || typeof value !== left.element) {
+        if (isAnyList(value) || valueElementCode(value) !== left.element) {
           throw new RuntimeError(
-            `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${left.element}`,
+            `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${elementCodeToHuman(left.element)}`,
           instr.loc);
         }
         let found = false;
         for (const e of left.items) {
-          if (e === value) { found = true; break; }
+          if (this.aggregateEquals(e, value)) { found = true; break; }
         }
         this.stack.push(found);
         break;
@@ -643,9 +692,9 @@ export class VM {
         if (!isList(list)) {
           throw new RuntimeError(`Type mismatch: 'append' target must be a list, got ${describe(list)}`, instr.loc);
         }
-        if (isList(value) || typeof value !== list.element) {
+        if (isAnyList(value) || valueElementCode(value) !== list.element) {
           throw new RuntimeError(
-            `Type mismatch: cannot append ${describe(value)} to list of ${list.element}`,
+            `Type mismatch: cannot append ${describe(value)} to list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
         list.items.push(value);
@@ -658,9 +707,9 @@ export class VM {
         if (!isList(list)) {
           throw new RuntimeError(`Type mismatch: 'prepend' target must be a list, got ${describe(list)}`, instr.loc);
         }
-        if (isList(value) || typeof value !== list.element) {
+        if (isAnyList(value) || valueElementCode(value) !== list.element) {
           throw new RuntimeError(
-            `Type mismatch: cannot prepend ${describe(value)} to list of ${list.element}`,
+            `Type mismatch: cannot prepend ${describe(value)} to list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
         list.items.unshift(value);
@@ -680,9 +729,9 @@ export class VM {
         if (idx < 1 || idx > list.items.length + 1) {
           throw new RuntimeError(`List insert position out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
-        if (isList(value) || typeof value !== list.element) {
+        if (isAnyList(value) || valueElementCode(value) !== list.element) {
           throw new RuntimeError(
-            `Type mismatch: cannot insert ${describe(value)} into list of ${list.element}`,
+            `Type mismatch: cannot insert ${describe(value)} into list of ${elementCodeToHuman(list.element)}`,
           instr.loc);
         }
         list.items.splice(idx - 1, 0, value);
@@ -808,6 +857,63 @@ export class VM {
         throw new RuntimeError(
           `Type mismatch: 'is empty' requires a string or list, got ${describe(v)}`, instr.loc);
       }
+
+      case 'MAKE_STRUCT': {
+        const fields = new Map<string, ChatterValue>();
+        const vals: ChatterValue[] = new Array(instr.fieldNames.length);
+        for (let i = instr.fieldNames.length - 1; i >= 0; i--) {
+          vals[i] = this.pop();
+        }
+        for (let i = 0; i < instr.fieldNames.length; i++) {
+          fields.set(instr.fieldNames[i], vals[i]);
+        }
+        const s: ChatterStruct = { kind: 'struct', typeName: instr.typeName, fields };
+        this.stack.push(s);
+        break;
+      }
+
+      case 'STRUCT_GET': {
+        const target = this.pop();
+        if (!isStruct(target)) {
+          throw new RuntimeError(
+            `Type mismatch: '${instr.fieldName} of X' requires a struct, got ${describe(target)}`,
+            instr.loc);
+        }
+        if (!target.fields.has(instr.fieldName)) {
+          throw new RuntimeError(
+            `struct ${unmangleStructName(target.typeName)} has no field '${instr.fieldName}'`,
+            instr.loc);
+        }
+        this.stack.push(target.fields.get(instr.fieldName)!);
+        break;
+      }
+
+      case 'STRUCT_WITH': {
+        const overrides: ChatterValue[] = new Array(instr.fieldNames.length);
+        for (let i = instr.fieldNames.length - 1; i >= 0; i--) {
+          overrides[i] = this.pop();
+        }
+        const base = this.pop();
+        if (!isStruct(base)) {
+          throw new RuntimeError(
+            `Type mismatch: 'X with FIELD V' requires a struct, got ${describe(base)}`,
+            instr.loc);
+        }
+        for (const fn of instr.fieldNames) {
+          if (!base.fields.has(fn)) {
+            throw new RuntimeError(
+              `struct ${unmangleStructName(base.typeName)} has no field '${fn}'`,
+              instr.loc);
+          }
+        }
+        const newFields = new Map<string, ChatterValue>(base.fields);
+        for (let i = 0; i < instr.fieldNames.length; i++) {
+          newFields.set(instr.fieldNames[i], overrides[i]);
+        }
+        const s: ChatterStruct = { kind: 'struct', typeName: base.typeName, fields: newFields };
+        this.stack.push(s);
+        break;
+      }
     }
   }
 
@@ -819,12 +925,33 @@ export class VM {
   }
 
   private aggregateEquals(a: ChatterValue, b: ChatterValue, loc?: SourceLocation): boolean {
-    // unique-list <-> unique-list: order-independent set equality.
+    // struct <-> struct: same type, every field equal (recursive).
+    if (isStruct(a) && isStruct(b)) {
+      if (a.typeName !== b.typeName) {
+        throw new RuntimeError(
+          `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
+          loc,
+        );
+      }
+      for (const [k, va] of a.fields) {
+        const vb = b.fields.get(k);
+        if (vb === undefined) return false;
+        if (!this.aggregateEquals(va, vb, loc)) return false;
+      }
+      return true;
+    }
+    if (isStruct(a) || isStruct(b)) {
+      throw new RuntimeError(
+        `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
+        loc,
+      );
+    }
+    // unique-list <-> unique-list: order-independent set equality (structural for elements).
     if (isUniqueList(a) && isUniqueList(b)) {
       if (a.element !== b.element) return false;
       if (a.items.length !== b.items.length) return false;
       for (const x of a.items) {
-        if (!b.items.some(y => y === x)) return false;
+        if (!b.items.some(y => this.aggregateEquals(x, y, loc))) return false;
       }
       return true;
     }
@@ -835,7 +962,7 @@ export class VM {
       if (ua.element !== ub.element) return false;
       if (ua.items.length !== ub.items.length) return false;
       for (let i = 0; i < ua.items.length; i++) {
-        if (ua.items[i] !== ub.items[i]) return false;
+        if (!this.aggregateEquals(ua.items[i], ub.items[i], loc)) return false;
       }
       return true;
     }

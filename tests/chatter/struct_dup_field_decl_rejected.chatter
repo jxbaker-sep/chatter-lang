@@ -1,0 +1,4 @@
+struct P
+    number x
+    number x
+end struct

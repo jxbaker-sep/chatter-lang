@@ -544,7 +544,7 @@ describe('Parser', () => {
       const ast = parseSource('set l to empty list of string');
       expect(ast.body[0]).toMatchObject({
         type: 'SetStatement',
-        value: { type: 'ListLiteral', kind: 'empty', elementType: 'string', elements: [] },
+        value: { type: 'ListLiteral', kind: 'empty', elementType: { kind: 'scalar', name: 'string' }, elements: [] },
       });
     });
 
@@ -599,8 +599,8 @@ describe('Parser', () => {
     test('parses list of TYPE and readonly list of TYPE param annotations', () => {
       const ast = parseSource('function f takes list of number xs other readonly list of string ys is\n    say 1\nend function');
       const fn = ast.body[0] as FunctionDeclaration;
-      expect(fn.params[0].paramType).toEqual({ kind: 'list', element: 'number', readonly: false });
-      expect(fn.params[1].paramType).toEqual({ kind: 'list', element: 'string', readonly: true });
+      expect(fn.params[0].paramType).toEqual({ kind: 'list', element: { kind: 'scalar', name: 'number' }, readonly: false });
+      expect(fn.params[1].paramType).toEqual({ kind: 'list', element: { kind: 'scalar', name: 'string' }, readonly: true });
     });
 
     test('rejects readonly outside parameter annotations', () => {
@@ -695,6 +695,61 @@ describe('Parser', () => {
     test('does not trigger sugar when of is missing', () => {
       const ast = parseSource('set the to 1\nset result to 2\nsay the\nsay result');
       expect((ast.body[0] as any).precall).toBeFalsy();
+    });
+  });
+
+  describe('structs', () => {
+    test('parses struct declaration', () => {
+      const ast = parseSource('struct Point\n    number x\n    number y\nend struct');
+      expect(ast.body[0]).toMatchObject({
+        type: 'StructDeclaration',
+        name: 'Point',
+        exported: false,
+        fields: [
+          { name: 'x', fieldType: { kind: 'scalar', name: 'number' } },
+          { name: 'y', fieldType: { kind: 'scalar', name: 'number' } },
+        ],
+      });
+    });
+
+    test('parses make expression with comma-separated fields', () => {
+      const ast = parseSource('struct P\n    number x\nend struct\nset p to make P with x 5');
+      expect((ast.body[1] as any).value).toMatchObject({
+        type: 'MakeStructExpression',
+        structName: 'P',
+        fields: [{ name: 'x', value: { type: 'NumberLiteral', value: 5 } }],
+      });
+    });
+
+    test('parses field access via IDENT of EXPR', () => {
+      const ast = parseSource('struct P\n    number x\nend struct\nset p to make P with x 5\nsay x of p');
+      const sayStmt = ast.body[2] as any;
+      expect(sayStmt.expressions[0]).toMatchObject({
+        type: 'FieldAccessExpression',
+        fieldName: 'x',
+        target: { type: 'IdentifierExpression', name: 'p' },
+      });
+    });
+
+    test('parses with-postfix update', () => {
+      const ast = parseSource('struct P\n    number x\nend struct\nset p to make P with x 1\nset q to p with x 9');
+      const setQ = ast.body[2] as any;
+      expect(setQ.value).toMatchObject({
+        type: 'StructWithExpression',
+        target: { type: 'IdentifierExpression', name: 'p' },
+        updates: [{ name: 'x', value: { type: 'NumberLiteral', value: 9 } }],
+      });
+    });
+
+    test('parses export struct', () => {
+      const ast = parseSource('export struct P\n    number x\nend struct');
+      expect(ast.body[0]).toMatchObject({ type: 'StructDeclaration', name: 'P', exported: true });
+    });
+
+    test('parses struct param annotation (bare ident)', () => {
+      const ast = parseSource('struct P\n    number x\nend struct\nfunction f takes P p is\n    say x of p\nend function');
+      const fn = ast.body[1] as FunctionDeclaration;
+      expect(fn.params[0].paramType).toEqual({ kind: 'struct', name: 'P' });
     });
   });
 });

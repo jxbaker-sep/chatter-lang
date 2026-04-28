@@ -1,9 +1,14 @@
 export type ScalarTypeName = 'number' | 'string' | 'boolean';
 
+export type ElementTypeAnnotation =
+  | { kind: 'scalar'; name: ScalarTypeName }
+  | { kind: 'struct'; name: string };  // unmangled struct name
+
 export type TypeAnnotation =
   | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: ScalarTypeName; readonly: boolean }
-  | { kind: 'uniqueList'; element: ScalarTypeName; readonly: false };
+  | { kind: 'list'; element: ElementTypeAnnotation; readonly: boolean }
+  | { kind: 'uniqueList'; element: ElementTypeAnnotation; readonly: false }
+  | { kind: 'struct'; name: string };  // unmangled struct name
 
 export interface Located {
   line?: number;
@@ -36,6 +41,9 @@ export type Expression = (
   | IsCharClassExpression
   | IsEmptyExpression
   | EndIndexSentinel
+  | MakeStructExpression
+  | FieldAccessExpression
+  | StructWithExpression
 ) & Located;
 
 export interface EndIndexSentinel {
@@ -65,7 +73,38 @@ export type Statement = (
   | UseStatement
   | ExitRepeatStatement
   | NextRepeatStatement
+  | StructDeclaration
 ) & Located;
+
+export interface StructField {
+  name: string;
+  fieldType: TypeAnnotation;
+}
+
+export interface StructDeclaration {
+  type: 'StructDeclaration';
+  name: string;             // unmangled
+  fields: StructField[];
+  exported: boolean;
+}
+
+export interface MakeStructExpression {
+  type: 'MakeStructExpression';
+  structName: string;       // unmangled (will be resolved by compiler)
+  fields: Array<{ name: string; value: Expression; nameLine?: number; nameCol?: number; nameLength?: number; nameFile?: string }>;
+}
+
+export interface FieldAccessExpression {
+  type: 'FieldAccessExpression';
+  fieldName: string;
+  target: Expression;
+}
+
+export interface StructWithExpression {
+  type: 'StructWithExpression';
+  target: Expression;
+  updates: Array<{ name: string; value: Expression }>;
+}
 
 export interface ExitRepeatStatement {
   type: 'ExitRepeatStatement';
@@ -212,7 +251,7 @@ export type RepeatStatement =
 export interface ListLiteral {
   type: 'ListLiteral';
   kind: 'nonempty' | 'empty';
-  elementType: ScalarTypeName | null;  // required for empty; null for nonempty (inferred)
+  elementType: ElementTypeAnnotation | null;  // required for empty; null for nonempty (inferred)
   elements: Expression[];
 }
 
@@ -324,7 +363,7 @@ export interface RemoveValueStatement {
 export interface UniqueListLiteral {
   type: 'UniqueListLiteral';
   kind: 'nonempty' | 'empty';
-  elementType: ScalarTypeName | null;  // required for empty; null for nonempty (inferred)
+  elementType: ElementTypeAnnotation | null;  // required for empty; null for nonempty (inferred)
   elements: Expression[];
 }
 

@@ -1,0 +1,3 @@
+struct Hidden
+    number x
+end struct

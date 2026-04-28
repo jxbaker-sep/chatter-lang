@@ -35,6 +35,7 @@ const KEYWORDS = new Set([
   'read', 'file', 'lines',
   'expect',
   'use', 'export',
+  'struct', 'make',
 ]);
 const TYPES = new Set(['number', 'boolean', 'string']);
 

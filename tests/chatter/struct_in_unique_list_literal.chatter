@@ -1,0 +1,10 @@
+struct Point
+    number X
+    number Y
+end struct
+
+set ps to unique list of make Point with X 1, Y 2, make Point with X 1, Y 2, make Point with X 5, Y 6
+say length of ps
+repeat with p in ps
+    say p
+end repeat
