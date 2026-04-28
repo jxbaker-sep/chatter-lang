@@ -253,7 +253,7 @@ A **unique list** is a "set" data structure (no duplicate values) spelled `uniqu
 - **Read ops (expressions)** — all polymorphic with `list` and (where noted) `string`:
   - `length of S` — returns count.
   - `S is empty` / `S is not empty` — polymorphic with string/list.
-  - `S contains V` — linear scan; element type must match.
+  - `S contains V` — element type must match. **O(1)** for unique lists (hash lookup); linear for plain lists / strings.
   - `repeat with x in S ... end repeat` — iterates in insertion order; same scoping rules as list iteration.
   - **No random access**: `item N of S`, `last item of S`, `change item N of S to V` all → compile error mentioning "random access".
 - **Mutation statements**:
