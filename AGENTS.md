@@ -175,7 +175,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 - The default stdlib directory is resolved as `path.resolve(__dirname, '..', 'stdlib')` relative to `src/moduleLoader.ts`. In dev that's `<repo>/stdlib/`; when installed as a package, `stdlib/` ships as a sibling of `dist/` (listed in `package.json` `files`). Missing module file → standard `cannot find module "std:NAME"` error.
 - `loadProgram(entryPath, { stdlibDir })` accepts an override for tests.
 - Stdlib modules participate in the same module graph (cycle detection, export checks, mangling). Relative `use` from inside a stdlib module resolves against the stdlib file's own directory. Stdlib modules are keyed in the loader's registry by the synthetic string `std:<NAME>` rather than their absolute filesystem path; because `std:` cannot appear in an absolute path, collisions with a coincidentally-named user file are impossible.
-- Placeholder module lives at `stdlib/placeholder.chatter` as proof-of-life; real modules (starting with `strings.chatter`) are authored separately.
+- Placeholder module lives at `stdlib/placeholder.chatter` as proof-of-life. Real stdlib modules: `stdlib/strings.chatter` (e.g. `parse`), `stdlib/math.chatter` (`min`, `max`).
 
 **Not in v1 (deferred)**: `use X as Y` renaming, exporting `set`/`var`, package-style paths (no `./` or `../`), re-exports, dynamic imports, circular imports with partial-module semantics.
 

@@ -1,0 +1,6 @@
+use min, max from "std:math"
+set xs to list of 42
+min xs
+say it
+max xs
+say it
