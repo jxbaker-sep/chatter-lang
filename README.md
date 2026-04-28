@@ -67,7 +67,7 @@ Every feature comes from a conversation. The author describes intent (often with
 Features land in small, focused batches. Tests prove they work before we move on. Earlier choices aren't sacred — when `print` stopped fitting the language's voice, it was replaced with `say`. When `==` felt too mathematical, it was swapped for `is`.
 
 ### 10. Simpler now, smarter later
-Ship runtime type checks today, plan compile-time inference tomorrow. Ship strict `and`/`or` evaluation today, consider short-circuit later. Ship `number` as 32-bit integer, add fractions later. The language grows by answering questions it can answer; the rest waits.
+Ship runtime type checks today, plan compile-time inference tomorrow. Ship strict `and`/`or` evaluation today, consider short-circuit later. Ship `number` as a safe integer, add fractions later. The language grows by answering questions it can answer; the rest waits.
 
 ---
 
