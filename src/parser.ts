@@ -385,7 +385,9 @@ export function parse(tokens: Token[], source?: string): Program {
     // `change item EXPR of IDENT to EXPR` — list element assignment
     if (peek().type === 'KEYWORD' && peek().value === 'item') {
       advance(); // item
-      const index = parseExpression();
+      indexSlotDepth++;
+      let index: Expression;
+      try { index = parseExpression(); } finally { indexSlotDepth--; }
       consume('KEYWORD', 'of');
       const nameTok = consume('IDENT');
       consume('KEYWORD', 'to');
