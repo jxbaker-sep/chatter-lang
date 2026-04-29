@@ -1,0 +1,5 @@
+struct Box
+    boolean flag
+end struct
+constant bs is list of (make Box with flag true), (make Box with flag false)
+sort bs by flag of it

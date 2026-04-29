@@ -1,0 +1,11 @@
+struct Pair
+    string k
+    number n
+end struct
+# Sort first by n, then by k. With a stable sort, items with equal k retain n-order.
+constant ps is list of (make Pair with k "b", n 1), (make Pair with k "a", n 2), (make Pair with k "b", n 3), (make Pair with k "a", n 4)
+sort ps by n of it
+sort ps by k of it
+repeat with p in ps
+    say k of p, n of p
+end repeat

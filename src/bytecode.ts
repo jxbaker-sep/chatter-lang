@@ -71,6 +71,7 @@ export type InstructionKind =
   | { op: 'MAKE_STRUCT'; typeName: string; fieldNames: string[] }   // typeName is mangled
   | { op: 'STRUCT_GET'; fieldName: string }
   | { op: 'STRUCT_WITH'; fieldNames: string[] }
+  | { op: 'SORT_LIST'; byKey: boolean; descending: boolean }
   | { op: 'ERROR'; message: string };
 
 export type Instruction = InstructionKind & { loc?: SourceLocation };

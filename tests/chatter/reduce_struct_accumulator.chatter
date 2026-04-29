@@ -1,0 +1,7 @@
+struct Pair
+    number sum
+    number count
+end struct
+constant xs is list of 4, 1, 7, 2, 9, 3
+constant p is reduce xs starting (make Pair with sum 0, count 0) using accumulator with sum (sum of accumulator) + it , count (count of accumulator) + 1
+say sum of p, count of p

@@ -145,6 +145,9 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 ### Keywords reserved for dictionaries
 `dictionary`. The supporting words `value`, `keys`, `values` are **not** reserved — they remain valid identifiers and struct field names; the parser disambiguates contextually (see "Dictionaries (v1)" below).
 
+### Keywords reserved for higher-order list ops
+`sort`, `map`, `filter`, `reduce`, `using`, `where`, `starting`, `ascending`, `descending`, `accumulator`. See "Higher-order list operations (v1)" below.
+
 ### Modules (v1)
 One file = one module. The file path (normalized absolute) identifies the module; the entry file passed to the `chatter` CLI is module #1 and may `use` and/or `export` just like any other module.
 
@@ -367,6 +370,35 @@ A **dictionary** is a hash-backed key→value map spelled `dictionary from K to 
 - **Static type checker**: arithmetic / comparison / logical / `not` / `if` / `while` / bare-`expect` operands of known dictionary type → compile error (parallel to existing list / unique-list checks).
 - **Internal representation**: `ChatterDict = { kind:'dict'; keyType: string; valueType: string; items: Map<string, { key: ChatterValue; value: ChatterValue }> }`. Map key is `canonicalKey(userKey)`; the entry stores the original key object so `keys of D` returns the user-facing values, not canonicalized strings.
 
+### Higher-order list operations (v1)
+Built-in syntax — not library functions, not first-class. Each "Big Four" form takes an inline expression body where `it` rebinds to the current element (and `accumulator` rebinds inside `reduce`). Lowered by the compiler to existing index-based loops (mirrors `repeat with x in L`); `sort` uses one new bytecode op `SORT_LIST`. Nesting of HOF forms inside one another is **forbidden** in v1 (compile error: `cannot nest higher-order list operations`).
+
+- **`sort NAME [ascending|descending]`** — statement; sorts a `list of number` or `list of string` **in place**. Default direction is ascending. Stable. `NAME` must resolve to a mutable list reference (compile error if it's a readonly-param list, dictionary, or non-list type). Does NOT update `it`.
+- **`sort NAME by KEY [ascending|descending]`** — statement; sorts in place by an expression of `it` evaluated per element. `KEY` must statically be `number` or `string` (compile error otherwise). Stable. The key is evaluated **once per element** (decorate-sort-undecorate via a parallel keys list), so `KEY` can be expensive without quadratic blowup. Does NOT update `it`.
+- **`map LIST using BODY`** — expression; returns a fresh list whose elements are `BODY` evaluated with `it` bound to each element of `LIST`. `BODY`'s static type must be known at compile time and resolve to `number`, `string`, `boolean`, or a struct (compile error otherwise — runtime element-type inference is deferred to a later iteration).
+- **`filter LIST where PREDICATE`** — expression; returns a fresh list of the elements for which `PREDICATE` evaluates to `true`. Result element type = source list's element type. Statically-known non-boolean predicate → compile error (`'filter' predicate requires a boolean, got X`); unknown static type → runtime check via `EXPECT_BOOL_CHECK` (`expect requires a boolean, got X`).
+- **`reduce LIST starting V using BODY`** — expression; folds left. `accumulator` starts as `V`; for each element `BODY` is evaluated with `it` = current element and `accumulator` = running result, then the result of `BODY` becomes the new `accumulator`. Returns the final `accumulator`. `V` must be a number, string, boolean, or struct (compile error if it's a list/dict/etc.). Type-locking: the accumulator local is stored via `STORE_VAR`, so on first store it locks to the type of `V`; subsequent stores from `BODY` re-check (runtime error on mismatch). Empty source list → returns `V` unchanged.
+
+**`it` semantics inside HOF bodies**: `it` is rebound per iteration to the synthesized loop local. The outer-frame `it` is preserved (HOFs do not call `STORE_IT` for the per-iteration value). After the HOF expression evaluates, the surrounding statement's normal `it` semantics apply.
+
+**Function calls inside HOF bodies**: function calls are not parsed as plain expressions in Chatter — they require the `the result of f arg ...` precall form, which is only available in specific syntactic positions (constant/variable initializers, function-call expressions in argument position via the existing rules). Inside an HOF body the practical implication is that you can't call a user function directly via bare-name syntax; either inline the expression, or compute the result into a `constant` outside the HOF. (Folded into the v2 "expression-position calls" follow-up.)
+
+**Examples**:
+```
+sort numbers ascending
+sort numbers descending
+sort points by x of it
+constant doubled is map xs using it * 2
+constant evens is filter xs where it mod 2 is 0
+constant total is reduce xs starting 0 using accumulator + it
+constant joined is reduce words starting "" using accumulator & it
+```
+
+**`accumulator` keyword**: reserved; only valid inside a `reduce` body. Outside → compile error (`'accumulator' can only be used inside a reduce body`).
+
+**Internals**: each HOF form maintains its own per-iteration synthesized local (`_rep_hof_it_N`, `_rep_hof_acc_N`, etc., via `freshName`); the compiler maintains `hofItStack` / `hofAccStack` so `it` and `accumulator` resolve correctly through the static-type analyzer and the codegen path. Nested-HOF detection uses an `inHofBody` flag set by `compileHofLoop`'s body callback (the `staticType` analyzer also threads `it` through `MapExpression`/`FilterExpression`/`ReduceExpression` cases without compiling).
+
+
 ### Compile-time vs runtime checks
 - **Compile-time**: readonly enforcement, call-site arg/param type matching, readonly smuggling prevention, return-type matching (scalar and list kind/element/readonly), type-locked `variable` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
 - **Compile-time (operator/control-flow type checks, when operand types are statically known)**:
@@ -433,6 +465,7 @@ A **dictionary** is a hash-backed key→value map spelled `dictionary from K to 
 - `DICT_REMOVE` — pop key, pop dict, delete entry (silent if absent). Errors: non-dict, key type mismatch.
 - `DICT_KEYS` — pop dict, push fresh `unique list of K` in insertion order.
 - `DICT_VALUES` — pop dict, push fresh `list of V` in insertion order.
+- `SORT_LIST { byKey: boolean; descending: boolean }` — in-place stable sort. With `byKey=false`, pops a single list (element type must be number or string) and sorts it. With `byKey=true`, pops a parallel keys list and an items list; sorts items by the corresponding key (key list element type must be number or string). Stability via decorate-sort-undecorate over an indices array; pure values, no side effects, no return value pushed. Errors: non-list operand, unsupported element type.
 
 `ChatterValue = number | string | boolean | ChatterList`, where `ChatterList = { kind:'list'; element; items: ChatterValue[] }`. Readonly-ness is **never** stored at runtime — it's purely a compile-time property.
 
@@ -511,15 +544,7 @@ Existing golden cases:
 - **Maps**: delivered as `dictionary from K to V` (see "Dictionaries (v1)" above). Keys can be scalar or struct; values can be scalar or struct (no nested collections in v1). Reference-equality only; structural equality is future work. A readonly variant exists for parameter annotations.
 - **Sets**: delivered as `unique list of T` (see "Unique lists (v1)" above). A readonly variant is not yet supported.
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
-- **Higher-order list ops via `it`-block sugar**: deliver `sort` / `map` / `filter` / `reduce` as built-in syntax rather than library functions. Each takes an inline expression where `it` rebinds to the current element (and `accumulator` for reduce). This avoids first-class functions, closures, function types, and generics — staying consistent with HyperTalk's "no functions in expressions" feel. Sketch:
-  ```
-  sort numbers ascending
-  sort points by x of it                    # sort by key
-  constant doubled is map xs using it * 2
-  constant evens is filter xs where it mod 2 is 0
-  constant total is reduce xs starting 0 using accumulator + it
-  ```
-  Compiles to a desugared loop that re-binds `it` (and `accumulator` for reduce) per iteration. Polymorphic for free — expressions already type-check at use site, so `map points using x of it + y of it` works for any struct. Tradeoff: only the Big Four are first-class; users can't write custom HOFs (`partition`, `chunk_by`, etc.) without language-level extension. Open design questions: multi-statement transformer blocks (probably `using` + indented block + final expression), `accumulator` vs alternative magic name, sort with multiple keys (`sort points by x of it, then y of it`?), stability guarantee, ascending-by-default. Considered alternatives (named function references, anonymous lambdas + closures, typeclass-style Comparable, SQL-flavored field-only specialization) — the `it`-block path was chosen for being the smallest change that fully delivers the Big Four with maximal readability.
+- **Higher-order list ops via `it`-block sugar**: **delivered (v1)** — see "Higher-order list operations (v1)" above. `sort` / `map` / `filter` / `reduce` are built-in syntax with `it` rebound per iteration (and `accumulator` for reduce). Open follow-ups: multi-statement transformer blocks (probably `using` + indented block + final expression), sort with multiple keys (`sort points by x of it, then y of it`), runtime element-type inference for `map` (so the body's result type doesn't need to be statically known), nested-HOF support (currently rejected at compile time), and lifting the "no expression-position function calls" restriction inside HOF bodies (so `map xs using the result of f it` becomes natural).
 
 ### Natural follow-ups
 - **String operations (tier 3/4 deferred)**: case transforms (`uppercase/lowercase of`), trim, split/join, replace, index-of, starts-with/ends-with. Tiers 1+2 (concat `&`, `length of`, `contains`, `character N of`, `characters A to B of`, `last character of`) are **implemented**.

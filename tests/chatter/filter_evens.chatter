@@ -1,0 +1,3 @@
+constant xs is list of 1, 2, 3, 4, 5, 6
+constant evens is filter xs where it mod 2 is 0
+say evens

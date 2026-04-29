@@ -1,0 +1,5 @@
+constant a is list of 3, 1, 2
+constant b is a
+sort a
+say a
+say b

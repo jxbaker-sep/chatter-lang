@@ -1,0 +1,4 @@
+constant xs is empty list of number
+constant ys is map xs using it * 2
+say ys
+say length of ys

@@ -21,6 +21,7 @@ import {
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
   MakeStructExpression, FieldAccessExpression, StructWithExpression,
+  SortStatement, MapExpression, FilterExpression, ReduceExpression,
 } from './ast';
 
 function locOfToken(t: Token): SourceLocation {
@@ -50,6 +51,8 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'expect',
   'use', 'export',
   'struct', 'make',
+  'sort', 'map', 'filter', 'reduce',
+  'using', 'where', 'starting', 'ascending', 'descending', 'accumulator',
 ]);;
 
 // Keywords that legally begin an expression (see parsePrimary / parseLogicalNot).
@@ -66,6 +69,7 @@ const EXPRESSION_START_KEYWORDS = new Set([
   'dictionary',
   'lines',
   'make',
+  'map', 'filter', 'reduce',
 ]);
 
 function canStartExpression(tok: Token): boolean {
@@ -178,6 +182,7 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'expect':   return parseExpectStatement();
         case 'exit':     return parseExitRepeatStatement();
         case 'next':     return parseNextRepeatStatement();
+        case 'sort':     return parseSortStatement();
         default:
           throw new ParseError(`Unexpected keyword '${tok.value}'`, tok);
       }
@@ -1079,6 +1084,24 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'ReadFileStatement', path };
   }
 
+  // `sort EXPR [by KEY-EXPR] [ascending|descending]`
+  function parseSortStatement(): SortStatement {
+    consume('KEYWORD', 'sort');
+    const list = parseExpression();
+    let key: Expression | undefined;
+    if (peek().type === 'KEYWORD' && peek().value === 'by') {
+      advance();
+      key = parseExpression();
+    }
+    let descending = false;
+    if (peek().type === 'KEYWORD' && (peek().value === 'ascending' || peek().value === 'descending')) {
+      descending = peek().value === 'descending';
+      advance();
+    }
+    consumeNewline();
+    return { type: 'SortStatement', list, key, descending };
+  }
+
   // --- Expression parsing with precedence ---
 
   function parseExpression(): Expression {
@@ -1599,6 +1622,48 @@ export function parse(tokens: Token[], source?: string): Program {
         };
         withLoc(node, makeTok);
         return node;
+      }
+      if (tok.value === 'map' || tok.value === 'filter' || tok.value === 'reduce') {
+        const opTok = advance();
+        const list = parseExpression();
+        if (opTok.value === 'map') {
+          if (!(peek().type === 'KEYWORD' && peek().value === 'using')) {
+            throw new ParseError(`Expected 'using' after 'map EXPR'`, peek());
+          }
+          advance();
+          const body = parseExpression();
+          const node: MapExpression = { type: 'MapExpression', list, body };
+          withLoc(node, opTok);
+          return node;
+        }
+        if (opTok.value === 'filter') {
+          if (!(peek().type === 'KEYWORD' && peek().value === 'where')) {
+            throw new ParseError(`Expected 'where' after 'filter EXPR'`, peek());
+          }
+          advance();
+          const predicate = parseExpression();
+          const node: FilterExpression = { type: 'FilterExpression', list, predicate };
+          withLoc(node, opTok);
+          return node;
+        }
+        // reduce
+        if (!(peek().type === 'KEYWORD' && peek().value === 'starting')) {
+          throw new ParseError(`Expected 'starting' after 'reduce EXPR'`, peek());
+        }
+        advance();
+        const start = parseExpression();
+        if (!(peek().type === 'KEYWORD' && peek().value === 'using')) {
+          throw new ParseError(`Expected 'using' after 'reduce EXPR starting V'`, peek());
+        }
+        advance();
+        const body = parseExpression();
+        const node: ReduceExpression = { type: 'ReduceExpression', list, start, body };
+        withLoc(node, opTok);
+        return node;
+      }
+      if (tok.value === 'accumulator') {
+        advance();
+        return { type: 'IdentifierExpression', name: 'accumulator' } as IdentifierExpression;
       }
     }
 

@@ -1,0 +1,9 @@
+struct Person
+    string name
+    number age
+end struct
+constant ppl is list of (make Person with name "ann", age 30), (make Person with name "bob", age 17), (make Person with name "cas", age 22)
+constant adults is filter ppl where age of it is at least 18
+repeat with p in adults
+    say name of p
+end repeat

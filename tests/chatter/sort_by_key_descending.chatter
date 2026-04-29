@@ -1,0 +1,9 @@
+struct Item
+    string name
+    number price
+end struct
+constant items is list of (make Item with name "a", price 10), (make Item with name "b", price 30), (make Item with name "c", price 20)
+sort items by price of it descending
+repeat with i in items
+    say name of i
+end repeat

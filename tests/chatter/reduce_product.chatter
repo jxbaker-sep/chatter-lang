@@ -1,0 +1,3 @@
+constant xs is list of 1, 2, 3, 4
+constant p is reduce xs starting 1 using accumulator * it
+say p

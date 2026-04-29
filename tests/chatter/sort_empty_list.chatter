@@ -1,0 +1,5 @@
+constant xs is empty list of number
+sort xs
+say xs
+sort xs descending
+say xs

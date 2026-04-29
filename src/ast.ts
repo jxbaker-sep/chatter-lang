@@ -47,6 +47,9 @@ export type Expression = (
   | MakeStructExpression
   | FieldAccessExpression
   | StructWithExpression
+  | MapExpression
+  | FilterExpression
+  | ReduceExpression
 ) & Located;
 
 export interface EndIndexSentinel {
@@ -78,6 +81,7 @@ export type Statement = (
   | ExitRepeatStatement
   | NextRepeatStatement
   | StructDeclaration
+  | SortStatement
 ) & Located;
 
 export interface StructField {
@@ -392,5 +396,31 @@ export interface DictSetStatement {
   dictName: string;
   key: Expression;
   value: Expression;
+}
+
+export interface SortStatement {
+  type: 'SortStatement';
+  list: Expression;
+  key?: Expression;          // optional `by KEY` expression; uses `it` for current element
+  descending: boolean;
+}
+
+export interface MapExpression {
+  type: 'MapExpression';
+  list: Expression;
+  body: Expression;          // uses `it` for current element
+}
+
+export interface FilterExpression {
+  type: 'FilterExpression';
+  list: Expression;
+  predicate: Expression;
+}
+
+export interface ReduceExpression {
+  type: 'ReduceExpression';
+  list: Expression;
+  start: Expression;
+  body: Expression;
 }
 

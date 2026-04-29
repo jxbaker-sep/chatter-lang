@@ -1,0 +1,9 @@
+struct Point
+    number x
+    number y
+end struct
+constant ps is list of (make Point with x 3, y 9), (make Point with x 1, y 8), (make Point with x 2, y 7)
+sort ps by x of it
+repeat with p in ps
+    say x of p
+end repeat

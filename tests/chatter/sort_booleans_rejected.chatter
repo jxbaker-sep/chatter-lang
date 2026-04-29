@@ -1,0 +1,2 @@
+constant xs is list of true, false, true
+sort xs

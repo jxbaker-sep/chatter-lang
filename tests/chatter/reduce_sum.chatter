@@ -1,0 +1,3 @@
+constant xs is list of 1, 2, 3, 4, 5
+constant total is reduce xs starting 0 using accumulator + it
+say total

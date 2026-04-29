@@ -71,6 +71,10 @@
           "match": "\\b(with|from|to|in|by|of)\\b"
         },
         {
+          "name": "keyword.control.hof.chatter",
+          "match": "\\b(sort|map|filter|reduce|using|where|starting|ascending|descending|accumulator)\\b"
+        },
+        {
           "name": "storage.type.declaration.chatter",
           "match": "\\b(function|takes|returns|variable|constant|change|make|export|use)\\b"
         }

@@ -1,0 +1,3 @@
+constant xs is list of "banana", "apple", "cherry"
+sort xs
+say xs

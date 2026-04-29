@@ -17,6 +17,7 @@ import {
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
   MakeStructExpression, FieldAccessExpression, StructWithExpression,
+  SortStatement, MapExpression, FilterExpression, ReduceExpression,
 } from './ast';
 import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
 import { ChatterError, SourceLocation } from './errors';
@@ -170,6 +171,13 @@ export class Compiler {
     continueJumps: number[];
     exitJumps: number[];
   }> = [];
+
+  // Higher-order list operation context. The `it` and `accumulator` magic
+  // names rebind to a synthesized local while compiling a HOF body. We push
+  // on entering a HOF body and pop on exit. Nested HOFs are forbidden in v1.
+  private hofItStack: Array<{ local: string; type: ChatterType | undefined }> = [];
+  private hofAccStack: Array<{ local: string; type: ChatterType | undefined }> = [];
+  private inHofBody = false;
 
   private get currentLoc(): SourceLocation | undefined {
     return this.locStack[this.locStack.length - 1];
@@ -558,6 +566,9 @@ export class Compiler {
         frame.continueJumps.push(idx);
         break;
       }
+      case 'SortStatement':
+        this.compileSort(stmt, out, bindings);
+        break;
     }
   }
 
@@ -1670,6 +1681,15 @@ export class Compiler {
         this.emit(out, { op: 'PUSH_BOOL', value: expr.value });
         break;
       case 'IdentifierExpression':
+        if (expr.name === 'accumulator') {
+          if (this.hofAccStack.length === 0) {
+            throw new CompileError(
+              `'accumulator' can only be used inside a reduce body`,
+            this.currentLoc);
+          }
+          this.emit(out, { op: 'LOAD', name: this.hofAccStack[this.hofAccStack.length - 1].local });
+          break;
+        }
         if (this.functionReturnTypes.get(expr.name) === null) {
           throw new CompileError(
             `void function '${expr.name}' cannot be used as a value`,
@@ -1685,7 +1705,11 @@ export class Compiler {
         this.emit(out, { op: 'LOAD', name: expr.name });
         break;
       case 'ItExpression':
-        this.emit(out, { op: 'LOAD_IT' });
+        if (this.hofItStack.length > 0) {
+          this.emit(out, { op: 'LOAD', name: this.hofItStack[this.hofItStack.length - 1].local });
+        } else {
+          this.emit(out, { op: 'LOAD_IT' });
+        }
         break;
       case 'BinaryExpression':
         this.compileBinary(expr, out, bindings);
@@ -2072,6 +2096,334 @@ export class Compiler {
         this.emit(out, { op: 'STRUCT_WITH', fieldNames });
         break;
       }
+      case 'MapExpression':
+        this.compileMap(expr, out, bindings);
+        break;
+      case 'FilterExpression':
+        this.compileFilter(expr, out, bindings);
+        break;
+      case 'ReduceExpression':
+        this.compileReduce(expr, out, bindings);
+        break;
+    }
+  }
+
+  // Helper: extract the element type of a list/uniqueList ChatterType as a ChatterType.
+  private listElementType(lt: ChatterType | null): ChatterType | undefined {
+    if (!lt || (lt.kind !== 'list' && lt.kind !== 'uniqueList')) return undefined;
+    if (lt.element.startsWith('struct:')) return { kind: 'struct', mangled: lt.element.slice(7) };
+    return { kind: 'scalar', name: lt.element as ScalarTypeName };
+  }
+
+  // Push HOF body context (set inHofBody=true so nested HOFs are detected).
+  private withHofBody<T>(fn: () => T): T {
+    const prev = this.inHofBody;
+    this.inHofBody = true;
+    try { return fn(); } finally { this.inHofBody = prev; }
+  }
+
+  // Common loop scaffold: compile <expr.list> into a temp; iterate with idx;
+  // bind `it` to the current element; call `body` to emit the per-iteration body.
+  // Cleans up temps on exit. Returns names of created temps for the caller to
+  // emit additional DELETEs if needed.
+  private compileHofLoop(
+    listExpr: Expression,
+    elemType: ChatterType | undefined,
+    out: Instruction[],
+    bindings: Bindings,
+    body: (itLocal: string) => void,
+  ): { listTmp: string; idxTmp: string; lenTmp: string; itTmp: string } {
+    const listTmp = this.freshName('hof_list');
+    const idxTmp = this.freshName('hof_idx');
+    const lenTmp = this.freshName('hof_len');
+    const itTmp = this.freshName('hof_it');
+
+    this.compileExpr(listExpr, out, bindings);
+    this.emit(out, { op: 'STORE', name: listTmp });
+    this.emit(out, { op: 'LOAD', name: listTmp });
+    this.emit(out, { op: 'LENGTH' });
+    this.emit(out, { op: 'STORE', name: lenTmp });
+    this.emit(out, { op: 'PUSH_INT', value: 1 });
+    this.emit(out, { op: 'STORE', name: idxTmp });
+
+    const topIdx = out.length;
+    this.emit(out, { op: 'LOAD', name: idxTmp });
+    this.emit(out, { op: 'LOAD', name: lenTmp });
+    this.emit(out, { op: 'LE' });
+    const jifEndIdx = out.length;
+    this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
+
+    // Load current element into the synthesized `it` local.
+    this.emit(out, { op: 'LOAD', name: listTmp });
+    this.emit(out, { op: 'LOAD', name: idxTmp });
+    this.emit(out, { op: 'LIST_GET' });
+    this.emit(out, { op: 'STORE', name: itTmp });
+
+    this.hofItStack.push({ local: itTmp, type: elemType });
+    try {
+      this.withHofBody(() => body(itTmp));
+    } finally {
+      this.hofItStack.pop();
+    }
+
+    this.emit(out, { op: 'LOAD', name: idxTmp });
+    this.emit(out, { op: 'PUSH_INT', value: 1 });
+    this.emit(out, { op: 'ADD' });
+    this.emit(out, { op: 'STORE', name: idxTmp });
+    this.emit(out, { op: 'JUMP', target: topIdx });
+    const exitIdx = out.length;
+    (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = exitIdx;
+
+    this.emit(out, { op: 'DELETE', name: itTmp });
+    this.emit(out, { op: 'DELETE', name: idxTmp });
+    this.emit(out, { op: 'DELETE', name: lenTmp });
+    return { listTmp, idxTmp, lenTmp, itTmp };
+  }
+
+  private compileSort(
+    stmt: SortStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (this.inHofBody) {
+      throw new CompileError(
+        `cannot nest higher-order list operations`,
+      this.currentLoc);
+    }
+    const lt = this.staticType(stmt.list, bindings);
+    if (lt && lt.kind !== 'list') {
+      throw new CompileError(
+        `'sort' requires a list, got ${typeToString(lt)}`,
+      this.currentLoc);
+    }
+    const elemType = this.listElementType(lt);
+    // Without a key expression, the list element type itself must be number or string.
+    if (!stmt.key) {
+      if (lt && lt.kind === 'list') {
+        if (lt.element !== 'number' && lt.element !== 'string') {
+          throw new CompileError(
+            `'sort' without 'by KEY' requires a list of number or string, got ${typeToString(lt)}`,
+          this.currentLoc);
+        }
+      }
+      this.compileExpr(stmt.list, out, bindings);
+      this.emit(out, { op: 'SORT_LIST', byKey: false, descending: stmt.descending });
+      return;
+    }
+
+    // by KEY: build a parallel keys list, then sort items by keys.
+    // Determine key type statically.
+    this.hofItStack.push({ local: '__sort_key_probe__', type: elemType });
+    let keyType: ChatterType | null;
+    try {
+      keyType = this.withHofBody(() => this.staticType(stmt.key!, bindings));
+    } finally { this.hofItStack.pop(); }
+
+    if (keyType === null) {
+      throw new CompileError(
+        `cannot determine static type of 'sort by KEY' expression; consider using a typed function call`,
+      this.currentLoc);
+    }
+    if (keyType.kind !== 'scalar' || (keyType.name !== 'number' && keyType.name !== 'string')) {
+      throw new CompileError(
+        `'sort by KEY' requires KEY to be number or string, got ${typeToString(keyType)}`,
+      this.currentLoc);
+    }
+    const keysTmp = this.freshName('hof_keys');
+
+    // Compile source list once into listTmp (via compileHofLoop's listTmp).
+    // We want SORT_LIST to operate on the SAME list reference, so pass the
+    // *original* listTmp into SORT_LIST's stack.
+
+    // Pre-create the keys list.
+    this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: keyType.name });
+    this.emit(out, { op: 'STORE', name: keysTmp });
+
+    const tmps = this.compileHofLoop(stmt.list, elemType, out, bindings, (itLocal) => {
+      this.emit(out, { op: 'LOAD', name: keysTmp });
+      this.compileExpr(stmt.key!, out, bindings);
+      this.emit(out, { op: 'LIST_APPEND' });
+    });
+
+    this.emit(out, { op: 'LOAD', name: tmps.listTmp });
+    this.emit(out, { op: 'LOAD', name: keysTmp });
+    this.emit(out, { op: 'SORT_LIST', byKey: true, descending: stmt.descending });
+
+    this.emit(out, { op: 'DELETE', name: tmps.listTmp });
+    this.emit(out, { op: 'DELETE', name: keysTmp });
+  }
+
+  private compileMap(
+    expr: MapExpression,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (this.inHofBody) {
+      throw new CompileError(
+        `cannot nest higher-order list operations`,
+      this.currentLoc);
+    }
+    const lt = this.staticType(expr.list, bindings);
+    if (lt && lt.kind !== 'list' && lt.kind !== 'uniqueList') {
+      throw new CompileError(
+        `'map' requires a list, got ${typeToString(lt)}`,
+      this.currentLoc);
+    }
+    const elemType = this.listElementType(lt);
+
+    // Determine result element type via body's static type with `it` bound.
+    this.hofItStack.push({ local: '__map_probe__', type: elemType });
+    let resultElemType: ChatterType | null;
+    try {
+      resultElemType = this.withHofBody(() => this.staticType(expr.body, bindings));
+    } finally { this.hofItStack.pop(); }
+
+    if (resultElemType === null) {
+      throw new CompileError(
+        `cannot determine static type of 'map' body; consider using a typed function call or annotating the source list`,
+      this.currentLoc);
+    }
+    if (resultElemType.kind !== 'scalar' && resultElemType.kind !== 'struct') {
+      throw new CompileError(
+        `'map' body must produce a number, string, boolean, or struct, got ${typeToString(resultElemType)}`,
+      this.currentLoc);
+    }
+    const resCode = elementCode(resultElemType)!;
+    const resTmp = this.freshName('hof_res');
+
+    this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: resCode });
+    this.emit(out, { op: 'STORE', name: resTmp });
+
+    const tmps = this.compileHofLoop(expr.list, elemType, out, bindings, (itLocal) => {
+      this.emit(out, { op: 'LOAD', name: resTmp });
+      this.compileExpr(expr.body, out, bindings);
+      this.emit(out, { op: 'LIST_APPEND' });
+    });
+
+    this.emit(out, { op: 'LOAD', name: resTmp });
+    this.emit(out, { op: 'DELETE', name: tmps.listTmp });
+    this.emit(out, { op: 'DELETE', name: resTmp });
+  }
+
+  private compileFilter(
+    expr: FilterExpression,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (this.inHofBody) {
+      throw new CompileError(
+        `cannot nest higher-order list operations`,
+      this.currentLoc);
+    }
+    const lt = this.staticType(expr.list, bindings);
+    if (lt && lt.kind !== 'list' && lt.kind !== 'uniqueList') {
+      throw new CompileError(
+        `'filter' requires a list, got ${typeToString(lt)}`,
+      this.currentLoc);
+    }
+    const elemType = this.listElementType(lt);
+
+    // Static type check: predicate must be boolean (or unknown).
+    this.hofItStack.push({ local: '__filter_probe__', type: elemType });
+    let predType: ChatterType | null;
+    try {
+      predType = this.withHofBody(() => this.staticType(expr.predicate, bindings));
+    } finally { this.hofItStack.pop(); }
+
+    if (predType !== null && !(predType.kind === 'scalar' && predType.name === 'boolean')) {
+      throw new CompileError(
+        `'filter where' requires a boolean, got ${typeToString(predType)}`,
+      this.currentLoc);
+    }
+
+    // Result element type is source list element type (or 'number' fallback when unknown).
+    let resCode: string | null = null;
+    if (lt && (lt.kind === 'list' || lt.kind === 'uniqueList')) {
+      resCode = lt.element;
+    }
+    if (resCode === null) {
+      throw new CompileError(
+        `cannot determine static element type for 'filter'; annotate the source list`,
+      this.currentLoc);
+    }
+    const resTmp = this.freshName('hof_res');
+    this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: resCode });
+    this.emit(out, { op: 'STORE', name: resTmp });
+
+    const tmps = this.compileHofLoop(expr.list, elemType, out, bindings, (itLocal) => {
+      this.compileExpr(expr.predicate, out, bindings);
+      // Runtime guard: predicate must be boolean.
+      this.emit(out, { op: 'EXPECT_BOOL_CHECK' });
+      const jifSkip = out.length;
+      this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
+      this.emit(out, { op: 'LOAD', name: resTmp });
+      this.emit(out, { op: 'LOAD', name: itLocal });
+      this.emit(out, { op: 'LIST_APPEND' });
+      (out[jifSkip] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+    });
+
+    this.emit(out, { op: 'LOAD', name: resTmp });
+    this.emit(out, { op: 'DELETE', name: tmps.listTmp });
+    this.emit(out, { op: 'DELETE', name: resTmp });
+  }
+
+  private compileReduce(
+    expr: ReduceExpression,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (this.inHofBody) {
+      throw new CompileError(
+        `cannot nest higher-order list operations`,
+      this.currentLoc);
+    }
+    const lt = this.staticType(expr.list, bindings);
+    if (lt && lt.kind !== 'list' && lt.kind !== 'uniqueList') {
+      throw new CompileError(
+        `'reduce' requires a list, got ${typeToString(lt)}`,
+      this.currentLoc);
+    }
+    const elemType = this.listElementType(lt);
+    const startType = this.staticType(expr.start, bindings);
+    if (startType !== null && startType.kind !== 'scalar' && startType.kind !== 'struct') {
+      throw new CompileError(
+        `'reduce starting V' requires V to be a number, string, boolean, or struct, got ${typeToString(startType)}`,
+      this.currentLoc);
+    }
+    const accTmp = this.freshName('hof_acc');
+
+    // Static body type check vs start type.
+    this.hofItStack.push({ local: '__reduce_probe__', type: elemType });
+    this.hofAccStack.push({ local: accTmp, type: startType ?? undefined });
+    let bodyType: ChatterType | null;
+    try {
+      bodyType = this.withHofBody(() => this.staticType(expr.body, bindings));
+    } finally {
+      this.hofAccStack.pop();
+      this.hofItStack.pop();
+    }
+    if (startType !== null && bodyType !== null && !typesEqual(startType, bodyType)) {
+      throw new CompileError(
+        `'reduce' body type ${typeToString(bodyType)} does not match starting value type ${typeToString(startType)}`,
+      this.currentLoc);
+    }
+
+    // Initialize accumulator. STORE_VAR locks the type on first store.
+    this.compileExpr(expr.start, out, bindings);
+    this.emit(out, { op: 'STORE_VAR', name: accTmp });
+
+    // Iterate, evaluating body and re-storing into accumulator (re-checked).
+    this.hofAccStack.push({ local: accTmp, type: startType ?? bodyType ?? undefined });
+    try {
+      const tmps = this.compileHofLoop(expr.list, elemType, out, bindings, (itLocal) => {
+        this.compileExpr(expr.body, out, bindings);
+        this.emit(out, { op: 'STORE_VAR', name: accTmp });
+      });
+      this.emit(out, { op: 'LOAD', name: accTmp });
+      this.emit(out, { op: 'DELETE', name: tmps.listTmp });
+      this.emit(out, { op: 'DELETE', name: accTmp });
+    } finally {
+      this.hofAccStack.pop();
     }
   }
 
@@ -2423,6 +2775,9 @@ export class Compiler {
         return { kind: 'scalar', name: 'boolean' };
       }
       case 'IdentifierExpression': {
+        if (expr.name === 'accumulator' && this.hofAccStack.length > 0) {
+          return this.hofAccStack[this.hofAccStack.length - 1].type ?? null;
+        }
         const info = bindings.get(expr.name);
         return info?.type ?? null;
       }
@@ -2545,6 +2900,31 @@ export class Compiler {
       }
       case 'StructWithExpression':
         return this.staticType(expr.target, bindings);
+      case 'MapExpression': {
+        const lt = this.staticType(expr.list, bindings);
+        if (!lt || (lt.kind !== 'list' && lt.kind !== 'uniqueList')) return null;
+        const et = this.listElementType(lt);
+        this.hofItStack.push({ local: '__sttype__', type: et });
+        try {
+          const bt = this.staticType(expr.body, bindings);
+          if (!bt) return null;
+          const code = elementCode(bt);
+          if (code === null) return null;
+          return { kind: 'list', element: code, readonly: false };
+        } finally { this.hofItStack.pop(); }
+      }
+      case 'FilterExpression': {
+        const lt = this.staticType(expr.list, bindings);
+        if (!lt || (lt.kind !== 'list' && lt.kind !== 'uniqueList')) return null;
+        return { kind: 'list', element: lt.element, readonly: false };
+      }
+      case 'ReduceExpression':
+        return this.staticType(expr.start, bindings);
+      case 'ItExpression':
+        if (this.hofItStack.length > 0) {
+          return this.hofItStack[this.hofItStack.length - 1].type ?? null;
+        }
+        return null;
       default:
         return null;
     }

@@ -850,6 +850,69 @@ export class VM {
         break;
       }
 
+      case 'SORT_LIST': {
+        const desc = instr.descending;
+        if (instr.byKey) {
+          const keys = this.pop();
+          const list = this.pop();
+          if (!isList(list)) {
+            throw new RuntimeError(`Type mismatch: 'sort' target must be a list, got ${describe(list)}`, instr.loc);
+          }
+          if (!isList(keys)) {
+            throw new RuntimeError(`Type mismatch: sort keys must be a list, got ${describe(keys)}`, instr.loc);
+          }
+          if (keys.items.length !== list.items.length) {
+            throw new RuntimeError(`internal sort error: keys length mismatch`, instr.loc);
+          }
+          if (keys.element !== 'number' && keys.element !== 'string') {
+            throw new RuntimeError(`'sort by KEY' keys must be number or string, got ${keys.element}`, instr.loc);
+          }
+          // Build paired indices and stable-sort.
+          const n = list.items.length;
+          const indices: number[] = new Array(n);
+          for (let i = 0; i < n; i++) indices[i] = i;
+          const ks = keys.items;
+          indices.sort((a, b) => {
+            const ka = ks[a] as any;
+            const kb = ks[b] as any;
+            let c: number;
+            if (typeof ka === 'number' && typeof kb === 'number') c = ka - kb;
+            else c = String(ka) < String(kb) ? -1 : (String(ka) > String(kb) ? 1 : 0);
+            if (c === 0) return a - b;  // stability fallback (Array.sort already stable in ES2019+)
+            return desc ? -c : c;
+          });
+          const sorted = new Array(n);
+          for (let i = 0; i < n; i++) sorted[i] = list.items[indices[i]];
+          for (let i = 0; i < n; i++) list.items[i] = sorted[i];
+        } else {
+          const list = this.pop();
+          if (!isList(list)) {
+            throw new RuntimeError(`Type mismatch: 'sort' target must be a list, got ${describe(list)}`, instr.loc);
+          }
+          if (list.element !== 'number' && list.element !== 'string') {
+            throw new RuntimeError(`'sort' without 'by KEY' requires a list of number or string, got list of ${list.element}`, instr.loc);
+          }
+          const items = list.items;
+          // Decorate with original index for stability.
+          const n = items.length;
+          const indices: number[] = new Array(n);
+          for (let i = 0; i < n; i++) indices[i] = i;
+          indices.sort((a, b) => {
+            const va = items[a] as any;
+            const vb = items[b] as any;
+            let c: number;
+            if (typeof va === 'number' && typeof vb === 'number') c = va - vb;
+            else c = String(va) < String(vb) ? -1 : (String(va) > String(vb) ? 1 : 0);
+            if (c === 0) return a - b;
+            return desc ? -c : c;
+          });
+          const sorted = new Array(n);
+          for (let i = 0; i < n; i++) sorted[i] = items[indices[i]];
+          for (let i = 0; i < n; i++) items[i] = sorted[i];
+        }
+        break;
+      }
+
       case 'READ_FILE_LINES': {
         const path = this.pop();
         if (typeof path !== 'string') {

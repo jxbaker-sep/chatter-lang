@@ -36,6 +36,8 @@ const KEYWORDS = new Set([
   'expect',
   'use', 'export',
   'struct', 'make',
+  'sort', 'map', 'filter', 'reduce',
+  'using', 'where', 'starting', 'ascending', 'descending', 'accumulator',
 ]);
 const TYPES = new Set(['number', 'boolean', 'string']);
 

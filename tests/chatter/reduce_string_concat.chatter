@@ -1,0 +1,3 @@
+constant words is list of "hello", " ", "world"
+constant s is reduce words starting "" using accumulator & it
+say s

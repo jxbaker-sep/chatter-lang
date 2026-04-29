@@ -1,0 +1,7 @@
+struct Point
+    number x
+    number y
+end struct
+constant ps is list of (make Point with x 1, y 2), (make Point with x 3, y 4), (make Point with x 5, y 6)
+constant xs is map ps using x of it
+say xs

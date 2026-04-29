@@ -1,0 +1,2 @@
+constant x is accumulator + 1
+say x
