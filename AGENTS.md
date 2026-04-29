@@ -511,6 +511,15 @@ Existing golden cases:
 - **Maps**: delivered as `dictionary from K to V` (see "Dictionaries (v1)" above). Keys can be scalar or struct; values can be scalar or struct (no nested collections in v1). Reference-equality only; structural equality is future work. A readonly variant exists for parameter annotations.
 - **Sets**: delivered as `unique list of T` (see "Unique lists (v1)" above). A readonly variant is not yet supported.
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
+- **Higher-order list ops via `it`-block sugar**: deliver `sort` / `map` / `filter` / `reduce` as built-in syntax rather than library functions. Each takes an inline expression where `it` rebinds to the current element (and `accumulator` for reduce). This avoids first-class functions, closures, function types, and generics — staying consistent with HyperTalk's "no functions in expressions" feel. Sketch:
+  ```
+  sort numbers ascending
+  sort points by x of it                    # sort by key
+  constant doubled is map xs using it * 2
+  constant evens is filter xs where it mod 2 is 0
+  constant total is reduce xs starting 0 using accumulator + it
+  ```
+  Compiles to a desugared loop that re-binds `it` (and `accumulator` for reduce) per iteration. Polymorphic for free — expressions already type-check at use site, so `map points using x of it + y of it` works for any struct. Tradeoff: only the Big Four are first-class; users can't write custom HOFs (`partition`, `chunk_by`, etc.) without language-level extension. Open design questions: multi-statement transformer blocks (probably `using` + indented block + final expression), `accumulator` vs alternative magic name, sort with multiple keys (`sort points by x of it, then y of it`?), stability guarantee, ascending-by-default. Considered alternatives (named function references, anonymous lambdas + closures, typeclass-style Comparable, SQL-flavored field-only specialization) — the `it`-block path was chosen for being the smallest change that fully delivers the Big Four with maximal readability.
 
 ### Natural follow-ups
 - **String operations (tier 3/4 deferred)**: case transforms (`uppercase/lowercase of`), trim, split/join, replace, index-of, starts-with/ends-with. Tiers 1+2 (concat `&`, `length of`, `contains`, `character N of`, `characters A to B of`, `last character of`) are **implemented**.
