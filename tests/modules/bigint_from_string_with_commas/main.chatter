@@ -1,0 +1,5 @@
+use bigint_from_string, bigint_to_string from "std:bigint"
+
+bigint_from_string "1,234"
+bigint_to_string it
+say it

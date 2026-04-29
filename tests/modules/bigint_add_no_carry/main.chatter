@@ -1,8 +1,10 @@
-use BigInt, bigint_add, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_add, bigint_to_string from "std:bigint"
 
 # 12 + 7 = 19 — no carry on any column.
-constant a is make BigInt with Digits list of 2, 1
-constant b is make BigInt with Digits list of 7
+bigint_from_number 12
+constant a is it
+bigint_from_number 7
+constant b is it
 bigint_add a to b
 bigint_to_string it
 say it

@@ -1,6 +1,6 @@
-use BigInt, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_to_string from "std:bigint"
 
 # Nine-digit value 123,456,789 — three full groups, no leftover lead.
-constant n is make BigInt with Digits list of 9, 8, 7, 6, 5, 4, 3, 2, 1
-bigint_to_string n
+bigint_from_number 123456789
+bigint_to_string it
 say it

@@ -1,0 +1,4 @@
+use bigint_from_string from "std:bigint"
+
+# BigInt is unsigned in v1; the leading minus is rejected as a non-digit.
+bigint_from_string "-5"

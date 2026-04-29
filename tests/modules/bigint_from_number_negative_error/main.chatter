@@ -1,0 +1,4 @@
+use bigint_from_number from "std:bigint"
+
+# BigInt is unsigned in v1; negative input must error.
+bigint_from_number -5

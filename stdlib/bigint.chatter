@@ -4,6 +4,38 @@ export struct BigInt
   list of number Digits
 end struct
 
+export function bigint_from_string takes string value returns struct BigInt is
+  constant digits is empty list of number
+  repeat with i from 1 to the length of value
+    constant c is character (length of value - i + 1) of value
+    if c is ","
+      next repeat
+    else if c is a digit
+      constant code is code of c
+      append code - code of "0" to digits
+    else
+      expect false, "expected a string representing an number, got " & value
+    end if
+  end repeat
+  return make BigInt with Digits digits
+end function
+
+export function bigint_from_number takes number value returns struct BigInt is
+  expect value to be at least 0, "bigint_from_number only takes non-negative numbers"
+  constant digits is empty list of number
+  variable current is value
+  if current is 0
+    append 0 to digits
+  else
+    repeat while current is at least 1
+      constant digit is current mod 10
+      append digit to digits
+      divide current by 10
+    end repeat
+  end if
+  return make BigInt with Digits digits
+end function
+
 export function bigint_add takes struct BigInt lhs to struct BigInt rhs returns struct BigInt is
   constant result is empty list of number
   constant biggest_digit is the result of max list of the length of Digits of lhs, the length of Digits of rhs

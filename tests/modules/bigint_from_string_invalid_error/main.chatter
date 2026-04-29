@@ -1,0 +1,3 @@
+use bigint_from_string from "std:bigint"
+
+bigint_from_string "abc"

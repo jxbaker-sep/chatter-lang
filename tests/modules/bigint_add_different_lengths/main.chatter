@@ -1,8 +1,10 @@
-use BigInt, bigint_add, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_add, bigint_to_string from "std:bigint"
 
 # 1234 + 5 = 1239 — operands of different lengths.
-constant a is make BigInt with Digits list of 4, 3, 2, 1
-constant b is make BigInt with Digits list of 5
+bigint_from_number 1234
+constant a is it
+bigint_from_number 5
+constant b is it
 bigint_add a to b
 bigint_to_string it
 say it

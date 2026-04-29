@@ -1,0 +1,11 @@
+use bigint_from_string, bigint_from_number, bigint_add, bigint_to_string from "std:bigint"
+
+# 999 (from string) + 1 (from number) = 1,000 — proves both constructors
+# produce values that interoperate with bigint_add.
+bigint_from_string "999"
+constant a is it
+bigint_from_number 1
+constant b is it
+bigint_add a to b
+bigint_to_string it
+say it

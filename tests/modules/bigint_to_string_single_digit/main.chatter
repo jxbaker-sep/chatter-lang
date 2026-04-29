@@ -1,6 +1,6 @@
-use BigInt, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_to_string from "std:bigint"
 
 # Single-digit value 7.
-constant n is make BigInt with Digits list of 7
-bigint_to_string n
+bigint_from_number 7
+bigint_to_string it
 say it

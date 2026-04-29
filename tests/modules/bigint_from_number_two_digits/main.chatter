@@ -1,6 +1,5 @@
 use bigint_from_number, bigint_to_string from "std:bigint"
 
-# Four-digit value 1000 — first comma boundary.
-bigint_from_number 1000
+bigint_from_number 42
 bigint_to_string it
 say it

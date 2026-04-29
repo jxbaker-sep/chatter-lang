@@ -1,7 +1,6 @@
-use BigInt, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_to_string from "std:bigint"
 
 # Three-digit value 123 — no comma needed.
-# Digits stored least-significant-first, so 123 = [3, 2, 1].
-constant n is make BigInt with Digits list of 3, 2, 1
-bigint_to_string n
+bigint_from_number 123
+bigint_to_string it
 say it

@@ -1,6 +1,6 @@
 use bigint_from_number, bigint_to_string from "std:bigint"
 
-# Four-digit value 1000 — first comma boundary.
-bigint_from_number 1000
+# Multi-group number — exercises comma insertion.
+bigint_from_number 123456789
 bigint_to_string it
 say it

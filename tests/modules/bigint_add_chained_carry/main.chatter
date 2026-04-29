@@ -1,9 +1,11 @@
-use BigInt, bigint_add, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_add, bigint_to_string from "std:bigint"
 
 # 999 + 1 = 1,000 — carry propagates through all three columns and grows
 # the result by one digit.
-constant a is make BigInt with Digits list of 9, 9, 9
-constant b is make BigInt with Digits list of 1
+bigint_from_number 999
+constant a is it
+bigint_from_number 1
+constant b is it
 bigint_add a to b
 bigint_to_string it
 say it

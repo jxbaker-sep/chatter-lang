@@ -1,9 +1,11 @@
-use BigInt, bigint_add, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_add, bigint_to_string from "std:bigint"
 
 # 5 + 5 = 10 — column sum is exactly ten.
 # Regression guard for the `is at least 10` (>=) carry threshold.
-constant a is make BigInt with Digits list of 5
-constant b is make BigInt with Digits list of 5
+bigint_from_number 5
+constant a is it
+bigint_from_number 5
+constant b is it
 bigint_add a to b
 bigint_to_string it
 say it
