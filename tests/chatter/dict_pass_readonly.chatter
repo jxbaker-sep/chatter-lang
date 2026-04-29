@@ -1,0 +1,7 @@
+function describeDict takes readonly dictionary from string to number m is
+    say length of m
+    say m contains "a"
+end function
+
+constant d is dictionary "a" to 1, "b" to 2
+describeDict d

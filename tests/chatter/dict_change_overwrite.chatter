@@ -1,0 +1,4 @@
+variable d is dictionary "a" to 1, "b" to 2
+change value of "a" in d to 99
+say d
+say value of "a" in d

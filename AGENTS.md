@@ -140,7 +140,10 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 `read`, `file`, `lines`. See "File I/O" below.
 
 ### Keywords reserved for modules
-`use`, `from`, `export`. See "Modules (v1)" below. (`from` is also reused by the `subtract X from Y` form.)
+`use`, `from`, `export`. See "Modules (v1)" below. (`from` is also reused by the `subtract X from Y` form and the `dictionary from K to V` type spelling.)
+
+### Keywords reserved for dictionaries
+`dictionary`. The supporting words `value`, `keys`, `values` are **not** reserved — they remain valid identifiers and struct field names; the parser disambiguates contextually (see "Dictionaries (v1)" below).
 
 ### Modules (v1)
 One file = one module. The file path (normalized absolute) identifies the module; the entry file passed to the `chatter` CLI is module #1 and may `use` and/or `export` just like any other module.
@@ -324,6 +327,46 @@ end struct
 
 **Out of scope (v2+)**: methods/dispatch, pattern matching/destructuring, optional fields/defaults, anonymous struct literals, mutation, recursive struct types (would require nullable/option types).
 
+### Dictionaries (v1)
+A **dictionary** is a hash-backed key→value map spelled `dictionary from K to V`. Like lists and unique lists, dictionaries are mutable references; assignment, parameter passing, and returning all alias the same underlying storage. Iteration yields entries in insertion order (first-set-wins; overwriting a key keeps its original position).
+
+- **Type spelling**: `dictionary from K to V`.
+  - K: scalar (`number` / `string` / `boolean`) or struct type — anything `canonicalKey` handles.
+  - V: scalar or struct. **No nested collections** in v1 — `dictionary from string to list of T`, `dictionary from string to dictionary from …`, `list of dictionary …`, etc. all → parse error (mirrors the no-nested-lists rule).
+  - `readonly dictionary from K to V` is a parameter-only marker (same rules as `readonly list of T`): legal only in param annotations; rejected as `constant`/`variable` annotation, return type, or struct field type.
+- **Literals**:
+  - `empty dictionary from K to V` — empty literal; both types required.
+  - `dictionary K1 to V1, K2 to V2, ...` — nonempty literal. All keys share one type, all values share one type. Duplicate keys at literal-creation time **silently keep the last** (not the first — matches the natural left-to-right `change value of … to …` semantics).
+- **Read ops (expressions)** — polymorphic where noted:
+  - `value of KEY in D` — returns the value bound to `KEY`. **Runtime error if KEY is missing** (parallel to list OOB). Compile error when `KEY`'s static type doesn't match the dict's key type.
+  - `D contains KEY` — boolean. Polymorphic with list / unique list / string. **O(1)** for dictionaries (hash lookup).
+  - `length of D` — entry count. Polymorphic with list / unique list / string.
+  - `D is empty` / `D is not empty` — polymorphic with list / unique list / string.
+  - `keys of D` — returns a fresh `unique list of K` (keys are unique by construction). Insertion order preserved.
+  - `values of D` — returns a fresh `list of V`. Iteration order matches `keys of D`.
+- **Mutation statements**:
+  - `change value of KEY in D to VALUE` — insert (if `KEY` is new) or overwrite (if present). Compile error on key/value type mismatch when statically known; runtime error otherwise. Targets a `constant`-bound dict fine (the binding is immutable; the dict it points to is mutable through aliases — same rule as lists).
+  - `remove KEY from D` — removes the entry with key `KEY`. **Silent no-op if absent** (matches `remove ITEM from S` for unique lists). Compile error / runtime error on key type mismatch.
+  - Neither updates `it`.
+- **Iteration**: no special form. Use `repeat with k in keys of D ... end repeat` and `value of k in D` inside.
+- **Disambiguation rules** — `value`, `keys`, `values` are NOT reserved words; they remain valid identifiers and struct field names. The parser disambiguates by shape:
+  - `value of EXPR1 in EXPR2` → dict lookup (the trailing `in` is the unique signal).
+  - `value of EXPR` (no `in`) → ordinary field access on a struct field named `value`.
+  - `keys of EXPR` / `values of EXPR` → parse as field access; the compiler lowers to `DICT_KEYS` / `DICT_VALUES` when `EXPR`'s static type is a dictionary, or to struct-field access when it's a struct with that field. Mismatch → compile error.
+- **Equality** (`is` / `is not`): **reference equality** in v1 (same instance only). Matches the existing list reference-equality wart; structural equality for dicts is future work.
+- **Type compatibility**: dictionaries are a distinct kind. `list of T` / `unique list of T` cannot be passed where a dictionary is expected, and vice versa.
+- **Readonly enforcement** (compile-time):
+  - `change value of KEY in P to VALUE` and `remove KEY from P` against a readonly-param dict → compile error.
+  - Binding/returning a readonly-param dict (`constant x is p`, `variable x is p`, `change v to p`, `return p` from a typed function) → compile error.
+  - Call-site widening: `dictionary from K to V` arg → `readonly dictionary from K to V` param OK; reverse rejected.
+- **Reference semantics & aliasing**: identical to lists / unique lists.
+- **Iteration during mutation**: undefined.
+- **Formatting**: round-trippable with the literal grammar.
+  - Empty: `empty dictionary from string to number`.
+  - Non-empty: `dictionary "alice" to 30, "bob" to 25` (string keys/values quoted; numbers/booleans bare; nested structs recursively formatted).
+- **Static type checker**: arithmetic / comparison / logical / `not` / `if` / `while` / bare-`expect` operands of known dictionary type → compile error (parallel to existing list / unique-list checks).
+- **Internal representation**: `ChatterDict = { kind:'dict'; keyType: string; valueType: string; items: Map<string, { key: ChatterValue; value: ChatterValue }> }`. Map key is `canonicalKey(userKey)`; the entry stores the original key object so `keys of D` returns the user-facing values, not canonicalized strings.
+
 ### Compile-time vs runtime checks
 - **Compile-time**: readonly enforcement, call-site arg/param type matching, readonly smuggling prevention, return-type matching (scalar and list kind/element/readonly), type-locked `variable` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
 - **Compile-time (operator/control-flow type checks, when operand types are statically known)**:
@@ -382,7 +425,14 @@ end struct
 - `CHAR_CODE` — pop string, push Unicode code point (number). Errors: non-string, empty, or more than one code point (`code of requires a single character, got "..."`).
 - `CHAR_FROM_CODE` — pop number, push one-code-point string via `String.fromCodePoint`. Errors: non-number, non-integer, `< 0` or `> 0x10FFFF`, or in surrogate range `0xD800..0xDFFF`.
 - `IS_DIGIT` / `IS_LETTER` / `IS_WHITESPACE` — pop string, push boolean. Ranges are ASCII-only: `0-9`, `A-Za-z`, and `{space, tab, LF, CR}` respectively. Errors: non-string, empty, or multi-code-point (same check as `CHAR_CODE`).
-- `IS_EMPTY` — pop string or list, push boolean (`length === 0`). Runtime error on any other type (`Type mismatch: 'is empty' requires a string or list, got X`).
+- `IS_EMPTY` — pop string, list, or dictionary, push boolean (`length === 0`). Runtime error on any other type (`Type mismatch: 'is empty' requires a string, list, or dictionary, got X`).
+- `MAKE_DICT { count, keyType, valueType }` — pops `2*count` values (k1, v1, k2, v2, ...), pushes a fresh `ChatterDict`. Duplicate keys at construction silently keep the last.
+- `MAKE_EMPTY_DICT { keyType, valueType }` — push fresh empty dictionary.
+- `DICT_GET` — pop key, pop dict, push value. Errors: non-dict, key type mismatch, key not present.
+- `DICT_SET` — pop value, pop key, pop dict, mutate (insert or overwrite). Errors: non-dict, key type mismatch, value type mismatch.
+- `DICT_REMOVE` — pop key, pop dict, delete entry (silent if absent). Errors: non-dict, key type mismatch.
+- `DICT_KEYS` — pop dict, push fresh `unique list of K` in insertion order.
+- `DICT_VALUES` — pop dict, push fresh `list of V` in insertion order.
 
 `ChatterValue = number | string | boolean | ChatterList`, where `ChatterList = { kind:'list'; element; items: ChatterValue[] }`. Readonly-ness is **never** stored at runtime — it's purely a compile-time property.
 
@@ -458,7 +508,7 @@ Existing golden cases:
 - **Fractional numbers**: planned. `number` is currently integer-only (safe range ±(2^53 − 1)).
 - **Loop extensions (deferred)**: reverse direction (`down to`), `repeat until cond`. Base `repeat` loops (times / range / while / with-in) and the `by STEP` clause on range-form are implemented; early exit (`exit repeat` / `next repeat`) is implemented.
 - **Chatter-native test framework**: write tests in Chatter (`assert x is 10`) once assertions exist.
-- **Maps**: independent built-in key-value type. Mutable. Also need a read-only variant.
+- **Maps**: delivered as `dictionary from K to V` (see "Dictionaries (v1)" above). Keys can be scalar or struct; values can be scalar or struct (no nested collections in v1). Reference-equality only; structural equality is future work. A readonly variant exists for parameter annotations.
 - **Sets**: delivered as `unique list of T` (see "Unique lists (v1)" above). A readonly variant is not yet supported.
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
 

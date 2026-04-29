@@ -1,0 +1,4 @@
+constant d is empty dictionary from string to number
+say d
+say length of d
+say d is empty

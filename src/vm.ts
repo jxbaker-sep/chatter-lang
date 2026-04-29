@@ -28,7 +28,14 @@ export interface ChatterStruct {
   fields: Map<string, ChatterValue>;  // insertion order = declaration order
 }
 
-export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct;
+export interface ChatterDict {
+  kind: 'dict';
+  keyType: string;              // 'number'|'string'|'boolean'|'struct:<mangled>'
+  valueType: string;            // same encoding
+  items: Map<string, { key: ChatterValue; value: ChatterValue }>;  // canonicalKey -> entry
+}
+
+export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct | ChatterDict;
 
 function isList(v: ChatterValue): v is ChatterList {
   return typeof v === 'object' && v !== null && (v as any).kind === 'list';
@@ -40,6 +47,10 @@ function isUniqueList(v: ChatterValue): v is ChatterUniqueList {
 
 function isStruct(v: ChatterValue): v is ChatterStruct {
   return typeof v === 'object' && v !== null && (v as any).kind === 'struct';
+}
+
+function isDict(v: ChatterValue): v is ChatterDict {
+  return typeof v === 'object' && v !== null && (v as any).kind === 'dict';
 }
 
 function isAnyList(v: ChatterValue): v is ChatterList | ChatterUniqueList {
@@ -83,6 +94,7 @@ function unmangleStructName(mangled: string): string {
 function valueElementCode(v: ChatterValue): string | null {
   if (isStruct(v)) return 'struct:' + v.typeName;
   if (isAnyList(v)) return null;  // lists never appear as elements (nested lists rejected)
+  if (isDict(v)) return null;     // dicts never appear as elements
   return typeof v as string;
 }
 
@@ -95,6 +107,7 @@ function describe(v: ChatterValue): string {
   if (isStruct(v)) return 'struct ' + unmangleStructName(v.typeName);
   if (isUniqueList(v)) return 'unique list of ' + elementCodeToHuman(v.element);
   if (isList(v)) return 'list of ' + elementCodeToHuman(v.element);
+  if (isDict(v)) return 'dictionary from ' + elementCodeToHuman(v.keyType) + ' to ' + elementCodeToHuman(v.valueType);
   return typeof v;
 }
 
@@ -128,7 +141,7 @@ function formatValue(v: ChatterValue): string {
   }
   if (isUniqueList(v)) {
     return '[' + uniqueListValues(v).map(e => {
-      if (isAnyList(e)) return formatValue(e);
+      if (isAnyList(e) || isDict(e)) return formatValue(e);
       if (isStruct(e)) return formatValue(e);
       if (typeof e === 'string') return `"${e}"`;
       return formatScalar(e);
@@ -136,11 +149,26 @@ function formatValue(v: ChatterValue): string {
   }
   if (isList(v)) {
     return '[' + v.items.map(e => {
-      if (isAnyList(e)) return formatValue(e);
+      if (isAnyList(e) || isDict(e)) return formatValue(e);
       if (isStruct(e)) return formatValue(e);
       if (typeof e === 'string') return `"${e}"`;
       return formatScalar(e);
     }).join(', ') + ']';
+  }
+  if (isDict(v)) {
+    if (v.items.size === 0) {
+      return 'empty dictionary from ' + elementCodeToHuman(v.keyType) + ' to ' + elementCodeToHuman(v.valueType);
+    }
+    const fmt = (e: ChatterValue): string => {
+      if (isAnyList(e) || isStruct(e) || isDict(e)) return formatValue(e);
+      if (typeof e === 'string') return `"${e}"`;
+      return formatScalar(e);
+    };
+    const parts: string[] = [];
+    for (const entry of v.items.values()) {
+      parts.push(fmt(entry.key) + ' to ' + fmt(entry.value));
+    }
+    return 'dictionary ' + parts.join(', ');
   }
   return formatScalar(v);
 }
@@ -233,6 +261,7 @@ export class VM {
         if (isStruct(val)) valType = 'struct:' + val.typeName;
         else if (isUniqueList(val)) valType = `uniqueList:${val.element}`;
         else if (isList(val)) valType = `list:${val.element}`;
+        else if (isDict(val)) valType = `dict:${val.keyType}:${val.valueType}`;
         else valType = typeof val as string;
         const existing = frame.varTypes.get(instr.name);
         if (existing === undefined) {
@@ -655,11 +684,15 @@ export class VM {
           this.stack.push(v.items.length);
           break;
         }
+        if (isDict(v)) {
+          this.stack.push(v.items.size);
+          break;
+        }
         if (typeof v === 'string') {
           this.stack.push(v.length);
           break;
         }
-        throw new RuntimeError(`Type mismatch: 'length of X' requires a list or string, got ${describe(v)}`, instr.loc);
+        throw new RuntimeError(`Type mismatch: 'length of X' requires a list, dictionary, or string, got ${describe(v)}`, instr.loc);
       }
 
       case 'CONTAINS': {
@@ -674,8 +707,17 @@ export class VM {
           this.stack.push(left.includes(value));
           break;
         }
+        if (isDict(left)) {
+          if (isAnyList(value) || isDict(value) || valueElementCode(value) !== left.keyType) {
+            throw new RuntimeError(
+              `Type mismatch: 'contains' key type ${describe(value)} does not match dictionary key type ${elementCodeToHuman(left.keyType)}`,
+            instr.loc);
+          }
+          this.stack.push(left.items.has(canonicalKey(value)));
+          break;
+        }
         if (!isAnyList(left)) {
-          throw new RuntimeError(`Type mismatch: 'contains' requires a list or string on the left, got ${describe(left)}`, instr.loc);
+          throw new RuntimeError(`Type mismatch: 'contains' requires a list, dictionary, or string on the left, got ${describe(left)}`, instr.loc);
         }
         if (isAnyList(value) || valueElementCode(value) !== left.element) {
           throw new RuntimeError(
@@ -912,8 +954,127 @@ export class VM {
           this.stack.push(v.items.length === 0);
           break;
         }
+        if (isDict(v)) {
+          this.stack.push(v.items.size === 0);
+          break;
+        }
         throw new RuntimeError(
-          `Type mismatch: 'is empty' requires a string or list, got ${describe(v)}`, instr.loc);
+          `Type mismatch: 'is empty' requires a string, list, or dictionary, got ${describe(v)}`, instr.loc);
+      }
+
+      case 'MAKE_DICT': {
+        const entries: { key: ChatterValue; value: ChatterValue }[] = new Array(instr.count);
+        for (let i = instr.count - 1; i >= 0; i--) {
+          const value = this.pop();
+          const key = this.pop();
+          entries[i] = { key, value };
+        }
+        const items = new Map<string, { key: ChatterValue; value: ChatterValue }>();
+        for (const e of entries) {
+          if (isAnyList(e.key) || isDict(e.key) || valueElementCode(e.key) !== instr.keyType) {
+            throw new RuntimeError(
+              `Type mismatch: dictionary key has type ${describe(e.key)}, expected ${elementCodeToHuman(instr.keyType)}`,
+            instr.loc);
+          }
+          if (isAnyList(e.value) || isDict(e.value) || valueElementCode(e.value) !== instr.valueType) {
+            throw new RuntimeError(
+              `Type mismatch: dictionary value has type ${describe(e.value)}, expected ${elementCodeToHuman(instr.valueType)}`,
+            instr.loc);
+          }
+          items.set(canonicalKey(e.key), e);
+        }
+        const d: ChatterDict = { kind: 'dict', keyType: instr.keyType, valueType: instr.valueType, items };
+        this.stack.push(d);
+        break;
+      }
+
+      case 'MAKE_EMPTY_DICT': {
+        const d: ChatterDict = { kind: 'dict', keyType: instr.keyType, valueType: instr.valueType, items: new Map() };
+        this.stack.push(d);
+        break;
+      }
+
+      case 'DICT_GET': {
+        const key = this.pop();
+        const dict = this.pop();
+        if (!isDict(dict)) {
+          throw new RuntimeError(`Type mismatch: 'value of K in X' requires a dictionary, got ${describe(dict)}`, instr.loc);
+        }
+        if (isAnyList(key) || isDict(key) || valueElementCode(key) !== dict.keyType) {
+          throw new RuntimeError(
+            `Type mismatch: dictionary key has type ${describe(key)}, expected ${elementCodeToHuman(dict.keyType)}`,
+          instr.loc);
+        }
+        const entry = dict.items.get(canonicalKey(key));
+        if (entry === undefined) {
+          throw new RuntimeError(`Key not found in dictionary`, instr.loc);
+        }
+        this.stack.push(entry.value);
+        break;
+      }
+
+      case 'DICT_SET': {
+        const value = this.pop();
+        const key = this.pop();
+        const dict = this.pop();
+        if (!isDict(dict)) {
+          throw new RuntimeError(`Type mismatch: 'change value of K in X' requires a dictionary, got ${describe(dict)}`, instr.loc);
+        }
+        if (isAnyList(key) || isDict(key) || valueElementCode(key) !== dict.keyType) {
+          throw new RuntimeError(
+            `Type mismatch: dictionary key has type ${describe(key)}, expected ${elementCodeToHuman(dict.keyType)}`,
+          instr.loc);
+        }
+        if (isAnyList(value) || isDict(value) || valueElementCode(value) !== dict.valueType) {
+          throw new RuntimeError(
+            `Type mismatch: dictionary value has type ${describe(value)}, expected ${elementCodeToHuman(dict.valueType)}`,
+          instr.loc);
+        }
+        dict.items.set(canonicalKey(key), { key, value });
+        break;
+      }
+
+      case 'DICT_REMOVE': {
+        const key = this.pop();
+        const dict = this.pop();
+        if (!isDict(dict)) {
+          throw new RuntimeError(`Type mismatch: 'remove K from X' requires a dictionary, got ${describe(dict)}`, instr.loc);
+        }
+        if (isAnyList(key) || isDict(key) || valueElementCode(key) !== dict.keyType) {
+          throw new RuntimeError(
+            `Type mismatch: dictionary key has type ${describe(key)}, expected ${elementCodeToHuman(dict.keyType)}`,
+          instr.loc);
+        }
+        dict.items.delete(canonicalKey(key));
+        break;
+      }
+
+      case 'DICT_KEYS': {
+        const dict = this.pop();
+        if (!isDict(dict)) {
+          throw new RuntimeError(`Type mismatch: 'keys of X' requires a dictionary, got ${describe(dict)}`, instr.loc);
+        }
+        const items = new Map<string, ChatterValue>();
+        for (const [k, entry] of dict.items) {
+          items.set(k, entry.key);
+        }
+        const u: ChatterUniqueList = { kind: 'uniqueList', element: dict.keyType, items };
+        this.stack.push(u);
+        break;
+      }
+
+      case 'DICT_VALUES': {
+        const dict = this.pop();
+        if (!isDict(dict)) {
+          throw new RuntimeError(`Type mismatch: 'values of X' requires a dictionary, got ${describe(dict)}`, instr.loc);
+        }
+        const items: ChatterValue[] = [];
+        for (const entry of dict.items.values()) {
+          items.push(entry.value);
+        }
+        const l: ChatterList = { kind: 'list', element: dict.valueType, items };
+        this.stack.push(l);
+        break;
       }
 
       case 'MAKE_STRUCT': {

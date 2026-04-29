@@ -1,0 +1,6 @@
+constant d is dictionary "a" to 1, "b" to 2, "c" to 3
+variable total is 0
+repeat with k in keys of d
+    add value of k in d to total
+end repeat
+say total

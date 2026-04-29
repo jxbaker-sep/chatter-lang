@@ -1,0 +1,6 @@
+function tryRemove takes readonly dictionary from string to number d is
+    remove "x" from d
+end function
+
+constant dd is dictionary "a" to 1
+tryRemove dd

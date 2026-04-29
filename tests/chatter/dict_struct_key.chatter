@@ -1,0 +1,12 @@
+struct Point
+    number x
+    number y
+end struct
+
+variable d is empty dictionary from struct Point to string
+change value of make Point with x 0, y 0 in d to "origin"
+change value of make Point with x 1, y 2 in d to "p12"
+say d contains make Point with x 0, y 0
+say d contains make Point with x 9, y 9
+say value of make Point with x 1, y 2 in d
+say length of d

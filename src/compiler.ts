@@ -7,6 +7,7 @@ import {
   ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
+  DictionaryLiteral, DictGetExpression, DictSetStatement,
   TypeAnnotation, ScalarTypeName, ElementTypeAnnotation,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
@@ -53,6 +54,7 @@ export type ChatterType =
   | { kind: 'scalar'; name: ScalarTypeName }
   | { kind: 'list'; element: string; readonly: boolean }       // element string-encoded
   | { kind: 'uniqueList'; element: string; readonly: false }
+  | { kind: 'dict'; keyType: string; valueType: string; readonly: boolean }
   | { kind: 'struct'; mangled: string };
 
 function unmangle(s: string): string {
@@ -74,6 +76,9 @@ function typesEqual(a: ChatterType, b: ChatterType): boolean {
   if (a.kind === 'uniqueList' && b.kind === 'uniqueList') {
     return a.element === b.element;
   }
+  if (a.kind === 'dict' && b.kind === 'dict') {
+    return a.keyType === b.keyType && a.valueType === b.valueType && a.readonly === b.readonly;
+  }
   if (a.kind === 'struct' && b.kind === 'struct') {
     return a.mangled === b.mangled;
   }
@@ -84,6 +89,10 @@ function typeToString(t: ChatterType): string {
   if (t.kind === 'scalar') return t.name;
   if (t.kind === 'struct') return 'struct ' + unmangle(t.mangled);
   if (t.kind === 'uniqueList') return 'unique list of ' + elementHuman(t.element);
+  if (t.kind === 'dict') {
+    return (t.readonly ? 'readonly dictionary from ' : 'dictionary from ')
+      + elementHuman(t.keyType) + ' to ' + elementHuman(t.valueType);
+  }
   return (t.readonly ? 'readonly list of ' : 'list of ') + elementHuman(t.element);
 }
 
@@ -209,6 +218,11 @@ export class Compiler {
         throw new CompileError(`unknown struct '${a.name}'`, loc ?? this.currentLoc);
       }
       return { kind: 'struct', mangled: info.mangled };
+    }
+    if (a.kind === 'dict') {
+      const kCode = this.elementAnnotationToCode(a.keyType, loc);
+      const vCode = this.elementAnnotationToCode(a.valueType, loc);
+      return { kind: 'dict', keyType: kCode, valueType: vCode, readonly: a.readonly };
     }
     // list/uniqueList
     const elem = a.element;
@@ -465,6 +479,9 @@ export class Compiler {
       case 'ChangeItemStatement':
         this.compileChangeItem(stmt, out, bindings);
         break;
+      case 'DictSetStatement':
+        this.compileDictSet(stmt, out, bindings);
+        break;
       case 'CompoundAssignStatement':
         this.compileCompoundAssign(stmt, out, bindings);
         break;
@@ -628,12 +645,17 @@ export class Compiler {
   }
 
   private checkNotReadonlySmuggle(value: Expression, bindings: Bindings, ctx: string): void {
-    // Cannot bind a readonly-list reference to a set/var binding.
+    // Cannot bind a readonly-list / readonly-dict reference to a set/var binding.
     if (value.type === 'IdentifierExpression') {
       const info = bindings.get(value.name);
       if (info?.type && info.type.kind === 'list' && info.type.readonly) {
         throw new CompileError(
           `cannot bind a readonly-list reference to a '${ctx}' binding (name '${value.name}')`,
+        this.currentLoc);
+      }
+      if (info?.type && info.type.kind === 'dict' && info.type.readonly) {
+        throw new CompileError(
+          `cannot bind a readonly-dictionary reference to a '${ctx}' binding (name '${value.name}')`,
         this.currentLoc);
       }
     }
@@ -732,10 +754,7 @@ export class Compiler {
     if (stmt.precall) {
       const rt = this.compilePrecall(stmt.precall, out, bindings);
       if (info.type) {
-        if (info.type.kind !== rt.kind ||
-            (info.type.kind === 'scalar' && rt.kind === 'scalar' && info.type.name !== rt.name) ||
-            (info.type.kind === 'list' && rt.kind === 'list' && info.type.element !== rt.element) ||
-            (info.type.kind === 'uniqueList' && rt.kind === 'uniqueList' && info.type.element !== rt.element)) {
+        if (!typesEqual(info.type, rt)) {
           throw new CompileError(
             `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rt)}`,
             this.currentLoc,
@@ -746,8 +765,8 @@ export class Compiler {
       this.emit(out, { op: 'STORE_VAR', name: stmt.name });
       return;
     }
-    // Static type check for list/uniqueList vars: exact match required.
-    if (info.type && (info.type.kind === 'list' || info.type.kind === 'uniqueList')) {
+    // Static type check for list/uniqueList/dict vars: exact match required.
+    if (info.type && (info.type.kind === 'list' || info.type.kind === 'uniqueList' || info.type.kind === 'dict')) {
       const rhs = this.staticType(stmt.value, bindings);
       if (rhs !== null && !typesEqual(rhs, info.type)) {
         throw new CompileError(
@@ -758,6 +777,11 @@ export class Compiler {
       if (rhs && rhs.kind === 'list' && rhs.readonly && info.type.kind === 'list' && !info.type.readonly) {
         throw new CompileError(
           `cannot change '${stmt.name}' to a readonly-list reference`,
+        this.currentLoc);
+      }
+      if (rhs && rhs.kind === 'dict' && rhs.readonly && info.type.kind === 'dict' && !info.type.readonly) {
+        throw new CompileError(
+          `cannot change '${stmt.name}' to a readonly-dictionary reference`,
         this.currentLoc);
       }
     }
@@ -918,9 +942,27 @@ export class Compiler {
           `'remove EXPR from NAME' is not a list operation; use 'remove item N from NAME' (name '${stmt.listName}')`,
         this.currentLoc);
       }
+      if (info.type.kind === 'dict') {
+        if (info.type.readonly) {
+          throw new CompileError(
+            `Cannot remove from '${stmt.listName}': it is a readonly dictionary reference`,
+          this.currentLoc);
+        }
+        const rhs = this.staticType(stmt.value, bindings);
+        const rc = elementCode(rhs);
+        if (rc !== null && rc !== info.type.keyType) {
+          throw new CompileError(
+            `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(rc)}`,
+          this.currentLoc);
+        }
+        this.emit(out, { op: 'LOAD', name: stmt.listName });
+        this.compileExpr(stmt.value, out, bindings);
+        this.emit(out, { op: 'DICT_REMOVE' });
+        return;
+      }
       if (info.type.kind !== 'uniqueList') {
         throw new CompileError(
-          `Cannot remove value from '${stmt.listName}': not a unique list (type ${typeToString(info.type)})`,
+          `Cannot remove value from '${stmt.listName}': not a unique list or dictionary (type ${typeToString(info.type)})`,
         this.currentLoc);
       }
       // Element-type check.
@@ -931,7 +973,7 @@ export class Compiler {
           `Type mismatch: cannot remove ${elementHuman(rc)} from unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
-      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList')) {
+      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList' || rhs.kind === 'dict')) {
         throw new CompileError(
           `Type mismatch: cannot remove ${typeToString(rhs)} from unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
@@ -1133,6 +1175,18 @@ export class Compiler {
             if (argType.element !== paramType.element) {
               throw new CompileError(
                 `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
+              this.currentLoc);
+            }
+          } else if (paramType.kind === 'dict' && argType.kind === 'dict') {
+            if (argType.keyType !== paramType.keyType || argType.valueType !== paramType.valueType) {
+              throw new CompileError(
+                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
+              this.currentLoc);
+            }
+            // Widening: mutable → readonly OK. Narrowing: readonly → mutable rejected.
+            if (argType.readonly && !paramType.readonly) {
+              throw new CompileError(
+                `Cannot pass readonly-dictionary reference to mutable-dictionary param '${sig[i].name}' in call to '${stmt.name}'`,
               this.currentLoc);
             }
           } else if (paramType.kind === 'scalar' && argType.kind === 'scalar') {
@@ -1507,10 +1561,7 @@ export class Compiler {
     }
     if (stmt.precall) {
       const callRt = this.compilePrecall(stmt.precall, out, bindings);
-      if (callRt.kind !== rt.kind ||
-          (callRt.kind === 'scalar' && rt.kind === 'scalar' && callRt.name !== rt.name) ||
-          (callRt.kind === 'list' && rt.kind === 'list' && callRt.element !== rt.element) ||
-          (callRt.kind === 'uniqueList' && rt.kind === 'uniqueList' && callRt.element !== rt.element)) {
+      if (!typesEqual(callRt, rt)) {
         throw new CompileError(
           `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(callRt)}`,
           this.currentLoc,
@@ -1520,13 +1571,18 @@ export class Compiler {
       this.emit(out, { op: 'RETURN' });
       return;
     }
-    // Smuggling ban: a typed function that `return NAME` where NAME is a readonly list → error.
+    // Smuggling ban: a typed function that `return NAME` where NAME is a readonly list/dict → error.
     // (Also: the return type itself is never readonly per spec §8.)
     if (stmt.value.type === 'IdentifierExpression') {
       const info = bindings.get(stmt.value.name);
       if (info?.type && info.type.kind === 'list' && info.type.readonly) {
         throw new CompileError(
           `cannot return readonly-list reference '${stmt.value.name}' from function '${this.currentFuncName}'`,
+        this.currentLoc);
+      }
+      if (info?.type && info.type.kind === 'dict' && info.type.readonly) {
+        throw new CompileError(
+          `cannot return readonly-dictionary reference '${stmt.value.name}' from function '${this.currentFuncName}'`,
         this.currentLoc);
       }
     }
@@ -1558,6 +1614,18 @@ export class Compiler {
         if (rt.element !== st.element) {
           throw new CompileError(
             `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
+          this.currentLoc);
+        }
+      }
+      if (rt.kind === 'dict' && st.kind === 'dict') {
+        if (rt.keyType !== st.keyType || rt.valueType !== st.valueType) {
+          throw new CompileError(
+            `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
+          this.currentLoc);
+        }
+        if (st.readonly && !rt.readonly) {
+          throw new CompileError(
+            `cannot return readonly-dictionary reference from function '${this.currentFuncName}'`,
           this.currentLoc);
         }
       }
@@ -1659,6 +1727,12 @@ export class Compiler {
         break;
       case 'UniqueListLiteral':
         this.compileUniqueListLiteral(expr, out, bindings);
+        break;
+      case 'DictionaryLiteral':
+        this.compileDictionaryLiteral(expr, out, bindings);
+        break;
+      case 'DictGetExpression':
+        this.compileDictGet(expr, out, bindings);
         break;
       case 'ItemAccessExpression': {
         const tt = this.staticType(expr.target, bindings);
@@ -1860,9 +1934,10 @@ export class Compiler {
         if (tt !== null
             && !(tt.kind === 'scalar' && tt.name === 'string')
             && tt.kind !== 'list'
-            && tt.kind !== 'uniqueList') {
+            && tt.kind !== 'uniqueList'
+            && tt.kind !== 'dict') {
           throw new CompileError(
-            `'is empty' requires a string or list, got ${typeToString(tt)}`,
+            `'is empty' requires a string, list, or dictionary, got ${typeToString(tt)}`,
           this.currentLoc);
         }
         this.compileExpr(expr.target, out, bindings);
@@ -1919,6 +1994,22 @@ export class Compiler {
       }
       case 'FieldAccessExpression': {
         const tt = this.staticType(expr.target, bindings);
+        // Dictionary `keys of D` / `values of D` lowering when target is a known dict.
+        if (tt && tt.kind === 'dict') {
+          if (expr.fieldName === 'keys') {
+            this.compileExpr(expr.target, out, bindings);
+            this.emit(out, { op: 'DICT_KEYS' });
+            break;
+          }
+          if (expr.fieldName === 'values') {
+            this.compileExpr(expr.target, out, bindings);
+            this.emit(out, { op: 'DICT_VALUES' });
+            break;
+          }
+          throw new CompileError(
+            `dictionary has no field '${expr.fieldName}' (use 'keys of', 'values of', or 'value of K in')`,
+          this.currentLoc);
+        }
         if (tt !== null && tt.kind !== 'struct') {
           throw new CompileError(
             `field access requires a struct, got ${typeToString(tt)}`,
@@ -1982,6 +2073,133 @@ export class Compiler {
         break;
       }
     }
+  }
+
+  private compileDictionaryLiteral(
+    expr: DictionaryLiteral,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    if (expr.kind === 'empty') {
+      const kCode = this.elementAnnotationToCode(expr.keyType!);
+      const vCode = this.elementAnnotationToCode(expr.valueType!);
+      this.emit(out, { op: 'MAKE_EMPTY_DICT', keyType: kCode, valueType: vCode });
+      return;
+    }
+    // Infer key + value types from entries.
+    let kInferred: string | null = null;
+    let vInferred: string | null = null;
+    for (const e of expr.entries) {
+      const kt = this.staticType(e.key, bindings);
+      if (kt) {
+        const c = elementCode(kt);
+        if (c === null) {
+          throw new CompileError(`nested collections not supported in dictionary key`, this.currentLoc);
+        }
+        if (kInferred === null) kInferred = c;
+        else if (kInferred !== c) {
+          throw new CompileError(
+            `Type mismatch in dictionary literal: mixed key types (${elementHuman(kInferred)} and ${elementHuman(c)})`,
+          this.currentLoc);
+        }
+      }
+      const vt = this.staticType(e.value, bindings);
+      if (vt) {
+        const c = elementCode(vt);
+        if (c === null) {
+          throw new CompileError(`nested collections not supported in dictionary value`, this.currentLoc);
+        }
+        if (vInferred === null) vInferred = c;
+        else if (vInferred !== c) {
+          throw new CompileError(
+            `Type mismatch in dictionary literal: mixed value types (${elementHuman(vInferred)} and ${elementHuman(c)})`,
+          this.currentLoc);
+        }
+      }
+    }
+    if (kInferred === null || vInferred === null) {
+      throw new CompileError(
+        `cannot infer dictionary key/value types; use 'empty dictionary from K to V' for empty dictionaries`,
+      this.currentLoc);
+    }
+    for (const e of expr.entries) {
+      this.compileExpr(e.key, out, bindings);
+      this.compileExpr(e.value, out, bindings);
+    }
+    this.emit(out, {
+      op: 'MAKE_DICT',
+      count: expr.entries.length,
+      keyType: kInferred,
+      valueType: vInferred,
+    });
+  }
+
+  private compileDictGet(
+    expr: DictGetExpression,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const dt = this.staticType(expr.dict, bindings);
+    if (dt !== null && dt.kind !== 'dict') {
+      throw new CompileError(
+        `'value of K in X' requires a dictionary, got ${typeToString(dt)}`,
+      this.currentLoc);
+    }
+    if (dt && dt.kind === 'dict') {
+      const kt = this.staticType(expr.key, bindings);
+      const kc = elementCode(kt);
+      if (kc !== null && kc !== dt.keyType) {
+        throw new CompileError(
+          `Type mismatch: dictionary key has type ${elementHuman(dt.keyType)}, got ${elementHuman(kc)}`,
+        this.currentLoc);
+      }
+    }
+    this.compileExpr(expr.dict, out, bindings);
+    this.compileExpr(expr.key, out, bindings);
+    this.emit(out, { op: 'DICT_GET' });
+  }
+
+  private compileDictSet(
+    stmt: DictSetStatement,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const info = bindings.get(stmt.dictName);
+    if (!info) {
+      throw new CompileError(
+        `Cannot change value in '${stmt.dictName}': no such binding`,
+      this.currentLoc);
+    }
+    if (info.type) {
+      if (info.type.kind !== 'dict') {
+        throw new CompileError(
+          `Cannot change value in '${stmt.dictName}': not a dictionary (type ${typeToString(info.type)})`,
+        this.currentLoc);
+      }
+      if (info.type.readonly) {
+        throw new CompileError(
+          `Cannot change value in '${stmt.dictName}': it is a readonly dictionary reference`,
+        this.currentLoc);
+      }
+      const kt = this.staticType(stmt.key, bindings);
+      const kc = elementCode(kt);
+      if (kc !== null && kc !== info.type.keyType) {
+        throw new CompileError(
+          `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(kc)}`,
+        this.currentLoc);
+      }
+      const vt = this.staticType(stmt.value, bindings);
+      const vc = elementCode(vt);
+      if (vc !== null && vc !== info.type.valueType) {
+        throw new CompileError(
+          `Type mismatch: dictionary value has type ${elementHuman(info.type.valueType)}, got ${elementHuman(vc)}`,
+        this.currentLoc);
+      }
+    }
+    this.emit(out, { op: 'LOAD', name: stmt.dictName });
+    this.compileExpr(stmt.key, out, bindings);
+    this.compileExpr(stmt.value, out, bindings);
+    this.emit(out, { op: 'DICT_SET' });
   }
 
   private compileUniqueListLiteral(
@@ -2080,9 +2298,22 @@ export class Compiler {
             `Type mismatch: 'contains' value type ${elementHuman(rc)} does not match list element type ${elementHuman(lt.element)}`,
           this.currentLoc);
         }
-        if (rt && (rt.kind === 'list' || rt.kind === 'uniqueList')) {
+        if (rt && (rt.kind === 'list' || rt.kind === 'uniqueList' || rt.kind === 'dict')) {
           throw new CompileError(
-            `Type mismatch: 'contains' value cannot be a list`,
+            `Type mismatch: 'contains' value cannot be a list or dictionary`,
+          this.currentLoc);
+        }
+      } else if (lt !== null && lt.kind === 'dict') {
+        const rt = this.staticType(expr.right, bindings);
+        const rc = elementCode(rt);
+        if (rc !== null && rc !== lt.keyType) {
+          throw new CompileError(
+            `Type mismatch: 'contains' key type ${elementHuman(rc)} does not match dictionary key type ${elementHuman(lt.keyType)}`,
+          this.currentLoc);
+        }
+        if (rt && (rt.kind === 'list' || rt.kind === 'uniqueList' || rt.kind === 'dict')) {
+          throw new CompileError(
+            `Type mismatch: 'contains' value cannot be a list or dictionary`,
           this.currentLoc);
         }
       }
@@ -2225,6 +2456,40 @@ export class Compiler {
         }
         return inferred !== null ? { kind: 'uniqueList', element: inferred, readonly: false } : null;
       }
+      case 'DictionaryLiteral': {
+        if (expr.kind === 'empty') {
+          const k = this.elementAnnotationToCode(expr.keyType!);
+          const v = this.elementAnnotationToCode(expr.valueType!);
+          return { kind: 'dict', keyType: k, valueType: v, readonly: false };
+        }
+        let kInf: string | null = null;
+        let vInf: string | null = null;
+        for (const e of expr.entries) {
+          if (kInf === null) {
+            const c = elementCode(this.staticType(e.key, bindings));
+            if (c !== null) kInf = c;
+          }
+          if (vInf === null) {
+            const c = elementCode(this.staticType(e.value, bindings));
+            if (c !== null) vInf = c;
+          }
+          if (kInf !== null && vInf !== null) break;
+        }
+        if (kInf !== null && vInf !== null) {
+          return { kind: 'dict', keyType: kInf, valueType: vInf, readonly: false };
+        }
+        return null;
+      }
+      case 'DictGetExpression': {
+        const dt = this.staticType(expr.dict, bindings);
+        if (dt && dt.kind === 'dict') {
+          if (dt.valueType.startsWith('struct:')) {
+            return { kind: 'struct', mangled: dt.valueType.slice(7) };
+          }
+          return { kind: 'scalar', name: dt.valueType as ScalarTypeName };
+        }
+        return null;
+      }
       case 'ItemAccessExpression':
       case 'LastItemExpression': {
         const tt = this.staticType((expr as any).target, bindings);
@@ -2261,6 +2526,15 @@ export class Compiler {
       }
       case 'FieldAccessExpression': {
         const tt = this.staticType(expr.target, bindings);
+        if (tt && tt.kind === 'dict') {
+          if (expr.fieldName === 'keys') {
+            return { kind: 'uniqueList', element: tt.keyType, readonly: false };
+          }
+          if (expr.fieldName === 'values') {
+            return { kind: 'list', element: tt.valueType, readonly: false };
+          }
+          return null;
+        }
         if (tt && tt.kind === 'struct') {
           let info: StructInfo | undefined;
           for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }

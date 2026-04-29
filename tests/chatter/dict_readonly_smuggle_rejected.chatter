@@ -1,0 +1,7 @@
+function smuggle takes readonly dictionary from string to number d is
+    constant alias is d
+    say alias
+end function
+
+constant dd is dictionary "a" to 1
+smuggle dd

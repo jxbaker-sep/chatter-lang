@@ -1,0 +1,5 @@
+variable a is dictionary "x" to 1
+constant b is a
+change value of "y" in a to 2
+say b
+say length of b

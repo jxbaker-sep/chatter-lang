@@ -1,0 +1,6 @@
+function tryMutate takes readonly dictionary from string to number d is
+    change value of "x" in d to 99
+end function
+
+constant dd is dictionary "a" to 1
+tryMutate dd

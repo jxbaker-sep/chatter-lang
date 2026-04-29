@@ -1,0 +1,4 @@
+variable d is dictionary "a" to 1
+remove "z" from d
+say d
+say length of d

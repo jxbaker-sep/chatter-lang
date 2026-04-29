@@ -1,0 +1,2 @@
+constant d is empty dictionary from string to list of number
+say d

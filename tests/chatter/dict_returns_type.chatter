@@ -1,0 +1,8 @@
+function makeDict returns dictionary from string to number is
+    constant d is dictionary "a" to 1, "b" to 2
+    return d
+end function
+
+makeDict
+say length of it
+say it

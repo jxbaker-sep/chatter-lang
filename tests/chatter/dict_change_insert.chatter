@@ -1,0 +1,5 @@
+variable d is empty dictionary from string to number
+change value of "a" in d to 1
+change value of "b" in d to 2
+say d
+say length of d

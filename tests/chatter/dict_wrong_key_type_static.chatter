@@ -1,0 +1,2 @@
+constant d is dictionary "a" to 1, "b" to 2
+say value of 5 in d

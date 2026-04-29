@@ -57,7 +57,7 @@
     "types": {
       "patterns": [{
         "name": "storage.type.chatter",
-        "match": "\\b(number|string|boolean|list|unique|readonly|struct)\\b"
+        "match": "\\b(number|string|boolean|list|unique|readonly|struct|dictionary)\\b"
       }]
     },
     "keywords": {

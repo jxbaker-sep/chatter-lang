@@ -8,6 +8,7 @@ export type TypeAnnotation =
   | { kind: 'scalar'; name: ScalarTypeName }
   | { kind: 'list'; element: ElementTypeAnnotation; readonly: boolean }
   | { kind: 'uniqueList'; element: ElementTypeAnnotation; readonly: false }
+  | { kind: 'dict'; keyType: ElementTypeAnnotation; valueType: ElementTypeAnnotation; readonly: boolean }
   | { kind: 'struct'; name: string };  // unmangled struct name
 
 export interface Located {
@@ -29,6 +30,8 @@ export type Expression = (
   | CallStatement
   | ListLiteral
   | UniqueListLiteral
+  | DictionaryLiteral
+  | DictGetExpression
   | ItemAccessExpression
   | LastItemExpression
   | LengthExpression
@@ -57,6 +60,7 @@ export type Statement = (
   | VarDeclaration
   | ChangeStatement
   | ChangeItemStatement
+  | DictSetStatement
   | CompoundAssignStatement
   | FunctionDeclaration
   | CallStatement
@@ -365,5 +369,28 @@ export interface UniqueListLiteral {
   kind: 'nonempty' | 'empty';
   elementType: ElementTypeAnnotation | null;  // required for empty; null for nonempty (inferred)
   elements: Expression[];
+}
+
+export interface DictionaryLiteral {
+  type: 'DictionaryLiteral';
+  kind: 'nonempty' | 'empty';
+  // For empty literals, both keyType and valueType are required.
+  // For nonempty literals, both are null and inferred from contents.
+  keyType: ElementTypeAnnotation | null;
+  valueType: ElementTypeAnnotation | null;
+  entries: Array<{ key: Expression; value: Expression }>;
+}
+
+export interface DictGetExpression {
+  type: 'DictGetExpression';
+  key: Expression;
+  dict: Expression;
+}
+
+export interface DictSetStatement {
+  type: 'DictSetStatement';
+  dictName: string;
+  key: Expression;
+  value: Expression;
 }
 
