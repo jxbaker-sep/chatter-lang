@@ -52,18 +52,28 @@ function runChatter(source: string): { stdout: string; error: Error | null } {
 
 function discoverCases(): Array<{ name: string; sourcePath: string; expectedPath: string }> {
   if (!fs.existsSync(CHATTER_DIR)) return [];
-  return fs
-    .readdirSync(CHATTER_DIR)
-    .filter((f) => f.endsWith('.chatter'))
-    .map((f) => {
-      const name = f.replace(/\.chatter$/, '');
-      return {
-        name,
-        sourcePath: path.join(CHATTER_DIR, f),
-        expectedPath: path.join(CHATTER_DIR, `${name}.expected`),
-      };
-    })
-    .filter((c) => fs.existsSync(c.expectedPath));
+  const cases: Array<{ name: string; sourcePath: string; expectedPath: string }> = [];
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir)) {
+      const entryPath = path.join(dir, entry);
+      const stat = fs.statSync(entryPath);
+      if (stat.isDirectory()) {
+        walk(entryPath);
+        continue;
+      }
+      if (!entry.endsWith('.chatter')) continue;
+      const expectedPath = entryPath.replace(/\.chatter$/, '.expected');
+      if (!fs.existsSync(expectedPath)) continue;
+      const rel = path.relative(CHATTER_DIR, entryPath).replace(/\.chatter$/, '');
+      cases.push({
+        name: rel.split(path.sep).join('/'),
+        sourcePath: entryPath,
+        expectedPath,
+      });
+    }
+  };
+  walk(CHATTER_DIR);
+  return cases;
 }
 
 describe('chatter golden file tests', () => {
