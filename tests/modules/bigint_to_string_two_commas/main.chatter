@@ -1,0 +1,6 @@
+use BigInt, bigint_to_string from "std:bigint"
+
+# Seven-digit value 1,000,000 — two commas.
+constant n is make BigInt with Digits list of 0, 0, 0, 0, 0, 0, 1
+bigint_to_string n
+say it

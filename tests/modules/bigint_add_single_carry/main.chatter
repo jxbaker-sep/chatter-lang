@@ -1,0 +1,8 @@
+use BigInt, bigint_add, bigint_to_string from "std:bigint"
+
+# 12 + 9 = 21 — single carry on the ones column.
+constant a is make BigInt with Digits list of 2, 1
+constant b is make BigInt with Digits list of 9
+bigint_add a to b
+bigint_to_string it
+say it

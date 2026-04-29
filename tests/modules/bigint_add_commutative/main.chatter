@@ -1,0 +1,15 @@
+use BigInt, bigint_add, bigint_to_string from "std:bigint"
+
+# Commutativity check: a + b should equal b + a, even when the operands
+# have different lengths and a carry is involved on one column.
+# 1234 + 5 = 1239 = 5 + 1234.
+constant a is make BigInt with Digits list of 4, 3, 2, 1
+constant b is make BigInt with Digits list of 5
+
+bigint_add a to b
+bigint_to_string it
+say it
+
+bigint_add b to a
+bigint_to_string it
+say it

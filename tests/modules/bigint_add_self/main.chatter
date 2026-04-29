@@ -1,0 +1,7 @@
+use BigInt, bigint_add, bigint_to_string from "std:bigint"
+
+# Adding a value to itself: 50 + 50 = 100. Same struct passed for both args.
+constant fifty is make BigInt with Digits list of 0, 5
+bigint_add fifty to fifty
+bigint_to_string it
+say it

@@ -1,0 +1,44 @@
+use max from "std:math"
+
+export struct BigInt
+  list of number Digits
+end struct
+
+export function bigint_add takes struct BigInt lhs to struct BigInt rhs returns struct BigInt is
+  constant result is empty list of number
+  constant biggest_digit is the result of max list of the length of Digits of lhs, the length of Digits of rhs
+  variable carry is 0
+  repeat with i from 1 to biggest_digit
+    variable temp is 0
+    if i is greater than the length of the Digits of lhs
+      change temp to item i of Digits of rhs + carry 
+    else if i is greater than the length of the Digits of rhs
+      change temp to item i of Digits of lhs + carry 
+    else
+      change temp to item i of Digits of lhs + item i of Digits of rhs + carry
+    end if
+    if temp is at least 10
+      subtract 10 from temp
+      change carry to 1
+    else
+      change carry to 0
+    end if
+    append temp to result
+  end repeat
+  if carry is 1
+    append 1 to result
+  end if
+  return make BigInt with Digits result
+end function
+
+export function bigint_to_string takes struct BigInt value returns string is
+  variable result is ""
+  constant digits is Digits of value
+  repeat with i from 1 to the length of digits
+    if i mod 3 is 1 and i is not 1
+      change result to "," & result
+    end if
+    change result to item i of digits & result
+  end repeat
+  return result
+end function

@@ -1,0 +1,5 @@
+use BigInt, bigint_to_string from "std:bigint"
+
+constant n is make BigInt with Digits list of 0
+bigint_to_string n
+say it
