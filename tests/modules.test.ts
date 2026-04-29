@@ -41,15 +41,27 @@ function runEntry(entryPath: string): { stdout: string; error: Error | null } {
 
 function discoverCases(): Array<{ name: string; entryPath: string; expectedPath: string }> {
   if (!fs.existsSync(MODULES_DIR)) return [];
-  return fs
-    .readdirSync(MODULES_DIR)
-    .filter((d) => fs.statSync(path.join(MODULES_DIR, d)).isDirectory())
-    .map((d) => ({
-      name: d,
-      entryPath: path.join(MODULES_DIR, d, 'main.chatter'),
-      expectedPath: path.join(MODULES_DIR, d, '.expected'),
-    }))
-    .filter((c) => fs.existsSync(c.entryPath) && fs.existsSync(c.expectedPath));
+  const cases: Array<{ name: string; entryPath: string; expectedPath: string }> = [];
+  const walk = (dir: string): void => {
+    const entryPath = path.join(dir, 'main.chatter');
+    const expectedPath = path.join(dir, '.expected');
+    if (fs.existsSync(entryPath) && fs.existsSync(expectedPath)) {
+      cases.push({
+        name: path.relative(MODULES_DIR, dir).split(path.sep).join('/'),
+        entryPath,
+        expectedPath,
+      });
+      return;
+    }
+    for (const child of fs.readdirSync(dir)) {
+      const childPath = path.join(dir, child);
+      if (fs.statSync(childPath).isDirectory()) {
+        walk(childPath);
+      }
+    }
+  };
+  walk(MODULES_DIR);
+  return cases;
 }
 
 describe('chatter module golden tests', () => {
