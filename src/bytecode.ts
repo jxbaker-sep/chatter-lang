@@ -36,6 +36,7 @@ export type InstructionKind =
   | { op: 'CHECK_TYPE'; expected: 'number' | 'string' | 'boolean'; context: string }  // peeks stack top; throws if type mismatches; used to enforce typed-function return types when the static type is unknown
   | { op: 'MAKE_LIST'; count: number; elementType: string | null }  // 'number'|'string'|'boolean'|'struct:<mangled>'|null (infer)
   | { op: 'MAKE_EMPTY_LIST'; elementType: string }
+  | { op: 'MAKE_EMPTY_LIST_LIKE' }  // pop a list/unique-list, push empty plain list with same element type
   | { op: 'MAKE_UNIQUE_LIST'; count: number; elementType: string | null }
   | { op: 'MAKE_EMPTY_UNIQUE_LIST'; elementType: string }
   | { op: 'UNIQUE_LIST_ADD' }    // pop value, pop unique-list, append if not already present

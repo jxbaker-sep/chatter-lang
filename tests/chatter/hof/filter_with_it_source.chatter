@@ -1,0 +1,3 @@
+read file "tests/chatter/fixtures/with_blanks.txt"
+constant filtered is filter it where it is not empty
+say filtered

@@ -551,6 +551,16 @@ export class VM {
         break;
       }
 
+      case 'MAKE_EMPTY_LIST_LIKE': {
+        const src = this.pop();
+        if (typeof src !== 'object' || src === null || (src.kind !== 'list' && src.kind !== 'uniqueList')) {
+          throw new RuntimeError(`'filter' requires a list, got ${describe(src as ChatterValue)}`, instr.loc);
+        }
+        const list: ChatterList = { kind: 'list', element: src.element, items: [] };
+        this.stack.push(list);
+        break;
+      }
+
       case 'MAKE_UNIQUE_LIST': {
         const elems: ChatterValue[] = new Array(instr.count);
         for (let i = instr.count - 1; i >= 0; i--) {

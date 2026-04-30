@@ -2132,6 +2132,7 @@ export class Compiler {
     out: Instruction[],
     bindings: Bindings,
     body: (itLocal: string) => void,
+    onSourceStored?: (listTmp: string) => void,
   ): { listTmp: string; idxTmp: string; lenTmp: string; itTmp: string } {
     const listTmp = this.freshName('hof_list');
     const idxTmp = this.freshName('hof_idx');
@@ -2140,6 +2141,7 @@ export class Compiler {
 
     this.compileExpr(listExpr, out, bindings);
     this.emit(out, { op: 'STORE', name: listTmp });
+    if (onSourceStored) onSourceStored(listTmp);
     this.emit(out, { op: 'LOAD', name: listTmp });
     this.emit(out, { op: 'LENGTH' });
     this.emit(out, { op: 'STORE', name: lenTmp });
@@ -2336,19 +2338,17 @@ export class Compiler {
       this.currentLoc);
     }
 
-    // Result element type is source list element type (or 'number' fallback when unknown).
+    // Result element type is source list element type; if unknown statically,
+    // defer to runtime via MAKE_EMPTY_LIST_LIKE on the source list.
     let resCode: string | null = null;
     if (lt && (lt.kind === 'list' || lt.kind === 'uniqueList')) {
       resCode = lt.element;
     }
-    if (resCode === null) {
-      throw new CompileError(
-        `cannot determine static element type for 'filter'; annotate the source list`,
-      this.currentLoc);
-    }
     const resTmp = this.freshName('hof_res');
-    this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: resCode });
-    this.emit(out, { op: 'STORE', name: resTmp });
+    if (resCode !== null) {
+      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: resCode });
+      this.emit(out, { op: 'STORE', name: resTmp });
+    }
 
     const tmps = this.compileHofLoop(expr.list, elemType, out, bindings, (itLocal) => {
       this.compileExpr(expr.predicate, out, bindings);
@@ -2360,7 +2360,11 @@ export class Compiler {
       this.emit(out, { op: 'LOAD', name: itLocal });
       this.emit(out, { op: 'LIST_APPEND' });
       (out[jifSkip] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
-    });
+    }, resCode === null ? (listTmp) => {
+      this.emit(out, { op: 'LOAD', name: listTmp });
+      this.emit(out, { op: 'MAKE_EMPTY_LIST_LIKE' });
+      this.emit(out, { op: 'STORE', name: resTmp });
+    } : undefined);
 
     this.emit(out, { op: 'LOAD', name: resTmp });
     this.emit(out, { op: 'DELETE', name: tmps.listTmp });
