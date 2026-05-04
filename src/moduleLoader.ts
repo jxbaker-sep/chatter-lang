@@ -237,7 +237,7 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
   const concatShifted = (block: Instruction[]) => {
     const shift = main.length;
     for (const instr of block) {
-      if (instr.op === 'JUMP' || instr.op === 'JUMP_IF_FALSE') {
+      if (instr.op === 'JUMP' || instr.op === 'JUMP_IF_FALSE' || instr.op === 'JUMP_BOOL_OP') {
         const copy: Instruction = { ...instr, target: instr.target + shift } as Instruction;
         if (instr.loc) Object.defineProperty(copy, 'loc', { value: instr.loc, enumerable: false, writable: true, configurable: true });
         main.push(copy);

@@ -112,7 +112,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
   - `a is at least b` → `>=` (also spelled `a is greater than or equal to b`)
   - Non-number operands → RuntimeError ("Type mismatch: comparison requires numbers"). Positive forms only (no `is not less than` etc. yet).
   - Reserved keywords added: `less`, `greater`, `than`, `at`, `least`, `most`.
-- Logical: `not` (unary), `and`, `or`. Precedence: `is`/`is not` > `not` > `and`/`or`.
+- Logical: `not` (unary, strict — operand must be boolean), `and`, `or` (binary, **short-circuit**: RHS is evaluated only when needed). Precedence: `is`/`is not` > `not` > `and`/`or`.
 - Unary `-` on numbers: `-EXPR` is legal anywhere a primary is (literals, vars, expressions). Binds tighter than `**`, so `-2 ** 2 = 4` (i.e. `(-2) ** 2`). Operand must be `number` or compile error.
 - **Hybrid paren rule** for `and`/`or`: same-operator chains fine; mixing `and` with `or` at same level = compile error ("parentheses required"). `(a and b) or c` is OK. Parens reset context.
 - `it` — meta-syntactic var holding last statement's result. **Per-frame/function-scoped**. `say` does not touch it.
@@ -175,7 +175,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 - Each module is assigned a sequential id `m0`, `m1`, … (`m0` = entry).
 - Function names are mangled to `<moduleId>::<name>` inside the emitted bytecode; imported names resolve to the defining module's mangled form. The VM only ever sees mangled names; compile and runtime errors still mention the user-facing unqualified name.
 - Top-level `constant`/`variable` bindings are also mangled by module to prevent cross-module collision. At runtime the `LOAD` op consults only the current frame and the bottom frame (frame[0] = combined module top-level), enforcing lexical scope. Imported-function closures reach their home-module top-level bindings via the mangled name in frame[0].
-- The combined `main` is the concatenation of every non-entry module's top-level instructions (in DFS post-order) followed by the entry's top-level. `JUMP`/`JUMP_IF_FALSE` targets are rewritten by the loader when blocks are concatenated. No new VM opcodes were needed.
+- The combined `main` is the concatenation of every non-entry module's top-level instructions (in DFS post-order) followed by the entry's top-level. `JUMP`/`JUMP_IF_FALSE`/`JUMP_BOOL_OP` targets are rewritten by the loader when blocks are concatenated. No new VM opcodes were needed.
 - Loader lives in `src/moduleLoader.ts`; entry point `loadProgram(entryFilePath) → BytecodeProgram`. `CLI` calls `loadProgram`.
 
 **Standard library imports (`std:` prefix)**: `use NAMES from "std:MODULENAME"` loads a bundled stdlib module.
@@ -441,8 +441,10 @@ Statement form goes through the same compile path as the expression form, so all
 ## Bytecode instructions
 `PUSH_INT`, `PUSH_STR`, `PUSH_BOOL`, `LOAD`, `STORE`, `STORE_VAR`, `DELETE`, `LOAD_IT`, `STORE_IT`,
 `ADD`, `SUB`, `MUL`, `DIV`, `POW`,
-`EQ`, `NEQ`, `LT`, `LE`, `GT`, `GE`, `NOT`, `AND`, `OR`,
+`EQ`, `NEQ`, `LT`, `LE`, `GT`, `GE`, `NOT`, `AND`, `OR` (legacy eager — no longer emitted by the compiler; retained in the VM for backward compatibility),
 `JUMP`, `JUMP_IF_FALSE`,
+`JUMP_BOOL_OP { logicalOp, target }` — peek stack top; throw `Type mismatch: '<op>' requires booleans, got X` if not boolean; on short-circuit (false for `'and'`, true for `'or'`) jump to `target` leaving the value on the stack; otherwise pop and fall through. Used by the compiler to emit short-circuit `and`/`or`.
+`EXPECT_BOOL_OP { logicalOp }` — peek stack top; throw `Type mismatch: '<op>' requires booleans, got X` if not boolean; stack unchanged. Emitted after the RHS of an `and`/`or` to enforce the runtime boolean check on the side that actually evaluated.
 `CALL` (name, argCount), `RETURN`, `SAY`, `SAY_MULTI` (count),
 `DROP` — pops and discards stack top; emitted after `CALL` at **void-function call sites** (void fns still emit a trailing `PUSH_INT 0; RETURN` so the stack stays balanced; caller discards it and does NOT update `it`).
 `CHECK_TYPE` (expected, context) — peeks the stack top and throws `RuntimeError("Type mismatch: <context> (expected X, got Y)")` when the type doesn't match. Emitted in typed-function `return EXPR` when the expression's static type is unknown.
@@ -540,7 +542,7 @@ Existing golden cases:
 - `constant` is strictly immutable (constants really).
 - No shadowing of any kind.
 - Booleans strict: `if 5` is runtime error, not truthiness.
-- `and`/`or` are strict (eager) not short-circuit. Both sides always evaluated.
+- `and`/`or` are **short-circuit**: `a and b` skips `b` when `a` is `false`; `a or b` skips `b` when `a` is `true`. Skipping suppresses any runtime errors that `b` would have raised. Static type checks on both operands still fire (e.g., `true and "hello"` is a compile error). Runtime type checks fire on whichever operands actually run (so `true and X` errors when `X` evaluates to a non-boolean; `false and X` does not).
 
 ## User preferences
 - Prefers explicit over clever (e.g. parens over precedence memorization for mixing).

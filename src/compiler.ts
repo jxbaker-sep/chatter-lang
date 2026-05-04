@@ -2710,6 +2710,10 @@ export class Compiler {
       this.emit(out, { op: 'CONTAINS' });
       return;
     }
+    if (expr.operator === 'and' || expr.operator === 'or') {
+      this.compileLogicalShortCircuit(expr, out, bindings);
+      return;
+    }
     this.compileExpr(expr.left, out, bindings);
     this.compileExpr(expr.right, out, bindings);
     const op = expr.operator;
@@ -2758,16 +2762,9 @@ export class Compiler {
         }
       }
     } else if (isLogical) {
-      if (lt && !(lt.kind === 'scalar' && lt.name === 'boolean')) {
-        throw new CompileError(
-          `Type mismatch: '${op}' requires booleans, got ${typeToString(lt)}`,
-        this.currentLoc);
-      }
-      if (rt && !(rt.kind === 'scalar' && rt.name === 'boolean')) {
-        throw new CompileError(
-          `Type mismatch: '${op}' requires booleans, got ${typeToString(rt)}`,
-        this.currentLoc);
-      }
+      // Short-circuit path is handled in compileLogicalShortCircuit; this branch
+      // is unreachable but kept for the type checker.
+      throw new CompileError(`unreachable: logical op '${op}' should be short-circuited`, this.currentLoc);
     }
     switch (op) {
       case '+':  this.emit(out, { op: 'ADD' }); break;
@@ -2783,11 +2780,45 @@ export class Compiler {
       case '<=': this.emit(out, { op: 'LE' }); break;
       case '>':  this.emit(out, { op: 'GT' }); break;
       case '>=': this.emit(out, { op: 'GE' }); break;
-      case 'and': this.emit(out, { op: 'AND' }); break;
-      case 'or':  this.emit(out, { op: 'OR' }); break;
       default:
         throw new CompileError(`Unknown operator: ${op}`, this.currentLoc);
     }
+  }
+
+  // Compile `a and b` / `a or b` with short-circuit semantics.
+  // Pattern (for 'and'):
+  //   <a>
+  //   JUMP_BOOL_OP and end   ; if a is false, jump w/ value preserved; else pop and continue
+  //   <b>
+  //   EXPECT_BOOL_OP and     ; type-check b at runtime when its static type is unknown
+  // end:
+  // Static type checks on both operands still fire when types are statically known.
+  private compileLogicalShortCircuit(
+    expr: BinaryExpression,
+    out: Instruction[],
+    bindings: Bindings,
+  ): void {
+    const op = expr.operator as 'and' | 'or';
+    const lt = this.staticType(expr.left, bindings);
+    if (lt && !(lt.kind === 'scalar' && lt.name === 'boolean')) {
+      throw new CompileError(
+        `Type mismatch: '${op}' requires booleans, got ${typeToString(lt)}`,
+        this.currentLoc,
+      );
+    }
+    const rt = this.staticType(expr.right, bindings);
+    if (rt && !(rt.kind === 'scalar' && rt.name === 'boolean')) {
+      throw new CompileError(
+        `Type mismatch: '${op}' requires booleans, got ${typeToString(rt)}`,
+        this.currentLoc,
+      );
+    }
+    this.compileExpr(expr.left, out, bindings);
+    const jumpIdx = out.length;
+    this.emit(out, { op: 'JUMP_BOOL_OP', logicalOp: op, target: -1 });
+    this.compileExpr(expr.right, out, bindings);
+    this.emit(out, { op: 'EXPECT_BOOL_OP', logicalOp: op });
+    (out[jumpIdx] as any).target = out.length;
   }
 
   // Best-effort static type inference.

@@ -1,0 +1,6 @@
+function f returns number is
+    return 5
+end function
+
+constant x is the result of f
+say true and x is 5

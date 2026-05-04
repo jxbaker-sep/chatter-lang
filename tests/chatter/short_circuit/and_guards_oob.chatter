@@ -1,0 +1,6 @@
+constant s is ""
+if s is not empty and character 1 of s is "a"
+    say "starts with a"
+else
+    say "no"
+end if

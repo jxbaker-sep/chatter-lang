@@ -1,0 +1,6 @@
+function untyped_string returns string is
+    return "hello"
+end function
+
+constant s is the result of untyped_string
+say s and true

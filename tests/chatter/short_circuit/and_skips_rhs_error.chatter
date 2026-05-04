@@ -1,0 +1,2 @@
+constant a is false
+say a and (1 / 0 is 0)

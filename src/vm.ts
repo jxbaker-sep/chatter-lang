@@ -506,6 +506,34 @@ export class VM {
         break;
       }
 
+      case 'JUMP_BOOL_OP': {
+        const v = this.stack[this.stack.length - 1];
+        if (typeof v !== 'boolean') {
+          throw new RuntimeError(
+            `Type mismatch: '${instr.logicalOp}' requires booleans, got ${typeof v}`,
+            instr.loc,
+          );
+        }
+        const shortCircuit = instr.logicalOp === 'and' ? !v : v;
+        if (shortCircuit) {
+          frame.ip = instr.target;
+        } else {
+          this.stack.pop();
+        }
+        break;
+      }
+
+      case 'EXPECT_BOOL_OP': {
+        const v = this.stack[this.stack.length - 1];
+        if (typeof v !== 'boolean') {
+          throw new RuntimeError(
+            `Type mismatch: '${instr.logicalOp}' requires booleans, got ${typeof v}`,
+            instr.loc,
+          );
+        }
+        break;
+      }
+
       case 'RETURN':
         // Handled in executeFrame; this branch is unreachable.
         break;
