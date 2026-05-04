@@ -1,0 +1,3 @@
+constant xs is list of 1, 2, 3
+map xs using it * 10
+say it

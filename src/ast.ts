@@ -82,6 +82,7 @@ export type Statement = (
   | NextRepeatStatement
   | StructDeclaration
   | SortStatement
+  | HofStatement
 ) & Located;
 
 export interface StructField {
@@ -422,5 +423,10 @@ export interface ReduceExpression {
   list: Expression;
   start: Expression;
   body: Expression;
+}
+
+export interface HofStatement {
+  type: 'HofStatement';
+  expr: MapExpression | FilterExpression | ReduceExpression;
 }
 

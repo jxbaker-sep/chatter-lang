@@ -21,7 +21,7 @@ import {
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
   MakeStructExpression, FieldAccessExpression, StructWithExpression,
-  SortStatement, MapExpression, FilterExpression, ReduceExpression,
+  SortStatement, MapExpression, FilterExpression, ReduceExpression, HofStatement,
 } from './ast';
 
 function locOfToken(t: Token): SourceLocation {
@@ -183,6 +183,9 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'exit':     return parseExitRepeatStatement();
         case 'next':     return parseNextRepeatStatement();
         case 'sort':     return parseSortStatement();
+        case 'map':
+        case 'filter':
+        case 'reduce':   return parseHofStatement();
         default:
           throw new ParseError(`Unexpected keyword '${tok.value}'`, tok);
       }
@@ -1100,6 +1103,25 @@ export function parse(tokens: Token[], source?: string): Program {
     }
     consumeNewline();
     return { type: 'SortStatement', list, key, descending };
+  }
+
+  function parseHofStatement(): HofStatement {
+    const opTok = peek();
+    const expr = parseExpression();
+    if (
+      expr.type !== 'MapExpression'
+      && expr.type !== 'FilterExpression'
+      && expr.type !== 'ReduceExpression'
+    ) {
+      throw new ParseError(
+        `Expected map / filter / reduce expression after '${opTok.value}'`,
+        opTok,
+      );
+    }
+    consumeNewline();
+    const node: HofStatement = { type: 'HofStatement', expr };
+    withLoc(node, opTok);
+    return node;
   }
 
   // --- Expression parsing with precedence ---

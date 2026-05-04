@@ -396,7 +396,17 @@ constant joined is reduce words starting "" using accumulator & it
 
 **`accumulator` keyword**: reserved; only valid inside a `reduce` body. Outside → compile error (`'accumulator' can only be used inside a reduce body`).
 
-**Internals**: each HOF form maintains its own per-iteration synthesized local (`_rep_hof_it_N`, `_rep_hof_acc_N`, etc., via `freshName`); the compiler maintains `hofItStack` / `hofAccStack` so `it` and `accumulator` resolve correctly through the static-type analyzer and the codegen path. Nested-HOF detection uses an `inHofBody` flag set by `compileHofLoop`'s body callback (the `staticType` analyzer also threads `it` through `MapExpression`/`FilterExpression`/`ReduceExpression` cases without compiling).
+**Statement form**: `map`, `filter`, and `reduce` may also be written as bare statements (no surrounding `constant ... is` host). The result is computed and stored into `it`, parallel to a typed function call. This enables chaining:
+```
+read file "input.txt"
+filter it where it is not empty
+map it using it & "!"
+reduce it starting "" using accumulator & it
+say it
+```
+Statement form goes through the same compile path as the expression form, so all static type checks (predicate must be boolean, `map` body must produce a known scalar/struct type, `reduce` start must be scalar/struct, etc.) apply identically. `sort` was already statement-only; nothing changes there.
+
+**Internals**: each HOF form maintains its own per-iteration synthesized local (`_rep_hof_it_N`, `_rep_hof_acc_N`, etc., via `freshName`); the compiler maintains `hofItStack` / `hofAccStack` so `it` and `accumulator` resolve correctly through the static-type analyzer and the codegen path. Nested-HOF detection uses an `inHofBody` flag set by `compileHofLoop`'s body callback (the `staticType` analyzer also threads `it` through `MapExpression`/`FilterExpression`/`ReduceExpression` cases without compiling). The statement form is a distinct AST node (`HofStatement`) wrapping a `MapExpression`/`FilterExpression`/`ReduceExpression`; the compiler emits the wrapped expression then a single `STORE_IT`.
 
 
 ### Compile-time vs runtime checks

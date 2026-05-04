@@ -1,0 +1,3 @@
+constant xs is list of 1, 2, 3, 4
+filter xs where it mod 2 is 0
+say it

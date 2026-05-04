@@ -1,0 +1,5 @@
+read file "tests/chatter/fixtures/with_blanks.txt"
+filter it where it is not empty
+map it using it & "!"
+reduce it starting "" using accumulator & it
+say it

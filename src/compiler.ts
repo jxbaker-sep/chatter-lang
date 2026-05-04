@@ -569,6 +569,10 @@ export class Compiler {
       case 'SortStatement':
         this.compileSort(stmt, out, bindings);
         break;
+      case 'HofStatement':
+        this.compileExpr(stmt.expr, out, bindings);
+        this.emit(out, { op: 'STORE_IT' });
+        break;
     }
   }
 
