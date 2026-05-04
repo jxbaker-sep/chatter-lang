@@ -1,0 +1,1 @@
+ERROR: 'the result of' in a 'map using' slot is only allowed when the HOF is used as a statement

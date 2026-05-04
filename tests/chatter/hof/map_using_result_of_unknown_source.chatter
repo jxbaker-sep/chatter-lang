@@ -1,0 +1,7 @@
+function shout takes string s returns string is
+    return s & "!"
+end function
+
+read file "tests/chatter/fixtures/with_blanks.txt"
+map it using the result of shout it
+say it

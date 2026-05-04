@@ -699,6 +699,29 @@ export class Compiler {
     return rt;
   }
 
+  // Validate a HOF body/predicate/start/key slot when filled via `the result of`.
+  // The slot's value is a CallStatement only when produced by `tryConsumeTheResultOf`
+  // (parser only allows this in statement-form HOFs and `sort by`). Surface a clear
+  // error early so the caller gets `void function ...` wording instead of the
+  // generic "cannot determine static type" path.
+  private validateHofResultOfSlot(slot: Expression | undefined): void {
+    if (!slot || slot.type !== 'CallStatement') return;
+    const call = slot as CallStatement;
+    if (!this.functionReturnTypes.has(call.name)) {
+      throw new CompileError(
+        `'the result of' refers to unknown function '${call.name}'`,
+        this.currentLoc,
+      );
+    }
+    const rt = this.functionReturnTypes.get(call.name);
+    if (rt === null || rt === undefined) {
+      throw new CompileError(
+        `'the result of' requires a typed function, but '${call.name}' is void`,
+        this.currentLoc,
+      );
+    }
+  }
+
   private compileSet(
     stmt: ConstantDeclaration,
     out: Instruction[],
@@ -2196,6 +2219,7 @@ export class Compiler {
         `cannot nest higher-order list operations`,
       this.currentLoc);
     }
+    this.validateHofResultOfSlot(stmt.key);
     const lt = this.staticType(stmt.list, bindings);
     if (lt && lt.kind !== 'list') {
       throw new CompileError(
@@ -2269,6 +2293,7 @@ export class Compiler {
         `cannot nest higher-order list operations`,
       this.currentLoc);
     }
+    this.validateHofResultOfSlot(expr.body);
     const lt = this.staticType(expr.list, bindings);
     if (lt && lt.kind !== 'list' && lt.kind !== 'uniqueList') {
       throw new CompileError(
@@ -2321,6 +2346,7 @@ export class Compiler {
         `cannot nest higher-order list operations`,
       this.currentLoc);
     }
+    this.validateHofResultOfSlot(expr.predicate);
     const lt = this.staticType(expr.list, bindings);
     if (lt && lt.kind !== 'list' && lt.kind !== 'uniqueList') {
       throw new CompileError(
@@ -2385,6 +2411,8 @@ export class Compiler {
         `cannot nest higher-order list operations`,
       this.currentLoc);
     }
+    this.validateHofResultOfSlot(expr.start);
+    this.validateHofResultOfSlot(expr.body);
     const lt = this.staticType(expr.list, bindings);
     if (lt && lt.kind !== 'list' && lt.kind !== 'uniqueList') {
       throw new CompileError(

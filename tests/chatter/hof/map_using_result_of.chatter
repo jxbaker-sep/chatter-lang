@@ -1,0 +1,7 @@
+function double takes number n returns number is
+    return n * 2
+end function
+
+constant xs is list of 1, 2, 3
+map xs using the result of double it
+say it

@@ -1,0 +1,7 @@
+function initial takes number seed returns number is
+    return seed * 10
+end function
+
+constant xs is list of 1, 2, 3, 4
+reduce xs starting the result of initial 1 using accumulator + it
+say it

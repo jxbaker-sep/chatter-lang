@@ -1,0 +1,7 @@
+function negate takes number n returns number is
+    return 0 - n
+end function
+
+variable xs is list of 3, 1, 4, 1, 5, 9, 2, 6
+sort xs by the result of negate it
+say xs

@@ -1,0 +1,7 @@
+function evenp takes number n returns boolean is
+    return n mod 2 is 0
+end function
+
+constant xs is list of 1, 2, 3, 4, 5, 6
+filter xs where the result of evenp it
+say it

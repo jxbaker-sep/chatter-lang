@@ -381,7 +381,16 @@ Built-in syntax — not library functions, not first-class. Each "Big Four" form
 
 **`it` semantics inside HOF bodies**: `it` is rebound per iteration to the synthesized loop local. The outer-frame `it` is preserved (HOFs do not call `STORE_IT` for the per-iteration value). After the HOF expression evaluates, the surrounding statement's normal `it` semantics apply.
 
-**Function calls inside HOF bodies**: function calls are not parsed as plain expressions in Chatter — they require the `the result of f arg ...` precall form, which is only available in specific syntactic positions (constant/variable initializers, function-call expressions in argument position via the existing rules). Inside an HOF body the practical implication is that you can't call a user function directly via bare-name syntax; either inline the expression, or compute the result into a `constant` outside the HOF. (Folded into the v2 "expression-position calls" follow-up.)
+**Function calls inside HOF bodies**: bare-name function calls aren't parsed as plain expressions in Chatter. To call a user function inside a HOF body, use `[the] result of CALL` — but **only when the HOF is used as a statement** (or inside `sort by`, which is already statement-only). The slots that accept `the result of`:
+- `filter EXPR where the result of CALL`
+- `map EXPR using the result of CALL`
+- `reduce EXPR starting the result of CALL using …`
+- `reduce EXPR starting V using the result of CALL`
+- `sort EXPR by the result of CALL [ascending|descending]`
+
+`the` is optional. The CALL is parsed greedy until the next HOF terminator keyword (`using`, `where`, `starting`, `by`, `ascending`, `descending`) or end-of-line. CALL args may reference `it` and (inside a `reduce` body) `accumulator`. The CALL itself does **not** update `it` per iteration — only the outer HOF statement's final result writes to `it`. Void functions are rejected with `'the result of' requires a typed function, but 'X' is void`. Using `the result of` in **expression-position** HOFs (`constant x is map xs using the result of f it`) is rejected with `'the result of' in a 'map using' slot is only allowed when the HOF is used as a statement` (parallel messages for `filter where`, `reduce starting`, `reduce using`). The source-list slot (`map the result of f where …`) does NOT accept `the result of` — it must be a plain expression.
+
+When the source list's static type is unknown but the HOF body is `the result of CALL`, the body's static type is known from the function's declared return type, so the compile-time element-type check still passes (this is the canonical solution for `read file ...; map it using the result of parse it`).
 
 **Examples**:
 ```
@@ -555,7 +564,7 @@ Existing golden cases:
 - **Maps**: delivered as `dictionary from K to V` (see "Dictionaries (v1)" above). Keys can be scalar or struct; values can be scalar or struct (no nested collections in v1). Reference-equality only; structural equality is future work. A readonly variant exists for parameter annotations.
 - **Sets**: delivered as `unique list of T` (see "Unique lists (v1)" above). A readonly variant is not yet supported.
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
-- **Higher-order list ops via `it`-block sugar**: **delivered (v1)** — see "Higher-order list operations (v1)" above. `sort` / `map` / `filter` / `reduce` are built-in syntax with `it` rebound per iteration (and `accumulator` for reduce). Open follow-ups: multi-statement transformer blocks (probably `using` + indented block + final expression), sort with multiple keys (`sort points by x of it, then y of it`), runtime element-type inference for `map` (so the body's result type doesn't need to be statically known), nested-HOF support (currently rejected at compile time), and lifting the "no expression-position function calls" restriction inside HOF bodies (so `map xs using the result of f it` becomes natural).
+- **Higher-order list ops via `it`-block sugar**: **delivered (v1)** — see "Higher-order list operations (v1)" above. `sort` / `map` / `filter` / `reduce` are built-in syntax with `it` rebound per iteration (and `accumulator` for reduce); statement form updates `it`; `[the] result of CALL` is accepted in the body slots of statement-form HOFs (and `sort by`). Open follow-ups: multi-statement transformer blocks (probably `using` + indented block + final expression), sort with multiple keys (`sort points by x of it, then y of it`), runtime element-type inference for `map` (so the body's result type doesn't need to be statically known), nested-HOF support (currently rejected at compile time), and lifting the "no expression-position function calls" restriction inside HOF bodies (so `constant x is map xs using f it` becomes natural).
 
 ### Natural follow-ups
 - **String operations (tier 3/4 deferred)**: case transforms (`uppercase/lowercase of`), trim, split/join, replace, index-of, starts-with/ends-with. Tiers 1+2 (concat `&`, `length of`, `contains`, `character N of`, `characters A to B of`, `last character of`) are **implemented**.

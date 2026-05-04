@@ -1,0 +1,7 @@
+function combine takes number a plus number b returns number is
+    return a + b
+end function
+
+constant xs is list of 1, 2, 3, 4
+reduce xs starting 0 using the result of combine accumulator plus it
+say it

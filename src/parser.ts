@@ -70,6 +70,7 @@ const EXPRESSION_START_KEYWORDS = new Set([
   'lines',
   'make',
   'map', 'filter', 'reduce',
+  'accumulator',
 ]);
 
 function canStartExpression(tok: Token): boolean {
@@ -381,7 +382,7 @@ export function parse(tokens: Token[], source?: string): Program {
     }
   }
 
-  function tryConsumeTheResultOf(): CallStatement | null {
+  function tryConsumeTheResultOf(consumeTerminator: boolean = true): CallStatement | null {
     // Accepts either `the result of f ...` or `result of f ...`.
     let p = pos;
     if (tokens[p]?.type === 'IDENT' && tokens[p]?.value === 'the') p++;
@@ -390,9 +391,80 @@ export function parse(tokens: Token[], source?: string): Program {
       tokens[p + 1]?.type === 'KEYWORD' && tokens[p + 1]?.value === 'of'
     ) {
       pos = p + 2;
-      return parseCallStatement();
+      return parseCallStatement(consumeTerminator);
     }
     return null;
+  }
+
+  // Reject `[the] result of` in HOF slots when the HOF is used in expression
+  // position (only statement-form HOFs and `sort` allow it).
+  function rejectResultOfHere(slotKind: string): void {
+    let p = pos;
+    if (tokens[p]?.type === 'IDENT' && tokens[p]?.value === 'the') p++;
+    if (
+      tokens[p]?.type === 'IDENT' && tokens[p]?.value === 'result' &&
+      tokens[p + 1]?.type === 'KEYWORD' && tokens[p + 1]?.value === 'of'
+    ) {
+      throw new ParseError(
+        `'the result of' in a ${slotKind} slot is only allowed when the HOF is used as a statement`,
+        peek(),
+      );
+    }
+  }
+
+  // Parse a HOF body/predicate/start slot. When `allowResultOf` is true, a
+  // leading `[the] result of CALL` is consumed as a CallStatement (which is a
+  // valid Expression). Otherwise, a fresh expression is parsed and the
+  // result-of token sequence is explicitly rejected for clarity.
+  function parseHofSlot(allowResultOf: boolean, slotKind: string): Expression {
+    if (allowResultOf) {
+      const call = tryConsumeTheResultOf(false);
+      if (call) return call;
+    } else {
+      rejectResultOfHere(slotKind);
+    }
+    return parseExpression();
+  }
+
+  function parseMapTail(opTok: Token, allowResultOf: boolean): MapExpression {
+    const list = parseExpression();
+    if (!(peek().type === 'KEYWORD' && peek().value === 'using')) {
+      throw new ParseError(`Expected 'using' after 'map EXPR'`, peek());
+    }
+    advance();
+    const body = parseHofSlot(allowResultOf, "'map using'");
+    const node: MapExpression = { type: 'MapExpression', list, body };
+    withLoc(node, opTok);
+    return node;
+  }
+
+  function parseFilterTail(opTok: Token, allowResultOf: boolean): FilterExpression {
+    const list = parseExpression();
+    if (!(peek().type === 'KEYWORD' && peek().value === 'where')) {
+      throw new ParseError(`Expected 'where' after 'filter EXPR'`, peek());
+    }
+    advance();
+    const predicate = parseHofSlot(allowResultOf, "'filter where'");
+    const node: FilterExpression = { type: 'FilterExpression', list, predicate };
+    withLoc(node, opTok);
+    return node;
+  }
+
+  function parseReduceTail(opTok: Token, allowResultOf: boolean): ReduceExpression {
+    const list = parseExpression();
+    if (!(peek().type === 'KEYWORD' && peek().value === 'starting')) {
+      throw new ParseError(`Expected 'starting' after 'reduce EXPR'`, peek());
+    }
+    advance();
+    const start = parseHofSlot(allowResultOf, "'reduce starting'");
+    if (!(peek().type === 'KEYWORD' && peek().value === 'using')) {
+      throw new ParseError(`Expected 'using' after 'reduce EXPR starting V'`, peek());
+    }
+    advance();
+    const body = parseHofSlot(allowResultOf, "'reduce using'");
+    const node: ReduceExpression = { type: 'ReduceExpression', list, start, body };
+    withLoc(node, opTok);
+    return node;
   }
 
   function parseConstantStatement(): ConstantDeclaration {
@@ -878,7 +950,7 @@ export function parse(tokens: Token[], source?: string): Program {
     return stmt;
   }
 
-  function parseCallStatement(): CallStatement {
+  function parseCallStatement(consumeTerminator: boolean = true): CallStatement {
     const nameTok = consume('IDENT');
     const args: Array<{ name: string | null; value: Expression }> = [];
 
@@ -905,7 +977,7 @@ export function parse(tokens: Token[], source?: string): Program {
       break;
     }
 
-    consumeNewline();
+    if (consumeTerminator) consumeNewline();
     return { type: 'CallStatement', name: nameTok.value, args };
   }
 
@@ -1094,7 +1166,7 @@ export function parse(tokens: Token[], source?: string): Program {
     let key: Expression | undefined;
     if (peek().type === 'KEYWORD' && peek().value === 'by') {
       advance();
-      key = parseExpression();
+      key = parseHofSlot(true, "'sort by'");
     }
     let descending = false;
     if (peek().type === 'KEYWORD' && (peek().value === 'ascending' || peek().value === 'descending')) {
@@ -1106,17 +1178,14 @@ export function parse(tokens: Token[], source?: string): Program {
   }
 
   function parseHofStatement(): HofStatement {
-    const opTok = peek();
-    const expr = parseExpression();
-    if (
-      expr.type !== 'MapExpression'
-      && expr.type !== 'FilterExpression'
-      && expr.type !== 'ReduceExpression'
-    ) {
-      throw new ParseError(
-        `Expected map / filter / reduce expression after '${opTok.value}'`,
-        opTok,
-      );
+    const opTok = advance(); // consumes 'map' / 'filter' / 'reduce'
+    let expr: MapExpression | FilterExpression | ReduceExpression;
+    if (opTok.value === 'map') {
+      expr = parseMapTail(opTok, true);
+    } else if (opTok.value === 'filter') {
+      expr = parseFilterTail(opTok, true);
+    } else {
+      expr = parseReduceTail(opTok, true);
     }
     consumeNewline();
     const node: HofStatement = { type: 'HofStatement', expr };
@@ -1647,41 +1716,9 @@ export function parse(tokens: Token[], source?: string): Program {
       }
       if (tok.value === 'map' || tok.value === 'filter' || tok.value === 'reduce') {
         const opTok = advance();
-        const list = parseExpression();
-        if (opTok.value === 'map') {
-          if (!(peek().type === 'KEYWORD' && peek().value === 'using')) {
-            throw new ParseError(`Expected 'using' after 'map EXPR'`, peek());
-          }
-          advance();
-          const body = parseExpression();
-          const node: MapExpression = { type: 'MapExpression', list, body };
-          withLoc(node, opTok);
-          return node;
-        }
-        if (opTok.value === 'filter') {
-          if (!(peek().type === 'KEYWORD' && peek().value === 'where')) {
-            throw new ParseError(`Expected 'where' after 'filter EXPR'`, peek());
-          }
-          advance();
-          const predicate = parseExpression();
-          const node: FilterExpression = { type: 'FilterExpression', list, predicate };
-          withLoc(node, opTok);
-          return node;
-        }
-        // reduce
-        if (!(peek().type === 'KEYWORD' && peek().value === 'starting')) {
-          throw new ParseError(`Expected 'starting' after 'reduce EXPR'`, peek());
-        }
-        advance();
-        const start = parseExpression();
-        if (!(peek().type === 'KEYWORD' && peek().value === 'using')) {
-          throw new ParseError(`Expected 'using' after 'reduce EXPR starting V'`, peek());
-        }
-        advance();
-        const body = parseExpression();
-        const node: ReduceExpression = { type: 'ReduceExpression', list, start, body };
-        withLoc(node, opTok);
-        return node;
+        if (opTok.value === 'map') return parseMapTail(opTok, false);
+        if (opTok.value === 'filter') return parseFilterTail(opTok, false);
+        return parseReduceTail(opTok, false);
       }
       if (tok.value === 'accumulator') {
         advance();
