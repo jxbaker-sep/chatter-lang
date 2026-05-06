@@ -53,9 +53,9 @@ function containsEndSentinel(expr: Expression | null | undefined): boolean {
 
 export type ChatterType =
   | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: string; readonly: boolean }       // element string-encoded
-  | { kind: 'uniqueList'; element: string; readonly: false }
-  | { kind: 'dict'; keyType: string; valueType: string; readonly: boolean }
+  | { kind: 'list'; element: string }       // element string-encoded
+  | { kind: 'uniqueList'; element: string }
+  | { kind: 'dict'; keyType: string; valueType: string }
   | { kind: 'struct'; mangled: string };
 
 function unmangle(s: string): string {
@@ -72,13 +72,13 @@ function typesEqual(a: ChatterType, b: ChatterType): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'scalar' && b.kind === 'scalar') return a.name === b.name;
   if (a.kind === 'list' && b.kind === 'list') {
-    return a.element === b.element && a.readonly === b.readonly;
+    return a.element === b.element;
   }
   if (a.kind === 'uniqueList' && b.kind === 'uniqueList') {
     return a.element === b.element;
   }
   if (a.kind === 'dict' && b.kind === 'dict') {
-    return a.keyType === b.keyType && a.valueType === b.valueType && a.readonly === b.readonly;
+    return a.keyType === b.keyType && a.valueType === b.valueType;
   }
   if (a.kind === 'struct' && b.kind === 'struct') {
     return a.mangled === b.mangled;
@@ -91,10 +91,9 @@ function typeToString(t: ChatterType): string {
   if (t.kind === 'struct') return 'struct ' + unmangle(t.mangled);
   if (t.kind === 'uniqueList') return 'unique list of ' + elementHuman(t.element);
   if (t.kind === 'dict') {
-    return (t.readonly ? 'readonly dictionary from ' : 'dictionary from ')
-      + elementHuman(t.keyType) + ' to ' + elementHuman(t.valueType);
+    return 'dictionary from ' + elementHuman(t.keyType) + ' to ' + elementHuman(t.valueType);
   }
-  return (t.readonly ? 'readonly list of ' : 'list of ') + elementHuman(t.element);
+  return 'list of ' + elementHuman(t.element);
 }
 
 function elementCode(t: ChatterType | null): string | null {
@@ -230,7 +229,7 @@ export class Compiler {
     if (a.kind === 'dict') {
       const kCode = this.elementAnnotationToCode(a.keyType, loc);
       const vCode = this.elementAnnotationToCode(a.valueType, loc);
-      return { kind: 'dict', keyType: kCode, valueType: vCode, readonly: a.readonly };
+      return { kind: 'dict', keyType: kCode, valueType: vCode };
     }
     // list/uniqueList
     const elem = a.element;
@@ -245,9 +244,9 @@ export class Compiler {
       elemCode = 'struct:' + info.mangled;
     }
     if (a.kind === 'uniqueList') {
-      return { kind: 'uniqueList', element: elemCode, readonly: false };
+      return { kind: 'uniqueList', element: elemCode };
     }
-    return { kind: 'list', element: elemCode, readonly: a.readonly };
+    return { kind: 'list', element: elemCode };
   }
 
   private elementAnnotationToCode(e: ElementTypeAnnotation, loc?: SourceLocation): string {
@@ -659,23 +658,6 @@ export class Compiler {
     this.emit(out, { op: 'SAY_MULTI', count: stmt.expressions.length });
   }
 
-  private checkNotReadonlySmuggle(value: Expression, bindings: Bindings, ctx: string): void {
-    // Cannot bind a readonly-list / readonly-dict reference to a set/var binding.
-    if (value.type === 'IdentifierExpression') {
-      const info = bindings.get(value.name);
-      if (info?.type && info.type.kind === 'list' && info.type.readonly) {
-        throw new CompileError(
-          `cannot bind a readonly-list reference to a '${ctx}' binding (name '${value.name}')`,
-        this.currentLoc);
-      }
-      if (info?.type && info.type.kind === 'dict' && info.type.readonly) {
-        throw new CompileError(
-          `cannot bind a readonly-dictionary reference to a '${ctx}' binding (name '${value.name}')`,
-        this.currentLoc);
-      }
-    }
-  }
-
   private compilePrecall(
     precall: CallStatement,
     out: Instruction[],
@@ -737,7 +719,6 @@ export class Compiler {
       bindings.set(stmt.name, { kind: 'constant', type: rt });
       return;
     }
-    this.checkNotReadonlySmuggle(stmt.value, bindings, 'constant');
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'STORE', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
@@ -766,7 +747,6 @@ export class Compiler {
       bindings.set(stmt.name, { kind: 'var', type: rt });
       return;
     }
-    this.checkNotReadonlySmuggle(stmt.value, bindings, 'variable');
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'STORE_VAR', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
@@ -811,17 +791,6 @@ export class Compiler {
           `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rhs)}`,
         this.currentLoc);
       }
-      // Prevent readonly smuggling via change
-      if (rhs && rhs.kind === 'list' && rhs.readonly && info.type.kind === 'list' && !info.type.readonly) {
-        throw new CompileError(
-          `cannot change '${stmt.name}' to a readonly-list reference`,
-        this.currentLoc);
-      }
-      if (rhs && rhs.kind === 'dict' && rhs.readonly && info.type.kind === 'dict' && !info.type.readonly) {
-        throw new CompileError(
-          `cannot change '${stmt.name}' to a readonly-dictionary reference`,
-        this.currentLoc);
-      }
     }
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'STORE_VAR', name: stmt.name });
@@ -850,11 +819,6 @@ export class Compiler {
         this.currentLoc);
       }
     } else {
-      if (info.type.readonly) {
-        throw new CompileError(
-          `Cannot change item of '${stmt.listName}': it is a readonly list reference`,
-        this.currentLoc);
-      }
       const rhs = this.staticType(stmt.value, bindings);
       const rc = elementCode(rhs);
       if (rc !== null && rc !== info.type.element) {
@@ -883,11 +847,6 @@ export class Compiler {
     if (info.type && info.type.kind !== 'list') {
       throw new CompileError(
         `Cannot ${op} to '${listName}': not a list (type ${typeToString(info.type)})`,
-      this.currentLoc);
-    }
-    if (info.type && info.type.kind === 'list' && info.type.readonly) {
-      throw new CompileError(
-        `Cannot ${op} to '${listName}': it is a readonly list reference`,
       this.currentLoc);
     }
     return info.type ?? null;
@@ -981,11 +940,6 @@ export class Compiler {
         this.currentLoc);
       }
       if (info.type.kind === 'dict') {
-        if (info.type.readonly) {
-          throw new CompileError(
-            `Cannot remove from '${stmt.listName}': it is a readonly dictionary reference`,
-          this.currentLoc);
-        }
         const rhs = this.staticType(stmt.value, bindings);
         const rc = elementCode(rhs);
         if (rc !== null && rc !== info.type.keyType) {
@@ -1203,12 +1157,6 @@ export class Compiler {
                 `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
               this.currentLoc);
             }
-            // Widening: mutable → readonly OK. Narrowing: readonly → mutable rejected.
-            if (argType.readonly && !paramType.readonly) {
-              throw new CompileError(
-                `Cannot pass readonly-list reference to mutable-list param '${sig[i].name}' in call to '${stmt.name}'`,
-              this.currentLoc);
-            }
           } else if (paramType.kind === 'uniqueList' && argType.kind === 'uniqueList') {
             if (argType.element !== paramType.element) {
               throw new CompileError(
@@ -1219,12 +1167,6 @@ export class Compiler {
             if (argType.keyType !== paramType.keyType || argType.valueType !== paramType.valueType) {
               throw new CompileError(
                 `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
-              this.currentLoc);
-            }
-            // Widening: mutable → readonly OK. Narrowing: readonly → mutable rejected.
-            if (argType.readonly && !paramType.readonly) {
-              throw new CompileError(
-                `Cannot pass readonly-dictionary reference to mutable-dictionary param '${sig[i].name}' in call to '${stmt.name}'`,
               this.currentLoc);
             }
           } else if (paramType.kind === 'scalar' && argType.kind === 'scalar') {
@@ -1609,21 +1551,6 @@ export class Compiler {
       this.emit(out, { op: 'RETURN' });
       return;
     }
-    // Smuggling ban: a typed function that `return NAME` where NAME is a readonly list/dict → error.
-    // (Also: the return type itself is never readonly per spec §8.)
-    if (stmt.value.type === 'IdentifierExpression') {
-      const info = bindings.get(stmt.value.name);
-      if (info?.type && info.type.kind === 'list' && info.type.readonly) {
-        throw new CompileError(
-          `cannot return readonly-list reference '${stmt.value.name}' from function '${this.currentFuncName}'`,
-        this.currentLoc);
-      }
-      if (info?.type && info.type.kind === 'dict' && info.type.readonly) {
-        throw new CompileError(
-          `cannot return readonly-dictionary reference '${stmt.value.name}' from function '${this.currentFuncName}'`,
-        this.currentLoc);
-      }
-    }
     const st = this.staticType(stmt.value, bindings);
     if (st !== null) {
       if (st.kind !== rt.kind) {
@@ -1642,11 +1569,6 @@ export class Compiler {
             `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
           this.currentLoc);
         }
-        if (st.readonly && !rt.readonly) {
-          throw new CompileError(
-            `cannot return readonly-list reference from function '${this.currentFuncName}'`,
-          this.currentLoc);
-        }
       }
       if (rt.kind === 'uniqueList' && st.kind === 'uniqueList') {
         if (rt.element !== st.element) {
@@ -1659,11 +1581,6 @@ export class Compiler {
         if (rt.keyType !== st.keyType || rt.valueType !== st.valueType) {
           throw new CompileError(
             `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
-          this.currentLoc);
-        }
-        if (st.readonly && !rt.readonly) {
-          throw new CompileError(
-            `cannot return readonly-dictionary reference from function '${this.currentFuncName}'`,
           this.currentLoc);
         }
       }
@@ -2564,11 +2481,6 @@ export class Compiler {
           `Cannot change value in '${stmt.dictName}': not a dictionary (type ${typeToString(info.type)})`,
         this.currentLoc);
       }
-      if (info.type.readonly) {
-        throw new CompileError(
-          `Cannot change value in '${stmt.dictName}': it is a readonly dictionary reference`,
-        this.currentLoc);
-      }
       const kt = this.staticType(stmt.key, bindings);
       const kc = elementCode(kt);
       if (kc !== null && kc !== info.type.keyType) {
@@ -2855,7 +2767,7 @@ export class Compiler {
       case 'ListLiteral': {
         if (expr.kind === 'empty') {
           const code = this.elementAnnotationToCode(expr.elementType!);
-          return { kind: 'list', element: code, readonly: false };
+          return { kind: 'list', element: code };
         }
         let inferred: string | null = null;
         for (const e of expr.elements) {
@@ -2863,12 +2775,12 @@ export class Compiler {
           const c = elementCode(t);
           if (c !== null) { inferred = c; break; }
         }
-        return inferred !== null ? { kind: 'list', element: inferred, readonly: false } : null;
+        return inferred !== null ? { kind: 'list', element: inferred } : null;
       }
       case 'UniqueListLiteral': {
         if (expr.kind === 'empty') {
           const code = this.elementAnnotationToCode(expr.elementType!);
-          return { kind: 'uniqueList', element: code, readonly: false };
+          return { kind: 'uniqueList', element: code };
         }
         let inferred: string | null = null;
         for (const e of expr.elements) {
@@ -2876,13 +2788,13 @@ export class Compiler {
           const c = elementCode(t);
           if (c !== null) { inferred = c; break; }
         }
-        return inferred !== null ? { kind: 'uniqueList', element: inferred, readonly: false } : null;
+        return inferred !== null ? { kind: 'uniqueList', element: inferred } : null;
       }
       case 'DictionaryLiteral': {
         if (expr.kind === 'empty') {
           const k = this.elementAnnotationToCode(expr.keyType!);
           const v = this.elementAnnotationToCode(expr.valueType!);
-          return { kind: 'dict', keyType: k, valueType: v, readonly: false };
+          return { kind: 'dict', keyType: k, valueType: v };
         }
         let kInf: string | null = null;
         let vInf: string | null = null;
@@ -2898,7 +2810,7 @@ export class Compiler {
           if (kInf !== null && vInf !== null) break;
         }
         if (kInf !== null && vInf !== null) {
-          return { kind: 'dict', keyType: kInf, valueType: vInf, readonly: false };
+          return { kind: 'dict', keyType: kInf, valueType: vInf };
         }
         return null;
       }
@@ -2932,7 +2844,7 @@ export class Compiler {
       case 'SubstringExpression':
         return { kind: 'scalar', name: 'string' };
       case 'ReadFileLinesExpression':
-        return { kind: 'list', element: 'string', readonly: false };
+        return { kind: 'list', element: 'string' };
       case 'CodeOfExpression':
         return { kind: 'scalar', name: 'number' };
       case 'CharacterFromCodeExpression':
@@ -2950,10 +2862,10 @@ export class Compiler {
         const tt = this.staticType(expr.target, bindings);
         if (tt && tt.kind === 'dict') {
           if (expr.fieldName === 'keys') {
-            return { kind: 'uniqueList', element: tt.keyType, readonly: false };
+            return { kind: 'uniqueList', element: tt.keyType };
           }
           if (expr.fieldName === 'values') {
-            return { kind: 'list', element: tt.valueType, readonly: false };
+            return { kind: 'list', element: tt.valueType };
           }
           return null;
         }
@@ -2977,13 +2889,13 @@ export class Compiler {
           if (!bt) return null;
           const code = elementCode(bt);
           if (code === null) return null;
-          return { kind: 'list', element: code, readonly: false };
+          return { kind: 'list', element: code };
         } finally { this.hofItStack.pop(); }
       }
       case 'FilterExpression': {
         const lt = this.staticType(expr.list, bindings);
         if (!lt || (lt.kind !== 'list' && lt.kind !== 'uniqueList')) return null;
-        return { kind: 'list', element: lt.element, readonly: false };
+        return { kind: 'list', element: lt.element };
       }
       case 'ReduceExpression':
         return this.staticType(expr.start, bindings);

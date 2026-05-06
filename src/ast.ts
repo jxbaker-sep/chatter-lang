@@ -6,9 +6,9 @@ export type ElementTypeAnnotation =
 
 export type TypeAnnotation =
   | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: ElementTypeAnnotation; readonly: boolean }
-  | { kind: 'uniqueList'; element: ElementTypeAnnotation; readonly: false }
-  | { kind: 'dict'; keyType: ElementTypeAnnotation; valueType: ElementTypeAnnotation; readonly: boolean }
+  | { kind: 'list'; element: ElementTypeAnnotation }
+  | { kind: 'uniqueList'; element: ElementTypeAnnotation }
+  | { kind: 'dict'; keyType: ElementTypeAnnotation; valueType: ElementTypeAnnotation }
   | { kind: 'struct'; name: string };  // unmangled struct name
 
 export interface Located {

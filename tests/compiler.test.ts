@@ -547,51 +547,14 @@ describe('Compiler', () => {
       expect(() => compileSource('constant x is 5\nappend 1 to x')).toThrow(/not a list/);
     });
 
-    test('append inside function with readonly param → compile error', () => {
-      const src = 'function f takes readonly list of number xs is\n    append 1 to xs\nend function';
-      expect(() => compileSource(src)).toThrow(/readonly list reference/);
-    });
-
-    test('change item with readonly param → compile error', () => {
-      const src = 'function f takes readonly list of number xs is\n    change item 1 of xs to 9\nend function';
-      expect(() => compileSource(src)).toThrow(/readonly/);
-    });
-
-    test('constant x is readonly param → compile error (no smuggling)', () => {
-      const src = 'function f takes readonly list of number xs is\n    constant other is xs\n    say length of other\nend function';
-      expect(() => compileSource(src)).toThrow(/readonly-list reference/);
-    });
-
-    test('variable other is readonly param → compile error', () => {
-      const src = 'function f takes readonly list of number xs is\n    variable other is xs\nend function';
-      expect(() => compileSource(src)).toThrow(/readonly-list reference/);
-    });
-
-    test('widening: mutable arg → readonly param OK', () => {
-      const src = 'function f takes readonly list of number xs returns number is\n    return length of xs\nend function\nconstant l is list of 1, 2\nf l\nsay it';
+    test('append inside function with list param → OK (no readonly)', () => {
+      const src = 'function f takes list of number xs is\n    append 1 to xs\nend function';
       expect(() => compileSource(src)).not.toThrow();
-    });
-
-    test('narrowing: readonly arg → mutable param rejected', () => {
-      const src = [
-        'function inner takes list of number xs is',
-        '    append 1 to xs',
-        'end function',
-        'function outer takes readonly list of number xs is',
-        '    inner xs',
-        'end function',
-      ].join('\n');
-      expect(() => compileSource(src)).toThrow(/Cannot pass readonly-list reference/);
     });
 
     test('pass scalar to list param → compile error', () => {
       const src = 'function f takes list of number xs is\n    say length of xs\nend function\nf 5';
       expect(() => compileSource(src)).toThrow(/Type mismatch/);
-    });
-
-    test('return readonly list reference from function → compile error', () => {
-      const src = 'function f takes readonly list of number xs returns list of number is\n    return xs\nend function';
-      expect(() => compileSource(src)).toThrow(/readonly/);
     });
 
     test('change var list to different element type → compile error', () => {

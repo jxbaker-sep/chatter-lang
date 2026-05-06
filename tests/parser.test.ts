@@ -596,15 +596,11 @@ describe('Parser', () => {
       expect(ast.body[0]).toMatchObject({ type: 'RepeatStatement', kind: 'list', varName: 'x' });
     });
 
-    test('parses list of TYPE and readonly list of TYPE param annotations', () => {
-      const ast = parseSource('function f takes list of number xs other readonly list of string ys is\n    say 1\nend function');
+    test('parses list of TYPE param annotations', () => {
+      const ast = parseSource('function f takes list of number xs other list of string ys is\n    say 1\nend function');
       const fn = ast.body[0] as FunctionDeclaration;
-      expect(fn.params[0].paramType).toEqual({ kind: 'list', element: { kind: 'scalar', name: 'number' }, readonly: false });
-      expect(fn.params[1].paramType).toEqual({ kind: 'list', element: { kind: 'scalar', name: 'string' }, readonly: true });
-    });
-
-    test('rejects readonly outside parameter annotations', () => {
-      expect(() => parseSource('constant l is readonly list of number')).toThrow(/readonly/);
+      expect(fn.params[0].paramType).toEqual({ kind: 'list', element: { kind: 'scalar', name: 'number' } });
+      expect(fn.params[1].paramType).toEqual({ kind: 'list', element: { kind: 'scalar', name: 'string' } });
     });
   });
 
