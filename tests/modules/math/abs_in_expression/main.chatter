@@ -1,0 +1,6 @@
+use abs from "std:math"
+constant a is the result of abs -3
+constant b is the result of abs 5
+say a + b
+constant c is the result of abs 4 - 10
+say c

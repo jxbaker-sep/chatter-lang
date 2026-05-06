@@ -1,0 +1,3 @@
+use abs from "std:math"
+abs 0
+say it

@@ -1,0 +1,16 @@
+use abs, min, max from "std:math"
+constant xs is list of -7, 2, -10, 4, -3
+variable largest_abs is 0
+repeat with x in xs
+  constant a is the result of abs x
+  if a is greater than largest_abs
+    change largest_abs to a
+  end if
+end repeat
+say largest_abs
+
+min xs
+constant lo is the result of abs it
+max xs
+constant hi is the result of abs it
+say lo, hi

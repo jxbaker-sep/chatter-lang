@@ -28,3 +28,11 @@ export function max takes list of number xs returns number is
   end repeat
   return max
 end function
+
+export function abs takes number n returns number is
+  if n is at least 0
+    return n
+  else
+    return -n
+  end if
+end function
