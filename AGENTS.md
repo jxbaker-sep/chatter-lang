@@ -46,7 +46,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 ### Statements
 - `say expr (, expr)*` — prints one or more expressions space-separated on one line, terminated by newline. **Does NOT update `it`** (for debugging). Empty `say` or trailing comma = compile error. Single-arg form output is byte-identical to the old single-expression `say`. List literals stay greedy in `say` arg position — use parens to mix a list alongside other items: `say (list of 1, 2), "end"`.
 - `constant NAME is expr` — immutable binding. Duplicate `constant` = compile error.
-- `variable NAME is expr` — **mutable** binding. Initializer required. Type-locked at first assignment to whichever of {number, string, boolean} the value is. Same scoping rules as `constant` (function-local; no shadowing of outer bindings; no redeclaration at same level — including mixing `constant`/`variable`). Does NOT update `it`.
+- `variable NAME is expr` — **mutable** binding. Initializer required. Type-locked at first assignment to whichever of {number, string, boolean} the value is. Same scoping rules as `constant` (block-scoped; cannot shadow a binding visible from an enclosing scope; no redeclaration at same level — including mixing `constant`/`variable`). Sibling blocks (e.g. the `if` and `else` arms of an `if`/`else`) may each declare their own `foo` independently. Does NOT update `it`.
 - `change NAME to expr` — reassigns an existing `variable`. Compile error if NAME is not a `variable` (e.g. a `constant`, param, loop var, or undeclared). Runtime error if the new value's type doesn't match the locked type (message mentions name + expected/got). Does NOT update `it`.
 - Arithmetic sugar (all shorthand for `change NAME to NAME <op> EXPR`):
   - `add EXPR to NAME`
@@ -119,9 +119,11 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 
 ### Scoping
 - `constant` bindings are immutable; `variable` bindings are mutable but type-locked.
-- **Lexical scoping.** A function body sees only: its own params/locals, and **module top-level** `constant`/`variable` bindings. It does NOT see locals of any caller frame. A reference to an unknown name is a compile error (`Undefined variable: 'X'`). `change`/sugar can only target `variable`s declared in the **same** function body.
-- Param names **cannot shadow** outer bindings — compile error.
-- `variable` **cannot shadow** outer bindings (inside a function) — compile error. Redeclaring a name already bound via `constant`/`variable` in the same scope — compile error.
+- **Lexical block scoping.** Each `if` / `else if` / `else` arm and each `repeat` body introduces its own scope, parented to the enclosing block. A name lookup walks the scope chain. A function body sees only: its own params/locals (block-scoped), and **module top-level** `constant`/`variable` bindings. It does NOT see locals of any caller frame. A reference to an unknown name is a compile error (`Undefined variable: 'X'`). `change`/sugar can only target `variable`s declared in the **same** function body's scope chain.
+- A `constant` / `variable` declaration **cannot shadow** any binding visible from an enclosing scope (compile error). Sibling scopes (e.g. `if`/`else` arms) may each declare the same name independently — they are not enclosing each other.
+- Redeclaring a name already bound at the **same** scope level → compile error (including mixing `constant`/`variable`).
+- Param names **cannot shadow** outer bindings — compile error. Block-declared locals also cannot shadow params.
+- **Internal**: each block-declared name is mangled to a unique internal form (`foo`, `foo$1`, `foo$2`, …) tracked per-function via a shared mangled-name set. The VM is unaware of scopes — it sees flat distinct local names. Loop variables do NOT need a `DELETE` op (mangling makes them unique to their iteration scope); internal repeat temps still emit `DELETE`.
 
 ### Keywords reserved for mutable vars
 `variable`, `change`, `add`, `subtract`, `multiply`, `divide`, `by`
@@ -528,7 +530,7 @@ Existing golden cases:
 - `print` does NOT update `it` — user wants this for debugging. (`print` was renamed to `say`.)
 - `it` is function-scoped (separate per frame).
 - `constant` is strictly immutable (constants really).
-- No shadowing of any kind.
+- No shadowing of bindings visible from an enclosing scope; sibling scopes may reuse names.
 - Booleans strict: `if 5` is runtime error, not truthiness.
 - `and`/`or` are **short-circuit**: `a and b` skips `b` when `a` is `false`; `a or b` skips `b` when `a` is `true`. Skipping suppresses any runtime errors that `b` would have raised. Static type checks on both operands still fire (e.g., `true and "hello"` is a compile error). Runtime type checks fire on whichever operands actually run (so `true and X` errors when `X` evaluates to a non-boolean; `false and X` does not).
 
