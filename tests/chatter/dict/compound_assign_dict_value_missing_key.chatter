@@ -1,0 +1,2 @@
+variable counts is dictionary "alice" to 1
+add 10 to value of "bob" in counts

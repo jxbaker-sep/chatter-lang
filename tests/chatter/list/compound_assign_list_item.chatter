@@ -1,0 +1,9 @@
+constant xs is list of 10, 20, 30
+add 5 to item 2 of xs
+say xs
+subtract 3 from item 1 of xs
+say xs
+multiply item 3 of xs by 2
+say xs
+divide item 2 of xs by 5
+say xs

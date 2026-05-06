@@ -48,12 +48,18 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `constant NAME is expr` — immutable binding. Duplicate `constant` = compile error.
 - `variable NAME is expr` — **mutable** binding. Initializer required. Type-locked at first assignment to whichever of {number, string, boolean} the value is. Same scoping rules as `constant` (block-scoped; cannot shadow a binding visible from an enclosing scope; no redeclaration at same level — including mixing `constant`/`variable`). Sibling blocks (e.g. the `if` and `else` arms of an `if`/`else`) may each declare their own `foo` independently. Does NOT update `it`.
 - `change NAME to expr` — reassigns an existing `variable`. Compile error if NAME is not a `variable` (e.g. a `constant`, param, loop var, or undeclared). Runtime error if the new value's type doesn't match the locked type (message mentions name + expected/got). Does NOT update `it`.
-- Arithmetic sugar (all shorthand for `change NAME to NAME <op> EXPR`):
-  - `add EXPR to NAME`
-  - `subtract EXPR from NAME`
-  - `multiply NAME by EXPR`
-  - `divide NAME by EXPR`
-  All require NAME to be a `variable` of locked type `number` (compile error if the type is statically known to be string or boolean; otherwise deferred to runtime arithmetic check). Do NOT update `it`.
+- Arithmetic sugar — read-modify-write at any of three lvalue forms:
+  - `add EXPR to TARGET`
+  - `subtract EXPR from TARGET`
+  - `multiply TARGET by EXPR`
+  - `divide TARGET by EXPR`
+
+  Where TARGET is one of:
+  - **bare `NAME`** — must be a `variable` of locked type `number` (compile error if statically known to be string/boolean; deferred runtime check otherwise).
+  - **`item INDEX of NAME`** — `NAME` must be a list whose element type is `number`. The `end` index sentinel is supported. Compile error on unique-list target (no random access). Equivalent to `change item INDEX of NAME to (item INDEX of NAME) <op> EXPR` — but `NAME` and `INDEX` are each evaluated **once** (compiler emits temps).
+  - **`value of KEY in NAME`** — `NAME` must be a dictionary whose value type is `number`. Equivalent to `change value of KEY in NAME to (value of KEY in NAME) <op> EXPR` — `NAME` and `KEY` evaluated once. Runtime error if the key is missing (read-modify-write does not auto-insert in v1).
+
+  None of de four forms update `it`. The `add EXPR to NAME` form remains overloaded for unique-list targets (silent insert via UNIQUE_LIST_ADD); the listItem / dictValue forms only do arithmetic.
 - `function NAME [takes TYPE IDENT (LABEL TYPE IDENT)*] [returns TYPE] is ... end function` — function decl. `TYPE` is `number`, `boolean`, or `string`. Zero-arg functions omit `takes` entirely. First param is positional (no label). Each subsequent param is preceded by a **separator label** that is used at the call site; the param's **body name** (the IDENT) is what the body code refers to. `LABEL` may be any IDENT or any non-stop KEYWORD (e.g. `to`, `with`, `from`, `in` are valid labels; `is`, `end`, `if`, `and`, `takes`, `returns`, ... are not). Duplicate body names in the same function → compile error. Duplicate labels are allowed; at the call site, multiple args with the same label bind to the matching params **in declaration order**. The closing `end function` qualifier is **required** (bare `end` is a parse error).
 
   **Two kinds of function (determined by presence of `returns` clause):**

@@ -1,0 +1,5 @@
+constant xs is list of 1, 2, 3, 4
+add 100 to item end of xs
+say xs
+multiply item end - 1 of xs by 10
+say xs

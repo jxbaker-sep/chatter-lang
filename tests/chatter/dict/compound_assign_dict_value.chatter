@@ -1,0 +1,10 @@
+variable counts is dictionary "alice" to 1, "bob" to 5
+add 10 to value of "alice" in counts
+say value of "alice" in counts
+say value of "bob" in counts
+multiply value of "bob" in counts by 3
+say value of "bob" in counts
+subtract 2 from value of "alice" in counts
+say value of "alice" in counts
+divide value of "bob" in counts by 5
+say value of "bob" in counts

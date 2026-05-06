@@ -144,10 +144,15 @@ export interface ChangeItemStatement {
   value: Expression;
 }
 
+export type CompoundAssignTarget =
+  | { kind: 'name'; name: string }
+  | { kind: 'listItem'; listName: string; index: Expression }
+  | { kind: 'dictValue'; dictName: string; key: Expression };
+
 export interface CompoundAssignStatement {
   type: 'CompoundAssignStatement';
   op: 'add' | 'subtract' | 'multiply' | 'divide';
-  name: string;
+  target: CompoundAssignTarget;
   value: Expression;
 }
 

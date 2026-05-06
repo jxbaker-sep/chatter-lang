@@ -535,40 +535,65 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'ChangeStatement', name: nameTok.value, value };
   }
 
+  // Parses a compound-assign target: bare IDENT, `item EXPR of IDENT`, or `value of EXPR in IDENT`.
+  // Caller has already consumed any leading word (e.g. `to` / `from`) preceding this target slot.
+  function parseCompoundAssignTarget(): import('./ast').CompoundAssignTarget {
+    if (peek().type === 'KEYWORD' && peek().value === 'item') {
+      advance(); // item
+      indexSlotDepth++;
+      let index: Expression;
+      try { index = parseExpression(); } finally { indexSlotDepth--; }
+      consume('KEYWORD', 'of');
+      const nameTok = consume('IDENT');
+      return { kind: 'listItem', listName: nameTok.value, index };
+    }
+    if (peek().type === 'IDENT' && peek().value === 'value'
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
+      advance(); // value
+      advance(); // of
+      const key = parsePrimary();
+      consume('KEYWORD', 'in');
+      const nameTok = consume('IDENT');
+      return { kind: 'dictValue', dictName: nameTok.value, key };
+    }
+    const nameTok = consume('IDENT');
+    return { kind: 'name', name: nameTok.value };
+  }
+
   function parseAddStatement(): CompoundAssignStatement {
     consume('KEYWORD', 'add');
     const value = parseExpression();
     consume('KEYWORD', 'to');
-    const nameTok = consume('IDENT');
+    const target = parseCompoundAssignTarget();
     consumeNewline();
-    return { type: 'CompoundAssignStatement', op: 'add', name: nameTok.value, value };
+    return { type: 'CompoundAssignStatement', op: 'add', target, value };
   }
 
   function parseSubtractStatement(): CompoundAssignStatement {
     consume('KEYWORD', 'subtract');
     const value = parseExpression();
     consume('KEYWORD', 'from');
-    const nameTok = consume('IDENT');
+    const target = parseCompoundAssignTarget();
     consumeNewline();
-    return { type: 'CompoundAssignStatement', op: 'subtract', name: nameTok.value, value };
+    return { type: 'CompoundAssignStatement', op: 'subtract', target, value };
   }
 
   function parseMultiplyStatement(): CompoundAssignStatement {
     consume('KEYWORD', 'multiply');
-    const nameTok = consume('IDENT');
+    const target = parseCompoundAssignTarget();
     consume('KEYWORD', 'by');
     const value = parseExpression();
     consumeNewline();
-    return { type: 'CompoundAssignStatement', op: 'multiply', name: nameTok.value, value };
+    return { type: 'CompoundAssignStatement', op: 'multiply', target, value };
   }
 
   function parseDivideStatement(): CompoundAssignStatement {
     consume('KEYWORD', 'divide');
-    const nameTok = consume('IDENT');
+    const target = parseCompoundAssignTarget();
     consume('KEYWORD', 'by');
     const value = parseExpression();
     consumeNewline();
-    return { type: 'CompoundAssignStatement', op: 'divide', name: nameTok.value, value };
+    return { type: 'CompoundAssignStatement', op: 'divide', target, value };
   }
 
   function parseTypeAnnotation(): TypeAnnotation {

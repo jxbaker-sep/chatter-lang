@@ -383,7 +383,7 @@ describe('Parser', () => {
     test('add EXPR to NAME produces CompoundAssignStatement op=add', () => {
       const ast = parseSource('add 3 to n');
       expect(ast.body[0]).toMatchObject({
-        type: 'CompoundAssignStatement', op: 'add', name: 'n',
+        type: 'CompoundAssignStatement', op: 'add', target: { kind: 'name', name: 'n' },
         value: { type: 'NumberLiteral', value: 3 },
       });
     });
@@ -391,14 +391,14 @@ describe('Parser', () => {
     test('subtract EXPR from NAME', () => {
       const ast = parseSource('subtract 3 from n');
       expect(ast.body[0]).toMatchObject({
-        type: 'CompoundAssignStatement', op: 'subtract', name: 'n',
+        type: 'CompoundAssignStatement', op: 'subtract', target: { kind: 'name', name: 'n' },
       });
     });
 
     test('multiply NAME by EXPR', () => {
       const ast = parseSource('multiply n by 4');
       expect(ast.body[0]).toMatchObject({
-        type: 'CompoundAssignStatement', op: 'multiply', name: 'n',
+        type: 'CompoundAssignStatement', op: 'multiply', target: { kind: 'name', name: 'n' },
         value: { type: 'NumberLiteral', value: 4 },
       });
     });
@@ -406,14 +406,14 @@ describe('Parser', () => {
     test('divide NAME by EXPR', () => {
       const ast = parseSource('divide n by 2');
       expect(ast.body[0]).toMatchObject({
-        type: 'CompoundAssignStatement', op: 'divide', name: 'n',
+        type: 'CompoundAssignStatement', op: 'divide', target: { kind: 'name', name: 'n' },
       });
     });
 
     test('add accepts a full expression on the RHS', () => {
       const ast = parseSource('add 2 + 3 to n');
       expect(ast.body[0]).toMatchObject({
-        type: 'CompoundAssignStatement', op: 'add', name: 'n',
+        type: 'CompoundAssignStatement', op: 'add', target: { kind: 'name', name: 'n' },
         value: { type: 'BinaryExpression', operator: '+' },
       });
     });

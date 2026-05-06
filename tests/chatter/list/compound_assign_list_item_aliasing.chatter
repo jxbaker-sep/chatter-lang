@@ -1,0 +1,5 @@
+constant a is list of 1, 2, 3
+constant b is a
+add 100 to item 2 of a
+say a
+say b

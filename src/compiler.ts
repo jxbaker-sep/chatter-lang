@@ -1063,10 +1063,20 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const info = bindings.lookup(stmt.name);
+    const target = stmt.target;
+    if (target.kind === 'listItem') {
+      this.compileCompoundAssignListItem(stmt, target, out, bindings);
+      return;
+    }
+    if (target.kind === 'dictValue') {
+      this.compileCompoundAssignDictValue(stmt, target, out, bindings);
+      return;
+    }
+    const name = target.name;
+    const info = bindings.lookup(name);
     if (!info) {
       throw new CompileError(
-        `Cannot ${stmt.op} '${stmt.name}': no such variable declared in this function`,
+        `Cannot ${stmt.op} '${name}': no such variable declared in this function`,
       this.currentLoc);
     }
     // `add EXPR to NAME` is overloaded: for unique-list bindings, route to UNIQUE_LIST_ADD.
@@ -1091,29 +1101,143 @@ export class Compiler {
     // `add EXPR to NAME` on a list → helpful error pointing at append/prepend/insert at.
     if (stmt.op === 'add' && info.type && info.type.kind === 'list') {
       throw new CompileError(
-        `'add' cannot insert into a list (use 'append', 'prepend', or 'insert at' for '${stmt.name}')`,
+        `'add' cannot insert into a list (use 'append', 'prepend', or 'insert at' for '${name}')`,
       this.currentLoc);
     }
     if (info.kind !== 'var') {
       throw new CompileError(
-        `Cannot ${stmt.op} '${stmt.name}': it is a ${info.kind === 'constant' ? "'constant' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'variable'`,
+        `Cannot ${stmt.op} '${name}': it is a ${info.kind === 'constant' ? "'constant' binding (immutable)" : info.kind === 'param' ? 'parameter' : 'loop variable'}, not a 'variable'`,
       this.currentLoc);
     }
     if (info.type !== undefined && !(info.type.kind === 'scalar' && info.type.name === 'number')) {
       throw new CompileError(
-        `Cannot ${stmt.op} '${stmt.name}': its type is ${typeToString(info.type)}, not number`,
+        `Cannot ${stmt.op} '${name}': its type is ${typeToString(info.type)}, not number`,
       this.currentLoc);
     }
     // Emit: LOAD name; <value>; OP; STORE_VAR name
     this.emit(out, { op: 'LOAD', name: info.mangled });
     this.compileExpr(stmt.value, out, bindings);
-    switch (stmt.op) {
+    this.emitArithOp(stmt.op, out);
+    this.emit(out, { op: 'STORE_VAR', name: info.mangled });
+  }
+
+  private emitArithOp(op: 'add' | 'subtract' | 'multiply' | 'divide', out: Instruction[]): void {
+    switch (op) {
       case 'add':      this.emit(out, { op: 'ADD' }); break;
       case 'subtract': this.emit(out, { op: 'SUB' }); break;
       case 'multiply': this.emit(out, { op: 'MUL' }); break;
       case 'divide':   this.emit(out, { op: 'DIV' }); break;
     }
-    this.emit(out, { op: 'STORE_VAR', name: info.mangled });
+  }
+
+  private compileCompoundAssignListItem(
+    stmt: CompoundAssignStatement,
+    target: { kind: 'listItem'; listName: string; index: Expression },
+    out: Instruction[],
+    bindings: Scope,
+  ): void {
+    const info = bindings.lookup(target.listName);
+    if (!info) {
+      throw new CompileError(
+        `Cannot ${stmt.op} item of '${target.listName}': no such binding`,
+      this.currentLoc);
+    }
+    if (info.type && info.type.kind === 'uniqueList') {
+      throw new CompileError(
+        `'${stmt.op} ... item N of NAME' is not a unique-list operation; unique lists do not support random access (name '${target.listName}')`,
+      this.currentLoc);
+    }
+    if (info.type && info.type.kind !== 'list') {
+      throw new CompileError(
+        `Cannot ${stmt.op} item of '${target.listName}': not a list (type ${typeToString(info.type)})`,
+      this.currentLoc);
+    }
+    if (info.type && info.type.kind === 'list' && info.type.element !== 'number') {
+      throw new CompileError(
+        `Cannot ${stmt.op} item of '${target.listName}': its element type is ${elementHuman(info.type.element)}, not number`,
+      this.currentLoc);
+    }
+    const listTmp = this.freshName('cassign_list');
+    const idxTmp = this.freshName('cassign_idx');
+    // Stash list and index once so the read and write see identical values.
+    this.emit(out, { op: 'LOAD', name: info.mangled });
+    this.emit(out, { op: 'STORE', name: listTmp });
+    if (containsEndSentinel(target.index)) {
+      const lenTmp = this.freshName('cassign_len');
+      this.emit(out, { op: 'LOAD', name: listTmp });
+      this.emit(out, { op: 'LENGTH' });
+      this.emit(out, { op: 'STORE', name: lenTmp });
+      this.endLenTmpStack.push(lenTmp);
+      try { this.compileExpr(target.index, out, bindings); } finally { this.endLenTmpStack.pop(); }
+      this.emit(out, { op: 'STORE', name: idxTmp });
+      this.emit(out, { op: 'DELETE', name: lenTmp });
+    } else {
+      this.compileExpr(target.index, out, bindings);
+      this.emit(out, { op: 'STORE', name: idxTmp });
+    }
+    // Build LIST_SET stack: list, index, newValue
+    this.emit(out, { op: 'LOAD', name: listTmp });
+    this.emit(out, { op: 'LOAD', name: idxTmp });
+    // newValue = oldValue OP rhs
+    this.emit(out, { op: 'LOAD', name: listTmp });
+    this.emit(out, { op: 'LOAD', name: idxTmp });
+    this.emit(out, { op: 'LIST_GET' });
+    this.compileExpr(stmt.value, out, bindings);
+    this.emitArithOp(stmt.op, out);
+    this.emit(out, { op: 'LIST_SET' });
+    this.emit(out, { op: 'DELETE', name: listTmp });
+    this.emit(out, { op: 'DELETE', name: idxTmp });
+  }
+
+  private compileCompoundAssignDictValue(
+    stmt: CompoundAssignStatement,
+    target: { kind: 'dictValue'; dictName: string; key: Expression },
+    out: Instruction[],
+    bindings: Scope,
+  ): void {
+    const info = bindings.lookup(target.dictName);
+    if (!info) {
+      throw new CompileError(
+        `Cannot ${stmt.op} value in '${target.dictName}': no such binding`,
+      this.currentLoc);
+    }
+    if (info.type) {
+      if (info.type.kind !== 'dict') {
+        throw new CompileError(
+          `Cannot ${stmt.op} value in '${target.dictName}': not a dictionary (type ${typeToString(info.type)})`,
+        this.currentLoc);
+      }
+      if (info.type.valueType !== 'number') {
+        throw new CompileError(
+          `Cannot ${stmt.op} value in '${target.dictName}': its value type is ${elementHuman(info.type.valueType)}, not number`,
+        this.currentLoc);
+      }
+      const kt = this.staticType(target.key, bindings);
+      const kc = elementCode(kt);
+      if (kc !== null && kc !== info.type.keyType) {
+        throw new CompileError(
+          `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(kc)}`,
+        this.currentLoc);
+      }
+    }
+    const dictTmp = this.freshName('cassign_dict');
+    const keyTmp = this.freshName('cassign_key');
+    this.emit(out, { op: 'LOAD', name: info.mangled });
+    this.emit(out, { op: 'STORE', name: dictTmp });
+    this.compileExpr(target.key, out, bindings);
+    this.emit(out, { op: 'STORE', name: keyTmp });
+    // Build DICT_SET stack: dict, key, newValue
+    this.emit(out, { op: 'LOAD', name: dictTmp });
+    this.emit(out, { op: 'LOAD', name: keyTmp });
+    // newValue = oldValue OP rhs
+    this.emit(out, { op: 'LOAD', name: dictTmp });
+    this.emit(out, { op: 'LOAD', name: keyTmp });
+    this.emit(out, { op: 'DICT_GET' });
+    this.compileExpr(stmt.value, out, bindings);
+    this.emitArithOp(stmt.op, out);
+    this.emit(out, { op: 'DICT_SET' });
+    this.emit(out, { op: 'DELETE', name: dictTmp });
+    this.emit(out, { op: 'DELETE', name: keyTmp });
   }
 
   private compileFuncDecl(stmt: FunctionDeclaration): void {
