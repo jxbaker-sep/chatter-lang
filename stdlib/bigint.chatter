@@ -4,7 +4,7 @@ export struct BigInt
   list of number Digits
 end struct
 
-export function bigint_from_string takes string value returns struct BigInt is
+export function bigint_from_string takes string value returns BigInt is
   constant digits is empty list of number
   repeat with i from 1 to the length of value
     constant c is character (length of value - i + 1) of value
@@ -20,7 +20,7 @@ export function bigint_from_string takes string value returns struct BigInt is
   return make BigInt with Digits digits
 end function
 
-export function bigint_from_number takes number value returns struct BigInt is
+export function bigint_from_number takes number value returns BigInt is
   expect value to be at least 0, "bigint_from_number only takes non-negative numbers"
   constant digits is empty list of number
   variable current is value
@@ -36,7 +36,7 @@ export function bigint_from_number takes number value returns struct BigInt is
   return make BigInt with Digits digits
 end function
 
-export function bigint_add takes struct BigInt lhs to struct BigInt rhs returns struct BigInt is
+export function bigint_add takes BigInt lhs to BigInt rhs returns BigInt is
   constant result is empty list of number
   constant biggest_digit is the result of max list of the length of Digits of lhs, the length of Digits of rhs
   variable carry is 0
@@ -63,7 +63,7 @@ export function bigint_add takes struct BigInt lhs to struct BigInt rhs returns 
   return make BigInt with Digits result
 end function
 
-export function bigint_to_string takes struct BigInt value returns string is
+export function bigint_to_string takes BigInt value returns string is
   variable result is ""
   constant digits is Digits of value
   repeat with i from 1 to the length of digits

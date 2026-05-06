@@ -618,11 +618,6 @@ export function parse(tokens: Token[], source?: string): Program {
         : { kind: 'struct', name: inner.name };
       return { kind: 'list', element: elem };
     }
-    if (tok.type === 'KEYWORD' && tok.value === 'struct') {
-      advance();
-      const nameTok = consume('IDENT');
-      return { kind: 'struct', name: nameTok.value };
-    }
     if (tok.type === 'TYPE') {
       advance();
       if (tok.value !== 'number' && tok.value !== 'string' && tok.value !== 'boolean') {
@@ -631,8 +626,8 @@ export function parse(tokens: Token[], source?: string): Program {
       return { kind: 'scalar', name: tok.value as ScalarTypeName };
     }
     if (tok.type === 'IDENT') {
-      // Bare IDENT in a type annotation position is treated as a struct
-      // reference (resolved at compile time).
+      // Bare IDENT in a type annotation position is a struct reference
+      // (resolved at compile time).
       advance();
       return { kind: 'struct', name: tok.value };
     }
@@ -1464,11 +1459,6 @@ export function parse(tokens: Token[], source?: string): Program {
           consume('KEYWORD', 'from');
           const parseElemAnno = (label: string): ElementTypeAnnotation => {
             const t = peek();
-            if (t.type === 'KEYWORD' && t.value === 'struct') {
-              advance();
-              const idn = consume('IDENT');
-              return { kind: 'struct', name: idn.value };
-            }
             if (t.type === 'TYPE') {
               advance();
               return { kind: 'scalar', name: t.value as ScalarTypeName };
@@ -1507,16 +1497,15 @@ export function parse(tokens: Token[], source?: string): Program {
           consume('KEYWORD', 'of');
           let elemAnno: ElementTypeAnnotation;
           const tTok = peek();
-          if (tTok.type === 'KEYWORD' && tTok.value === 'struct') {
-            advance();
-            const idn = consume('IDENT');
-            elemAnno = { kind: 'struct', name: idn.value };
-          } else if (tTok.type === 'TYPE') {
+          if (tTok.type === 'TYPE') {
             advance();
             if (tTok.value === 'list' || tTok.value === 'unique') {
               throw new ParseError(`nested lists not supported`, tTok);
             }
             elemAnno = { kind: 'scalar', name: tTok.value as ScalarTypeName };
+          } else if (tTok.type === 'IDENT') {
+            advance();
+            elemAnno = { kind: 'struct', name: tTok.value };
           } else {
             throw new ParseError(`Expected element type after 'empty unique list of'`, tTok);
           }
@@ -1531,16 +1520,15 @@ export function parse(tokens: Token[], source?: string): Program {
         consume('KEYWORD', 'of');
         let elemAnno: ElementTypeAnnotation;
         const tTok = peek();
-        if (tTok.type === 'KEYWORD' && tTok.value === 'struct') {
-          advance();
-          const idn = consume('IDENT');
-          elemAnno = { kind: 'struct', name: idn.value };
-        } else if (tTok.type === 'TYPE') {
+        if (tTok.type === 'TYPE') {
           advance();
           if (tTok.value === 'list') {
             throw new ParseError(`nested lists not supported`, tTok);
           }
           elemAnno = { kind: 'scalar', name: tTok.value as ScalarTypeName };
+        } else if (tTok.type === 'IDENT') {
+          advance();
+          elemAnno = { kind: 'struct', name: tTok.value };
         } else {
           throw new ParseError(`Expected element type after 'empty list of'`, tTok);
         }

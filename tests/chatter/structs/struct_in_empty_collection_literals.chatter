@@ -1,0 +1,11 @@
+struct Point
+    number x
+    number y
+end struct
+
+constant a is empty list of Point
+constant b is empty unique list of Point
+constant c is empty dictionary from Point to number
+say length of a
+say length of b
+say length of c

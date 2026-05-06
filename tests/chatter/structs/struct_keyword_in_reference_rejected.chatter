@@ -1,0 +1,5 @@
+struct Point
+    number x
+end struct
+
+constant ps is empty list of struct Point
