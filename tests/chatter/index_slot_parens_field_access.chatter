@@ -1,0 +1,15 @@
+struct Point
+    number y
+end struct
+
+constant p is make Point with y 2
+constant rows is list of "a", "b", "c"
+
+constant row is item (y of p) of rows
+say row
+
+constant ch is character (y of p) of "hello"
+say ch
+
+constant sub is characters 1 to (y of p) of "hello"
+say sub

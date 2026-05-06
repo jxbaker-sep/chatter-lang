@@ -1813,7 +1813,14 @@ export function parse(tokens: Token[], source?: string): Program {
 
     if (tok.type === 'LPAREN') {
       advance();
-      const expr = parseExpression();
+      // Parens are a hard boundary — RPAREN is required, so inner expressions
+      // can't bleed `of` out to an enclosing `item N of L` / `character N of S`
+      // / `characters A to B of S`. Reset indexSlotDepth so field access
+      // (`FIELD of EXPR`) and dict lookup (`value of K in D`) work normally.
+      const savedIndexDepth = indexSlotDepth;
+      indexSlotDepth = 0;
+      let expr: Expression;
+      try { expr = parseExpression(); } finally { indexSlotDepth = savedIndexDepth; }
       consume('RPAREN');
       return expr;
     }
