@@ -209,11 +209,13 @@ describe('Compiler', () => {
       expect(target).toBeLessThan(jumpIdx);
     });
 
-    test('repeat range emits LE comparison and DELETEs the loop var', () => {
+    test('repeat range emits LE comparison (loop var is block-scoped via mangling, no DELETE needed)', () => {
       const bc = compileSource('repeat with i from 1 to 3\n    say i\nend repeat');
       const ops = bc.main.map(i => i.op);
       expect(ops).toContain('LE');
-      expect(bc.main).toContainEqual({ op: 'DELETE', name: 'i' });
+      // Block scoping mints a unique mangled name per declaration, so DELETE
+      // for the loop variable itself is no longer required.
+      expect(bc.main).not.toContainEqual({ op: 'DELETE', name: 'i' });
     });
 
     test('repeat while emits no LT/LE/ERROR, just cond + JUMP_IF_FALSE + back-edge', () => {

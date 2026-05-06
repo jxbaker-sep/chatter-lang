@@ -117,7 +117,86 @@ interface BindingInfo {
   type?: ChatterType;  // statically known type
 }
 
-type Bindings = Map<string, BindingInfo>;
+interface ScopedBindingInfo extends BindingInfo {
+  mangled: string;
+}
+
+// Lexical scope chain for block scoping. Each Scope has its own bindings map
+// plus a parent pointer. Bindings in ancestor scopes are visible inward via
+// `lookup` but cannot be shadowed (`declare` rejects names already visible).
+// Each block-declared binding receives a possibly-mangled internal name so
+// distinct sibling-scope bindings sharing a user-facing name never collide
+// at runtime.
+//
+// `allMangledInFunction` tracks every internal name minted anywhere in the
+// enclosing function (or module top-level for the root scope) and is shared
+// by reference across all scopes that descend from the same root.
+class Scope {
+  parent: Scope | null;
+  vars: Map<string, ScopedBindingInfo> = new Map();
+  allMangledInFunction: Set<string>;
+  // Top-level scopes feed module-mangling: every minted mangled name is also
+  // added to `outerNamesSink` so the post-processor module-prefixes it.
+  // Function-body scopes leave this null.
+  outerNamesSink: Set<string> | null;
+
+  constructor(parent: Scope | null, outerNamesSink: Set<string> | null = null) {
+    this.parent = parent;
+    if (parent) {
+      this.allMangledInFunction = parent.allMangledInFunction;
+      this.outerNamesSink = parent.outerNamesSink;
+    } else {
+      this.allMangledInFunction = new Set();
+      this.outerNamesSink = outerNamesSink;
+    }
+  }
+
+  hasInCurrent(name: string): boolean {
+    return this.vars.has(name);
+  }
+
+  lookup(name: string): ScopedBindingInfo | null {
+    for (let s: Scope | null = this; s !== null; s = s.parent) {
+      const v = s.vars.get(name);
+      if (v) return v;
+    }
+    return null;
+  }
+
+  // Walk only ancestor scopes (not current). Used to distinguish "shadow"
+  // vs "duplicate" errors in declare().
+  private lookupAncestors(name: string): ScopedBindingInfo | null {
+    for (let s: Scope | null = this.parent; s !== null; s = s.parent) {
+      const v = s.vars.get(name);
+      if (v) return v;
+    }
+    return null;
+  }
+
+  declare(name: string, info: BindingInfo, currentLoc?: SourceLocation, extraOuterShadow?: boolean): string {
+    if (this.vars.has(name)) {
+      throw new CompileError(
+        `Duplicate binding: '${name}' is already declared`,
+        currentLoc,
+      );
+    }
+    if (this.lookupAncestors(name) !== null || extraOuterShadow) {
+      throw new CompileError(
+        `Variable '${name}' shadows outer binding`,
+        currentLoc,
+      );
+    }
+    let mangled = name;
+    let i = 1;
+    while (this.allMangledInFunction.has(mangled)) {
+      mangled = `${name}$${i++}`;
+    }
+    this.allMangledInFunction.add(mangled);
+    if (this.outerNamesSink) this.outerNamesSink.add(mangled);
+    this.vars.set(name, { ...info, mangled });
+    return mangled;
+  }
+}
 
 export interface ImportedFunction {
   mangled: string;
@@ -150,7 +229,14 @@ export class Compiler {
   private functionReturnTypes = new Map<string, ChatterType | null>();  // null = void
   private functionMangled = new Map<string, string>();   // local name -> mangled
   private outerBindings = new Set<string>();
-  private topLevelBindings: Bindings | null = null;
+  // Superset of `outerBindings`: also includes block-scoped top-level mangled
+  // names (e.g. `a$1` for `constant a` declared inside an `if` branch at
+  // module top level). Used solely by the post-processor to module-prefix
+  // every top-level mangled name. Visibility checks (from inside a function
+  // body) still use `outerBindings`, which holds only direct top-level user
+  // bindings — block-scope top-level locals are NOT visible from elsewhere.
+  private topLevelMangled = new Set<string>();
+  private topLevelBindings: Scope | null = null;
   private tempCounter = 0;
   private currentFuncReturnType: ChatterType | null | undefined = undefined;  // undefined = top-level
   private currentFuncName: string | null = null;
@@ -201,7 +287,7 @@ export class Compiler {
   }
 
   private mangleBinding(name: string): string {
-    if (this.moduleId && this.outerBindings.has(name)) {
+    if (this.moduleId && this.topLevelMangled.has(name)) {
       return `${this.moduleId}::${name}`;
     }
     return name;
@@ -400,11 +486,16 @@ export class Compiler {
       }
       if (stmt.type === 'ConstantDeclaration' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
+        this.topLevelMangled.add(stmt.name);
       }
     }
 
     const topLevel: Instruction[] = [];
-    const bindings: Bindings = new Map();
+    // Top-level scope feeds `topLevelMangled` (a superset of outerBindings)
+    // as block-mangled names are minted at module top level, so the
+    // post-processor module-prefixes them and they don't collide with
+    // identically-named block-scoped bindings in other modules.
+    const bindings: Scope = new Scope(null, this.topLevelMangled);
     this.topLevelBindings = bindings;
 
     for (const stmt of program.body) {
@@ -455,7 +546,7 @@ export class Compiler {
   private compileStatement(
     stmt: Statement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     this.locStack.push(locOf(stmt) ?? this.currentLoc);
     try {
@@ -468,7 +559,7 @@ export class Compiler {
   private compileStatementInner(
     stmt: Statement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     switch (stmt.type) {
       case 'SayStatement':
@@ -578,7 +669,7 @@ export class Compiler {
   private compileExpect(
     stmt: ExpectStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     // Static type check on predicate (skip when unknown).
     const pt = this.staticType(stmt.expression, bindings);
@@ -629,7 +720,7 @@ export class Compiler {
   private compileReadFileStatement(
     stmt: ReadFileStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const pt = this.staticType(stmt.path, bindings);
     if (pt && !(pt.kind === 'scalar' && pt.name === 'string')) {
@@ -645,7 +736,7 @@ export class Compiler {
   private compileSay(
     stmt: SayStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (stmt.expressions.length === 1) {
       this.compileExpr(stmt.expressions[0], out, bindings);
@@ -661,7 +752,7 @@ export class Compiler {
   private compilePrecall(
     precall: CallStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): ChatterType {
     if (!this.functionReturnTypes.has(precall.name)) {
       throw new CompileError(
@@ -707,58 +798,49 @@ export class Compiler {
   private compileSet(
     stmt: ConstantDeclaration,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    if (bindings.has(stmt.name)) {
-      throw new CompileError(`Duplicate binding: '${stmt.name}' is already declared`, this.currentLoc);
-    }
+    // Determine type first, then declare (declare may throw shadow/dup error).
     if (stmt.precall) {
       const rt = this.compilePrecall(stmt.precall, out, bindings);
       this.compileExpr(stmt.value, out, bindings);
-      this.emit(out, { op: 'STORE', name: stmt.name });
-      bindings.set(stmt.name, { kind: 'constant', type: rt });
+      const mangled = bindings.declare(stmt.name, { kind: 'constant', type: rt }, this.currentLoc,
+        bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name));
+      this.emit(out, { op: 'STORE', name: mangled });
       return;
     }
     this.compileExpr(stmt.value, out, bindings);
-    this.emit(out, { op: 'STORE', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
-    bindings.set(stmt.name, { kind: 'constant', type: st ?? undefined });
+    const mangled = bindings.declare(stmt.name, { kind: 'constant', type: st ?? undefined }, this.currentLoc,
+      bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name));
+    this.emit(out, { op: 'STORE', name: mangled });
   }
 
   private compileVarDecl(
     stmt: VarDeclaration,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    if (bindings.has(stmt.name)) {
-      throw new CompileError(
-        `Duplicate binding: '${stmt.name}' is already declared`,
-      this.currentLoc);
-    }
-    if (bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name)) {
-      throw new CompileError(
-        `Variable '${stmt.name}' shadows outer binding`,
-      this.currentLoc);
-    }
+    const extraOuter = bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name);
     if (stmt.precall) {
       const rt = this.compilePrecall(stmt.precall, out, bindings);
       this.compileExpr(stmt.value, out, bindings);
-      this.emit(out, { op: 'STORE_VAR', name: stmt.name });
-      bindings.set(stmt.name, { kind: 'var', type: rt });
+      const mangled = bindings.declare(stmt.name, { kind: 'var', type: rt }, this.currentLoc, extraOuter);
+      this.emit(out, { op: 'STORE_VAR', name: mangled });
       return;
     }
     this.compileExpr(stmt.value, out, bindings);
-    this.emit(out, { op: 'STORE_VAR', name: stmt.name });
     const st = this.staticType(stmt.value, bindings);
-    bindings.set(stmt.name, { kind: 'var', type: st ?? undefined });
+    const mangled = bindings.declare(stmt.name, { kind: 'var', type: st ?? undefined }, this.currentLoc, extraOuter);
+    this.emit(out, { op: 'STORE_VAR', name: mangled });
   }
 
   private compileChange(
     stmt: ChangeStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    const info = bindings.get(stmt.name);
+    const info = bindings.lookup(stmt.name);
     if (!info) {
       throw new CompileError(
         `Cannot change '${stmt.name}': no such variable declared in this function`,
@@ -780,7 +862,7 @@ export class Compiler {
         }
       }
       this.compileExpr(stmt.value, out, bindings);
-      this.emit(out, { op: 'STORE_VAR', name: stmt.name });
+      this.emit(out, { op: 'STORE_VAR', name: info.mangled });
       return;
     }
     // Static type check for list/uniqueList/dict vars: exact match required.
@@ -793,15 +875,15 @@ export class Compiler {
       }
     }
     this.compileExpr(stmt.value, out, bindings);
-    this.emit(out, { op: 'STORE_VAR', name: stmt.name });
+    this.emit(out, { op: 'STORE_VAR', name: info.mangled });
   }
 
   private compileChangeItem(
     stmt: ChangeItemStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    const info = bindings.get(stmt.listName);
+    const info = bindings.lookup(stmt.listName);
     if (!info) {
       throw new CompileError(
         `Cannot change item of '${stmt.listName}': no such binding`,
@@ -828,14 +910,14 @@ export class Compiler {
       }
     }
     // Emit: LOAD list; <index>; <value>; LIST_SET
-    this.emit(out, { op: 'LOAD', name: stmt.listName });
+    this.emit(out, { op: 'LOAD', name: info.mangled });
     this.compileExpr(stmt.index, out, bindings);
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'LIST_SET' });
   }
 
-  private compileListMutationTarget(listName: string, bindings: Bindings, op: string): ChatterType | null {
-    const info = bindings.get(listName);
+  private compileListMutationTarget(listName: string, bindings: Scope, op: string): { type: ChatterType | null; mangled: string } {
+    const info = bindings.lookup(listName);
     if (!info) {
       throw new CompileError(`Cannot ${op} to '${listName}': no such binding`, this.currentLoc);
     }
@@ -849,13 +931,13 @@ export class Compiler {
         `Cannot ${op} to '${listName}': not a list (type ${typeToString(info.type)})`,
       this.currentLoc);
     }
-    return info.type ?? null;
+    return { type: info.type ?? null, mangled: info.mangled };
   }
 
   private checkElementType(
     listType: ChatterType | null,
     value: Expression,
-    bindings: Bindings,
+    bindings: Scope,
     op: string,
   ): void {
     if (listType && listType.kind === 'list') {
@@ -877,11 +959,11 @@ export class Compiler {
   private compileAppend(
     stmt: AppendStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const lt = this.compileListMutationTarget(stmt.listName, bindings, 'append');
-    this.checkElementType(lt, stmt.value, bindings, 'append');
-    this.emit(out, { op: 'LOAD', name: stmt.listName });
+    this.checkElementType(lt.type, stmt.value, bindings, 'append');
+    this.emit(out, { op: 'LOAD', name: lt.mangled });
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'LIST_APPEND' });
   }
@@ -889,11 +971,11 @@ export class Compiler {
   private compilePrepend(
     stmt: PrependStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const lt = this.compileListMutationTarget(stmt.listName, bindings, 'prepend');
-    this.checkElementType(lt, stmt.value, bindings, 'prepend');
-    this.emit(out, { op: 'LOAD', name: stmt.listName });
+    this.checkElementType(lt.type, stmt.value, bindings, 'prepend');
+    this.emit(out, { op: 'LOAD', name: lt.mangled });
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'LIST_PREPEND' });
   }
@@ -901,11 +983,11 @@ export class Compiler {
   private compileInsert(
     stmt: InsertStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const lt = this.compileListMutationTarget(stmt.listName, bindings, 'insert');
-    this.checkElementType(lt, stmt.value, bindings, 'insert');
-    this.emit(out, { op: 'LOAD', name: stmt.listName });
+    this.checkElementType(lt.type, stmt.value, bindings, 'insert');
+    this.emit(out, { op: 'LOAD', name: lt.mangled });
     this.compileExpr(stmt.index, out, bindings);
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'LIST_INSERT' });
@@ -914,10 +996,10 @@ export class Compiler {
   private compileRemove(
     stmt: RemoveItemStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    this.compileListMutationTarget(stmt.listName, bindings, 'remove');
-    this.emit(out, { op: 'LOAD', name: stmt.listName });
+    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'remove');
+    this.emit(out, { op: 'LOAD', name: lt.mangled });
     this.compileExpr(stmt.index, out, bindings);
     this.emit(out, { op: 'LIST_REMOVE' });
   }
@@ -925,9 +1007,9 @@ export class Compiler {
   private compileRemoveValue(
     stmt: RemoveValueStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    const info = bindings.get(stmt.listName);
+    const info = bindings.lookup(stmt.listName);
     if (!info) {
       throw new CompileError(
         `Cannot remove value from '${stmt.listName}': no such binding`,
@@ -947,7 +1029,7 @@ export class Compiler {
             `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(rc)}`,
           this.currentLoc);
         }
-        this.emit(out, { op: 'LOAD', name: stmt.listName });
+        this.emit(out, { op: 'LOAD', name: info.mangled });
         this.compileExpr(stmt.value, out, bindings);
         this.emit(out, { op: 'DICT_REMOVE' });
         return;
@@ -971,7 +1053,7 @@ export class Compiler {
         this.currentLoc);
       }
     }
-    this.emit(out, { op: 'LOAD', name: stmt.listName });
+    this.emit(out, { op: 'LOAD', name: info.mangled });
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'UNIQUE_LIST_REMOVE' });
   }
@@ -979,9 +1061,9 @@ export class Compiler {
   private compileCompoundAssign(
     stmt: CompoundAssignStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    const info = bindings.get(stmt.name);
+    const info = bindings.lookup(stmt.name);
     if (!info) {
       throw new CompileError(
         `Cannot ${stmt.op} '${stmt.name}': no such variable declared in this function`,
@@ -1001,7 +1083,7 @@ export class Compiler {
           `Type mismatch: cannot add ${typeToString(rhs)} to unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
-      this.emit(out, { op: 'LOAD', name: stmt.name });
+      this.emit(out, { op: 'LOAD', name: info.mangled });
       this.compileExpr(stmt.value, out, bindings);
       this.emit(out, { op: 'UNIQUE_LIST_ADD' });
       return;
@@ -1023,7 +1105,7 @@ export class Compiler {
       this.currentLoc);
     }
     // Emit: LOAD name; <value>; OP; STORE_VAR name
-    this.emit(out, { op: 'LOAD', name: stmt.name });
+    this.emit(out, { op: 'LOAD', name: info.mangled });
     this.compileExpr(stmt.value, out, bindings);
     switch (stmt.op) {
       case 'add':      this.emit(out, { op: 'ADD' }); break;
@@ -1031,7 +1113,7 @@ export class Compiler {
       case 'multiply': this.emit(out, { op: 'MUL' }); break;
       case 'divide':   this.emit(out, { op: 'DIV' }); break;
     }
-    this.emit(out, { op: 'STORE_VAR', name: stmt.name });
+    this.emit(out, { op: 'STORE_VAR', name: info.mangled });
   }
 
   private compileFuncDecl(stmt: FunctionDeclaration): void {
@@ -1060,12 +1142,12 @@ export class Compiler {
     const funcDef: FunctionDef = { name: mangledName, params, instructions };
     this.functions.set(mangledName, funcDef);
 
-    const funcBindings: Bindings = new Map();
+    const funcBindings: Scope = new Scope(null, null);
     for (const p of stmt.params) {
-      funcBindings.set(p.name, {
+      funcBindings.declare(p.name, {
         kind: 'param',
         type: this.fromAnnotation(p.paramType),
-      });
+      }, this.currentLoc);
     }
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
@@ -1089,7 +1171,7 @@ export class Compiler {
   private compileCallStmt(
     stmt: CallStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const sig = this.functionSignatures.get(stmt.name);
 
@@ -1188,7 +1270,7 @@ export class Compiler {
   private compileIf(
     stmt: IfStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const exitJumps: number[] = [];
 
@@ -1203,8 +1285,9 @@ export class Compiler {
       const jifIdx = out.length;
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
+      const branchScope = new Scope(bindings);
       for (const s of branch.body) {
-        this.compileStatement(s, out, bindings);
+        this.compileStatement(s, out, branchScope);
       }
 
       const exitIdx = out.length;
@@ -1215,8 +1298,9 @@ export class Compiler {
     }
 
     if (stmt.elseBody) {
+      const elseScope = new Scope(bindings);
       for (const s of stmt.elseBody) {
-        this.compileStatement(s, out, bindings);
+        this.compileStatement(s, out, elseScope);
       }
     }
 
@@ -1229,7 +1313,7 @@ export class Compiler {
   private compileRepeat(
     stmt: RepeatStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (stmt.kind === 'times') {
       // Static type check on count.
@@ -1280,8 +1364,9 @@ export class Compiler {
 
       const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
       this.loopStack.push(frame);
+      const bodyScope = new Scope(bindings);
       for (const s of stmt.body) {
-        this.compileStatement(s, out, bindings);
+        this.compileStatement(s, out, bodyScope);
       }
       this.loopStack.pop();
 
@@ -1304,7 +1389,8 @@ export class Compiler {
 
     if (stmt.kind === 'range') {
       const loopVar = stmt.varName;
-      if (bindings.has(loopVar) || this.outerBindings.has(loopVar)) {
+      // Pre-check shadow against module top-level outer bindings.
+      if (this.outerBindings.has(loopVar) && bindings !== this.topLevelBindings) {
         throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
       }
 
@@ -1340,8 +1426,23 @@ export class Compiler {
         }
       }
 
+      // Declare loop var in the body's scope so its mangled name is fixed
+      // before we emit the STOREs that initialize it.
+      const bodyScope = new Scope(bindings);
+      // declare() handles the shadow-against-ancestor check; remap the
+      // error message to reuse "Loop variable" wording for consistency.
+      let loopVarMangled: string;
+      try {
+        loopVarMangled = bodyScope.declare(loopVar, { kind: 'loop', type: { kind: 'scalar', name: 'number' } }, this.currentLoc);
+      } catch (e) {
+        if (e instanceof CompileError && /shadows outer binding|already declared/.test(e.message)) {
+          throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
+        }
+        throw e;
+      }
+
       this.compileExpr(stmt.from, out, bindings);
-      this.emit(out, { op: 'STORE', name: loopVar });
+      this.emit(out, { op: 'STORE', name: loopVarMangled });
       this.compileExpr(stmt.to, out, bindings);
       this.emit(out, { op: 'STORE', name: limit });
 
@@ -1366,30 +1467,28 @@ export class Compiler {
       }
 
       const topIdx = out.length;
-      this.emit(out, { op: 'LOAD', name: loopVar });
+      this.emit(out, { op: 'LOAD', name: loopVarMangled });
       this.emit(out, { op: 'LOAD', name: limit });
       this.emit(out, { op: 'LE' });
       const jifEndIdx = out.length;
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
-      bindings.set(loopVar, { kind: 'loop', type: { kind: 'scalar', name: 'number' } });
       const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
       this.loopStack.push(frame);
       for (const s of stmt.body) {
-        this.compileStatement(s, out, bindings);
+        this.compileStatement(s, out, bodyScope);
       }
       this.loopStack.pop();
-      bindings.delete(loopVar);
 
       const continueIdx = out.length;
-      this.emit(out, { op: 'LOAD', name: loopVar });
+      this.emit(out, { op: 'LOAD', name: loopVarMangled });
       if (stepTmp !== null) {
         this.emit(out, { op: 'LOAD', name: stepTmp });
       } else {
         this.emit(out, { op: 'PUSH_INT', value: 1 });
       }
       this.emit(out, { op: 'ADD' });
-      this.emit(out, { op: 'STORE', name: loopVar });
+      this.emit(out, { op: 'STORE', name: loopVarMangled });
       this.emit(out, { op: 'JUMP', target: topIdx });
       const exitIdx = out.length;
       (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = exitIdx;
@@ -1399,7 +1498,6 @@ export class Compiler {
       for (const j of frame.exitJumps) {
         (out[j] as { op: 'JUMP'; target: number }).target = exitIdx;
       }
-      this.emit(out, { op: 'DELETE', name: loopVar });
       this.emit(out, { op: 'DELETE', name: limit });
       if (stepTmp !== null) {
         this.emit(out, { op: 'DELETE', name: stepTmp });
@@ -1409,7 +1507,7 @@ export class Compiler {
 
     if (stmt.kind === 'list') {
       const loopVar = stmt.varName;
-      if (bindings.has(loopVar) || this.outerBindings.has(loopVar)) {
+      if (this.outerBindings.has(loopVar) && bindings !== this.topLevelBindings) {
         throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
       }
 
@@ -1431,6 +1529,17 @@ export class Compiler {
       const idxTmp = this.freshName('idx');
       const lenTmp = this.freshName('len');
 
+      const bodyScope = new Scope(bindings);
+      let loopVarMangled: string;
+      try {
+        loopVarMangled = bodyScope.declare(loopVar, { kind: 'loop', type: elemType }, this.currentLoc);
+      } catch (e) {
+        if (e instanceof CompileError && /shadows outer binding|already declared/.test(e.message)) {
+          throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
+        }
+        throw e;
+      }
+
       this.compileExpr(stmt.list, out, bindings);
       this.emit(out, { op: 'STORE', name: listTmp });
       this.emit(out, { op: 'LOAD', name: listTmp });
@@ -1450,16 +1559,14 @@ export class Compiler {
       this.emit(out, { op: 'LOAD', name: listTmp });
       this.emit(out, { op: 'LOAD', name: idxTmp });
       this.emit(out, { op: 'LIST_GET' });
-      this.emit(out, { op: 'STORE', name: loopVar });
+      this.emit(out, { op: 'STORE', name: loopVarMangled });
 
-      bindings.set(loopVar, { kind: 'loop', type: elemType });
       const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
       this.loopStack.push(frame);
       for (const s of stmt.body) {
-        this.compileStatement(s, out, bindings);
+        this.compileStatement(s, out, bodyScope);
       }
       this.loopStack.pop();
-      bindings.delete(loopVar);
 
       const continueIdx = out.length;
       this.emit(out, { op: 'LOAD', name: idxTmp });
@@ -1475,7 +1582,6 @@ export class Compiler {
       for (const j of frame.exitJumps) {
         (out[j] as { op: 'JUMP'; target: number }).target = exitIdx;
       }
-      this.emit(out, { op: 'DELETE', name: loopVar });
       this.emit(out, { op: 'DELETE', name: listTmp });
       this.emit(out, { op: 'DELETE', name: idxTmp });
       this.emit(out, { op: 'DELETE', name: lenTmp });
@@ -1495,8 +1601,9 @@ export class Compiler {
     this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
     const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
     this.loopStack.push(frame);
+    const bodyScope = new Scope(bindings);
     for (const s of stmt.body) {
-      this.compileStatement(s, out, bindings);
+      this.compileStatement(s, out, bodyScope);
     }
     this.loopStack.pop();
     const continueIdx = out.length;
@@ -1516,7 +1623,7 @@ export class Compiler {
   private compileReturn(
     stmt: ReturnStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const rt = this.currentFuncReturnType;
     if (rt === undefined) {
@@ -1599,7 +1706,7 @@ export class Compiler {
   private compileExpr(
     expr: Expression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     this.locStack.push(locOf(expr) ?? this.currentLoc);
     try {
@@ -1612,7 +1719,7 @@ export class Compiler {
   private compileExprInner(
     expr: Expression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     switch (expr.type) {
       case 'NumberLiteral':
@@ -1639,14 +1746,15 @@ export class Compiler {
             `void function '${expr.name}' cannot be used as a value`,
           this.currentLoc);
         }
+        const scopeInfo = bindings.lookup(expr.name);
         if (!this.functionReturnTypes.has(expr.name)
-            && !bindings.has(expr.name)
+            && !scopeInfo
             && !this.outerBindings.has(expr.name)) {
           throw new CompileError(
             `Undefined variable: '${expr.name}'`,
           this.currentLoc);
         }
-        this.emit(out, { op: 'LOAD', name: expr.name });
+        this.emit(out, { op: 'LOAD', name: scopeInfo?.mangled ?? expr.name });
         break;
       case 'ItExpression':
         if (this.hofItStack.length > 0) {
@@ -2074,7 +2182,7 @@ export class Compiler {
     listExpr: Expression,
     elemType: ChatterType | undefined,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
     body: (itLocal: string) => void,
     onSourceStored?: (listTmp: string) => void,
   ): { listTmp: string; idxTmp: string; lenTmp: string; itTmp: string } {
@@ -2129,7 +2237,7 @@ export class Compiler {
   private compileSort(
     stmt: SortStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (this.inHofBody) {
       throw new CompileError(
@@ -2203,7 +2311,7 @@ export class Compiler {
   private compileMap(
     expr: MapExpression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (this.inHofBody) {
       throw new CompileError(
@@ -2256,7 +2364,7 @@ export class Compiler {
   private compileFilter(
     expr: FilterExpression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (this.inHofBody) {
       throw new CompileError(
@@ -2321,7 +2429,7 @@ export class Compiler {
   private compileReduce(
     expr: ReduceExpression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (this.inHofBody) {
       throw new CompileError(
@@ -2383,7 +2491,7 @@ export class Compiler {
   private compileDictionaryLiteral(
     expr: DictionaryLiteral,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (expr.kind === 'empty') {
       const kCode = this.elementAnnotationToCode(expr.keyType!);
@@ -2442,7 +2550,7 @@ export class Compiler {
   private compileDictGet(
     expr: DictGetExpression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const dt = this.staticType(expr.dict, bindings);
     if (dt !== null && dt.kind !== 'dict') {
@@ -2467,9 +2575,9 @@ export class Compiler {
   private compileDictSet(
     stmt: DictSetStatement,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
-    const info = bindings.get(stmt.dictName);
+    const info = bindings.lookup(stmt.dictName);
     if (!info) {
       throw new CompileError(
         `Cannot change value in '${stmt.dictName}': no such binding`,
@@ -2496,7 +2604,7 @@ export class Compiler {
         this.currentLoc);
       }
     }
-    this.emit(out, { op: 'LOAD', name: stmt.dictName });
+    this.emit(out, { op: 'LOAD', name: info.mangled });
     this.compileExpr(stmt.key, out, bindings);
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'DICT_SET' });
@@ -2505,7 +2613,7 @@ export class Compiler {
   private compileUniqueListLiteral(
     expr: UniqueListLiteral,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (expr.kind === 'empty') {
       this.emit(out, { op: 'MAKE_EMPTY_UNIQUE_LIST', elementType: this.elementAnnotationToCode(expr.elementType!) });
@@ -2540,7 +2648,7 @@ export class Compiler {
   private compileListLiteral(
     expr: ListLiteral,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (expr.kind === 'empty') {
       this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: this.elementAnnotationToCode(expr.elementType!) });
@@ -2575,7 +2683,7 @@ export class Compiler {
   private compileBinary(
     expr: BinaryExpression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     if (expr.operator === 'contains') {
       const lt = this.staticType(expr.left, bindings);
@@ -2708,7 +2816,7 @@ export class Compiler {
   private compileLogicalShortCircuit(
     expr: BinaryExpression,
     out: Instruction[],
-    bindings: Bindings,
+    bindings: Scope,
   ): void {
     const op = expr.operator as 'and' | 'or';
     const lt = this.staticType(expr.left, bindings);
@@ -2734,7 +2842,7 @@ export class Compiler {
   }
 
   // Best-effort static type inference.
-  private staticType(expr: Expression, bindings: Bindings): ChatterType | null {
+  private staticType(expr: Expression, bindings: Scope): ChatterType | null {
     switch (expr.type) {
       case 'NumberLiteral': return { kind: 'scalar', name: 'number' };
       case 'StringLiteral': return { kind: 'scalar', name: 'string' };
@@ -2757,7 +2865,7 @@ export class Compiler {
         if (expr.name === 'accumulator' && this.hofAccStack.length > 0) {
           return this.hofAccStack[this.hofAccStack.length - 1].type ?? null;
         }
-        const info = bindings.get(expr.name);
+        const info = bindings.lookup(expr.name);
         return info?.type ?? null;
       }
       case 'CallStatement': {

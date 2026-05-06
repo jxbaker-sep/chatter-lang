@@ -1,0 +1,7 @@
+repeat with i from 1 to 2
+    say i
+end repeat
+
+repeat with i from 10 to 11
+    say i
+end repeat

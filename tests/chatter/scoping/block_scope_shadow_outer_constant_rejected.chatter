@@ -1,0 +1,9 @@
+constant x is 5
+function f is
+    if true
+        constant x is 10
+        say x
+    end if
+end function
+
+f

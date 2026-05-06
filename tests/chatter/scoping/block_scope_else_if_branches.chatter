@@ -1,0 +1,11 @@
+constant n is 2
+if n is 1
+    constant label is "one"
+    say label
+else if n is 2
+    constant label is "two"
+    say label
+else
+    constant label is "many"
+    say label
+end if

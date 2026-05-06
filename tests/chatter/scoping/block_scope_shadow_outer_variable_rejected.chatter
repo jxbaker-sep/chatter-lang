@@ -1,0 +1,9 @@
+variable counter is 0
+function f is
+    if true
+        variable counter is 99
+        say counter
+    end if
+end function
+
+f

@@ -1,0 +1,9 @@
+constant flag is true
+if flag
+    constant a is 1
+    repeat 2 times
+        constant b is 10
+        say a, b
+    end repeat
+    say a
+end if

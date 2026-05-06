@@ -1,0 +1,9 @@
+repeat 2 times
+    constant msg is "hello"
+    say msg
+end repeat
+
+repeat 3 times
+    constant msg is "world"
+    say msg
+end repeat

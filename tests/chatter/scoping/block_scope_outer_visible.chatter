@@ -1,0 +1,9 @@
+constant outer is 100
+constant cond is true
+if cond
+    say outer
+end if
+
+repeat 2 times
+    say outer
+end repeat

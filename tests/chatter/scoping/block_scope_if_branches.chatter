@@ -1,0 +1,16 @@
+constant cond is true
+if cond
+    constant x is 5
+    say x
+else
+    constant x is 6
+    say x
+end if
+
+if not cond
+    constant x is 5
+    say x
+else
+    constant x is 6
+    say x
+end if

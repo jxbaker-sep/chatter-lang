@@ -1,0 +1,5 @@
+variable total is 0
+repeat 3 times
+    add 1 to total
+end repeat
+say total

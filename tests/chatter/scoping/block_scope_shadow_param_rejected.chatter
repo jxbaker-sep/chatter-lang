@@ -1,0 +1,8 @@
+function f takes number x is
+    if x is 0
+        constant x is 1
+        say x
+    end if
+end function
+
+f 0

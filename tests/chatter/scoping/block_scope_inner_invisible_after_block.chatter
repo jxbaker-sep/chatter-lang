@@ -1,0 +1,5 @@
+if true
+    constant inner is 42
+    say inner
+end if
+say inner
