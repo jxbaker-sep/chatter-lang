@@ -600,5 +600,18 @@ Existing golden cases:
     - `CallStatement` / call-expression target name needs a location too (currently only de statement has loc).
   - **Out of scope (later):** semantic highlighting, hover docs, go-to-definition, find-all-references as a standalone command. Once de resolver exists, all of dese fall out almost for free, but treat as separate roadmap items.
 - REPL.
+  - **Decided so far:**
+    - Invoked as `chatter` with no file arg (drops into interactive prompt).
+    - Multi-line constructs auto-detected: `function` / `if` / `repeat` / `struct` (and likely multiline `function` headers + `dictionary` / `list` / `make` literals if we ever go multiline) open a continuation; prompt switches to a continuation marker (e.g. `... `) and submits when de matching `end` is seen at depth 0. Single-line statements submit on `Enter`.
+    - Auto-echo `it` after every input dat updates it. So `2 + 2` prints `4`, `length of xs` prints de length, `say "hi"` prints just `hi` (because `say` doesn't update `it`), `constant x is 5` prints nothing (constant doesn't update `it`), `f x` (typed function) prints de return value, `f x` (void function) prints nothing.
+  - **Open questions:**
+    - Bare expressions at de prompt: should de REPL accept `2 + 2` / `length of xs` / `x of p` (currently not legal at top level — only statements are) and treat dem as if dey were `constant it is EXPR` (or equivalently emit `STORE_IT`)? Default leaning: yes, as a REPL-only convenience, since auto-echo is useless without it.
+    - State persistence between inputs: assumed yes — constants, variables, function defs, struct defs, and module imports all persist across prompts within de session. Re-binding rules need a decision: does `constant x is 5` at de prompt followed by another `constant x is 6` overwrite (REPL convenience) or error (consistency with file mode)? Same Q for `variable` / `function` / `struct` redefinition.
+    - Module imports: should `use ... from "..."` work at de prompt? If yes, paths resolve relative to `process.cwd()` when REPL was started.
+    - Special meta-commands: `.exit` / `.quit`, `.help`, `.load FILE` (eval a file in current session), `.clear` (reset session state), `.history`? Or stick to bare prompt only in v1?
+    - Error recovery: on compile or runtime error, print and continue (same session, same bindings) — assumed yes.
+    - Line editing / history: use Node's built-in `readline` for arrow keys + history? Or stay simple with `process.stdin` line-at-a-time?
+    - `it` lifetime: each prompt input runs as a fresh top-level "statement" — `it` from de previous input should still be visible (so `2 + 2` den `it * 10` works). Confirms a session-wide `it`, not per-input.
+    - Prompt strings: `> ` for fresh, `... ` for continuation? Customizable?
 - More example programs (FizzBuzz, Fibonacci — need loops first).
 - **GitHub syntax highlighting for `.chatter` files.** Quick win: `.gitattributes` override like `*.chatter linguist-language=Ruby` (imperfect but instant). Proper path: PR to github-linguist/linguist with a TextMate grammar (the `vscode-chatter/` extension may already have one to reuse); requires ~200 public `.chatter` files to clear the popularity bar.
