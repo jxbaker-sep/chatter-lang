@@ -1,0 +1,9 @@
+function combine takes
+    number a
+    plus number b
+    returns number is
+    return a + b
+end function
+
+combine 3 plus 4
+say it

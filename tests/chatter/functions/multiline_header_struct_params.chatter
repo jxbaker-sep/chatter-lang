@@ -1,0 +1,18 @@
+struct Point
+    number x
+    number y
+end struct
+
+function distance_squared
+        takes Point a
+        with Point b
+        returns number is
+    constant dx is x of a - x of b
+    constant dy is y of a - y of b
+    return dx * dx + dy * dy
+end function
+
+constant p1 is make Point with x 0, y 0
+constant p2 is make Point with x 3, y 4
+distance_squared p1 with p2
+say it

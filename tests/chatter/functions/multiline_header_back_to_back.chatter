@@ -1,0 +1,18 @@
+# Two functions back-to-back, both with multiline headers.
+function bumped
+    takes number a
+    returns number is
+    return a + 1
+end function
+
+function product takes
+    number a with
+    number b returns
+    number is
+    return a * b
+end function
+
+bumped 10
+say it
+product 3 with 4
+say it

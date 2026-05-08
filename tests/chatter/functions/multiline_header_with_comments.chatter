@@ -1,0 +1,17 @@
+# Comments and blank lines mid-header should be ignored.
+function lookup
+    # the dictionary to read from
+    takes dictionary from string to number scores
+
+    # the key to look up
+    with string name
+
+    returns number is
+    return value of name in scores
+end function
+
+constant s is dictionary "alice" to 90, "bob" to 85
+lookup s with "alice"
+say it
+lookup s with "bob"
+say it

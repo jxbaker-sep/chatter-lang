@@ -45,6 +45,11 @@ export function lex(source: string, filename?: string): Token[] {
   const tokens: Token[] = [];
   const lines = source.split('\n');
   const indentStack: number[] = [0];
+  // Soft-layout flag: while true, suppress NEWLINE / INDENT / DEDENT and don't
+  // touch the indent stack. Toggled on by `function` keyword and off by the
+  // first `is` keyword that follows. Lets multi-line function headers ignore
+  // line breaks the way Python ignores them inside parentheses.
+  let inFunctionHeader = false;
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
@@ -59,19 +64,21 @@ export function lex(source: string, filename?: string): Token[] {
     // Skip blank lines and comment lines entirely
     if (col >= line.length || line[col] === '#') continue;
 
-    const indent = col;
-    const currentIndent = indentStack[indentStack.length - 1];
+    if (!inFunctionHeader) {
+      const indent = col;
+      const currentIndent = indentStack[indentStack.length - 1];
 
-    if (indent > currentIndent) {
-      indentStack.push(indent);
-      tokens.push({ type: 'INDENT', value: '', line: lineNum, col: 0 });
-    } else if (indent < currentIndent) {
-      while (indentStack.length > 1 && indentStack[indentStack.length - 1] > indent) {
-        indentStack.pop();
-        tokens.push({ type: 'DEDENT', value: '', line: lineNum, col: 0 });
-      }
-      if (indentStack[indentStack.length - 1] !== indent) {
-        throw new Error(`Inconsistent indentation at line ${lineNum}`);
+      if (indent > currentIndent) {
+        indentStack.push(indent);
+        tokens.push({ type: 'INDENT', value: '', line: lineNum, col: 0 });
+      } else if (indent < currentIndent) {
+        while (indentStack.length > 1 && indentStack[indentStack.length - 1] > indent) {
+          indentStack.pop();
+          tokens.push({ type: 'DEDENT', value: '', line: lineNum, col: 0 });
+        }
+        if (indentStack[indentStack.length - 1] !== indent) {
+          throw new Error(`Inconsistent indentation at line ${lineNum}`);
+        }
       }
     }
 
@@ -166,13 +173,26 @@ export function lex(source: string, filename?: string): Token[] {
         else if (TYPES.has(value)) type = 'TYPE';
         else type = 'IDENT';
         tokens.push({ type, value, line: lineNum, col: startCol });
+        if (type === 'KEYWORD') {
+          if (value === 'function') {
+            // Don't enter header mode for `end function` (closing keyword).
+            const prev = tokens[tokens.length - 2];
+            if (!(prev && prev.type === 'KEYWORD' && prev.value === 'end')) {
+              inFunctionHeader = true;
+            }
+          } else if (value === 'is' && inFunctionHeader) {
+            inFunctionHeader = false;
+          }
+        }
         continue;
       }
 
       throw new Error(`Unexpected character '${line[col]}' at line ${lineNum}, col ${col + 1}`);
     }
 
-    tokens.push({ type: 'NEWLINE', value: '\n', line: lineNum, col: line.length });
+    if (!inFunctionHeader) {
+      tokens.push({ type: 'NEWLINE', value: '\n', line: lineNum, col: line.length });
+    }
   }
 
   // Emit remaining DEDENTs

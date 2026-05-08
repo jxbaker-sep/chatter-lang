@@ -1,0 +1,9 @@
+# Continuation lines may sit at any column, including back at column 0.
+function greet takes
+string name
+returns string is
+    return "hello, " & name
+end function
+
+greet "Gambit"
+say it
