@@ -1,0 +1,15 @@
+struct VL
+    number x
+end struct
+
+struct HL
+    number y
+end struct
+
+function need_hl takes HL h returns boolean is
+    return y of h is 0
+end function
+
+constant vlines is list of (make VL with x 1)
+filter vlines where the result of need_hl it
+say it

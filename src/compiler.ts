@@ -1375,6 +1375,12 @@ export class Compiler {
                 `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
               this.currentLoc);
             }
+          } else if (paramType.kind === 'struct' && argType.kind === 'struct') {
+            if (paramType.mangled !== argType.mangled) {
+              throw new CompileError(
+                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
+              this.currentLoc);
+            }
           } else if (paramType.kind === 'scalar' && argType.kind === 'scalar') {
             // Scalar kinds match — element-name check delegated to existing runtime / future static.
           }

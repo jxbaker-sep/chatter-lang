@@ -415,7 +415,7 @@ Statement form goes through the same compile path as the expression form, so all
 
 
 ### Compile-time vs runtime checks
-- **Compile-time**: call-site arg/param type matching, return-type matching (scalar and list kind/element), type-locked `variable` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection.
+- **Compile-time**: call-site arg/param type matching (kind, list/uniqueList element, dict key/value, **and struct name**), return-type matching (scalar and list kind/element), type-locked `variable` changes, mixed-type-literal detection (when all types known), append/prepend/insert/change-item element-type static checks, nested-list rejection. Inside HOF bodies (`map`/`filter`/`reduce`/`sort by`), `it` carries the source list's element type, so wrong-struct args to functions called via `the result of CALL` are caught statically.
 - **Compile-time (operator/control-flow type checks, when operand types are statically known)**:
   - Arithmetic (`+`, `-`, `*`, `/`, `**`, `mod`) — both operands must be `number`. Known non-number → `Type mismatch: arithmetic requires numbers, got X`.
   - Unary minus `-X` — `X` must be `number`.

@@ -36,3 +36,7 @@ export function abs takes number n returns number is
     return -n
   end if
 end function
+
+export function sum takes list of number xs returns number is
+  return reduce xs starting 0 using accumulator + it 
+end function
