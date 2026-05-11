@@ -1,0 +1,10 @@
+struct Triple
+    number a
+    number b
+    number c
+end struct
+constant ts is list of (make Triple with a 1, b 2, c 3), (make Triple with a 1, b 2, c 1), (make Triple with a 1, b 1, c 9), (make Triple with a 2, b 1, c 1), (make Triple with a 1, b 2, c 2)
+sort ts by a of it then by b of it then by c of it
+repeat with t in ts
+    say a of t, b of t, c of t
+end repeat

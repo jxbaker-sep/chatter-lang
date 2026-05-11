@@ -1,0 +1,9 @@
+struct Row
+    number n
+    string s
+end struct
+constant rs is list of (make Row with n 2, s "banana"), (make Row with n 1, s "cherry"), (make Row with n 2, s "apple"), (make Row with n 1, s "apple")
+sort rs by n of it then by s of it
+repeat with r in rs
+    say n of r, s of r
+end repeat

@@ -2374,7 +2374,9 @@ export class Compiler {
         `cannot nest higher-order list operations`,
       this.currentLoc);
     }
-    this.validateHofResultOfSlot(stmt.key);
+    for (const k of stmt.keys) {
+      this.validateHofResultOfSlot(k.key);
+    }
     const lt = this.staticType(stmt.list, bindings);
     if (lt && lt.kind !== 'list') {
       throw new CompileError(
@@ -2382,8 +2384,9 @@ export class Compiler {
       this.currentLoc);
     }
     const elemType = this.listElementType(lt);
-    // Without a key expression, the list element type itself must be number or string.
-    if (!stmt.key) {
+
+    // Plain `sort xs [ascending|descending]` (single key, no `by`).
+    if (stmt.keys.length === 1 && stmt.keys[0].key === undefined) {
       if (lt && lt.kind === 'list') {
         if (lt.element !== 'number' && lt.element !== 'string') {
           throw new CompileError(
@@ -2392,50 +2395,123 @@ export class Compiler {
         }
       }
       this.compileExpr(stmt.list, out, bindings);
-      this.emit(out, { op: 'SORT_LIST', byKey: false, descending: stmt.descending });
+      this.emit(out, { op: 'SORT_LIST', byKey: false, descending: stmt.keys[0].descending });
       return;
     }
 
-    // by KEY: build a parallel keys list, then sort items by keys.
-    // Determine key type statically.
-    this.hofItStack.push({ local: '__sort_key_probe__', type: elemType });
-    let keyType: ChatterType | null;
-    try {
-      keyType = this.withHofBody(() => this.staticType(stmt.key!, bindings));
-    } finally { this.hofItStack.pop(); }
+    // Validate each key's static type.
+    const validateKey = (keyExpr: Expression): void => {
+      this.hofItStack.push({ local: '__sort_key_probe__', type: elemType });
+      let keyType: ChatterType | null;
+      try {
+        keyType = this.withHofBody(() => this.staticType(keyExpr, bindings));
+      } finally { this.hofItStack.pop(); }
+      if (keyType === null) {
+        throw new CompileError(
+          `cannot determine static type of 'sort by KEY' expression; consider using a typed function call`,
+        this.currentLoc);
+      }
+      if (keyType.kind !== 'scalar' || (keyType.name !== 'number' && keyType.name !== 'string')) {
+        throw new CompileError(
+          `'sort by KEY' requires KEY to be number or string, got ${typeToString(keyType)}`,
+        this.currentLoc);
+      }
+      return;
+    };
+    for (const k of stmt.keys) validateKey(k.key!);
 
-    if (keyType === null) {
-      throw new CompileError(
-        `cannot determine static type of 'sort by KEY' expression; consider using a typed function call`,
-      this.currentLoc);
-    }
-    if (keyType.kind !== 'scalar' || (keyType.name !== 'number' && keyType.name !== 'string')) {
-      throw new CompileError(
-        `'sort by KEY' requires KEY to be number or string, got ${typeToString(keyType)}`,
-      this.currentLoc);
-    }
-    const keysTmp = this.freshName('hof_keys');
-
-    // Compile source list once into listTmp (via compileHofLoop's listTmp).
-    // We want SORT_LIST to operate on the SAME list reference, so pass the
-    // *original* listTmp into SORT_LIST's stack.
-
-    // Pre-create the keys list.
-    this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: keyType.name });
-    this.emit(out, { op: 'STORE', name: keysTmp });
-
-    const tmps = this.compileHofLoop(stmt.list, elemType, out, bindings, (itLocal) => {
+    // Single-key path: build keys list once, single SORT_LIST pass.
+    if (stmt.keys.length === 1) {
+      const onlyKey = stmt.keys[0];
+      const keysTmp = this.freshName('hof_keys');
+      // Determine key type for the keys list element.
+      this.hofItStack.push({ local: '__sort_key_probe__', type: elemType });
+      let keyType: ChatterType;
+      try {
+        keyType = this.withHofBody(() => this.staticType(onlyKey.key!, bindings))!;
+      } finally { this.hofItStack.pop(); }
+      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: (keyType as { kind: 'scalar'; name: string }).name });
+      this.emit(out, { op: 'STORE', name: keysTmp });
+      const tmps = this.compileHofLoop(stmt.list, elemType, out, bindings, () => {
+        this.emit(out, { op: 'LOAD', name: keysTmp });
+        this.compileExpr(onlyKey.key!, out, bindings);
+        this.emit(out, { op: 'LIST_APPEND' });
+      });
+      this.emit(out, { op: 'LOAD', name: tmps.listTmp });
       this.emit(out, { op: 'LOAD', name: keysTmp });
-      this.compileExpr(stmt.key!, out, bindings);
-      this.emit(out, { op: 'LIST_APPEND' });
-    });
+      this.emit(out, { op: 'SORT_LIST', byKey: true, descending: onlyKey.descending });
+      this.emit(out, { op: 'DELETE', name: tmps.listTmp });
+      this.emit(out, { op: 'DELETE', name: keysTmp });
+      return;
+    }
 
-    this.emit(out, { op: 'LOAD', name: tmps.listTmp });
-    this.emit(out, { op: 'LOAD', name: keysTmp });
-    this.emit(out, { op: 'SORT_LIST', byKey: true, descending: stmt.descending });
+    // Multi-key path: lower to N stable single-key SORT_LIST passes in
+    // REVERSE order of significance. Compile the source list once into a
+    // shared temp so each pass sees the (now-reordered) same list.
+    const sharedListTmp = this.freshName('hof_list');
+    this.compileExpr(stmt.list, out, bindings);
+    this.emit(out, { op: 'STORE', name: sharedListTmp });
 
-    this.emit(out, { op: 'DELETE', name: tmps.listTmp });
-    this.emit(out, { op: 'DELETE', name: keysTmp });
+    for (let i = stmt.keys.length - 1; i >= 0; i--) {
+      const keyEntry = stmt.keys[i];
+      // Re-derive key type for the keys list element type.
+      this.hofItStack.push({ local: '__sort_key_probe__', type: elemType });
+      let keyType: ChatterType;
+      try {
+        keyType = this.withHofBody(() => this.staticType(keyEntry.key!, bindings))!;
+      } finally { this.hofItStack.pop(); }
+
+      const keysTmp = this.freshName('hof_keys');
+      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: (keyType as { kind: 'scalar'; name: string }).name });
+      this.emit(out, { op: 'STORE', name: keysTmp });
+
+      // Iterate the (possibly reordered) sharedListTmp without re-compiling
+      // the list expression. We inline a small loop here mirroring
+      // compileHofLoop, but reading from sharedListTmp directly.
+      const idxTmp = this.freshName('hof_idx');
+      const lenTmp = this.freshName('hof_len');
+      const itTmp = this.freshName('hof_it');
+      this.emit(out, { op: 'LOAD', name: sharedListTmp });
+      this.emit(out, { op: 'LENGTH' });
+      this.emit(out, { op: 'STORE', name: lenTmp });
+      this.emit(out, { op: 'PUSH_INT', value: 1 });
+      this.emit(out, { op: 'STORE', name: idxTmp });
+      const topIdx = out.length;
+      this.emit(out, { op: 'LOAD', name: idxTmp });
+      this.emit(out, { op: 'LOAD', name: lenTmp });
+      this.emit(out, { op: 'LE' });
+      const jifEndIdx = out.length;
+      this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
+      this.emit(out, { op: 'LOAD', name: sharedListTmp });
+      this.emit(out, { op: 'LOAD', name: idxTmp });
+      this.emit(out, { op: 'LIST_GET' });
+      this.emit(out, { op: 'STORE', name: itTmp });
+      this.hofItStack.push({ local: itTmp, type: elemType });
+      try {
+        this.withHofBody(() => {
+          this.emit(out, { op: 'LOAD', name: keysTmp });
+          this.compileExpr(keyEntry.key!, out, bindings);
+          this.emit(out, { op: 'LIST_APPEND' });
+        });
+      } finally { this.hofItStack.pop(); }
+      this.emit(out, { op: 'LOAD', name: idxTmp });
+      this.emit(out, { op: 'PUSH_INT', value: 1 });
+      this.emit(out, { op: 'ADD' });
+      this.emit(out, { op: 'STORE', name: idxTmp });
+      this.emit(out, { op: 'JUMP', target: topIdx });
+      const exitIdx = out.length;
+      (out[jifEndIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = exitIdx;
+      this.emit(out, { op: 'DELETE', name: itTmp });
+      this.emit(out, { op: 'DELETE', name: idxTmp });
+      this.emit(out, { op: 'DELETE', name: lenTmp });
+
+      this.emit(out, { op: 'LOAD', name: sharedListTmp });
+      this.emit(out, { op: 'LOAD', name: keysTmp });
+      this.emit(out, { op: 'SORT_LIST', byKey: true, descending: keyEntry.descending });
+      this.emit(out, { op: 'DELETE', name: keysTmp });
+    }
+
+    this.emit(out, { op: 'DELETE', name: sharedListTmp });
   }
 
   private compileMap(

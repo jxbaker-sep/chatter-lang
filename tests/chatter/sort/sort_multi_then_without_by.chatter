@@ -1,0 +1,6 @@
+struct Point
+    number x
+    number y
+end struct
+constant ps is list of (make Point with x 1, y 2)
+sort ps by x of it then ascending

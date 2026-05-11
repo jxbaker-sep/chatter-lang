@@ -404,11 +404,17 @@ export interface DictSetStatement {
   value: Expression;
 }
 
+export interface SortKey {
+  key?: Expression;          // optional `by KEY` expression; uses `it` for current element
+  descending: boolean;
+}
+
 export interface SortStatement {
   type: 'SortStatement';
   list: Expression;
-  key?: Expression;          // optional `by KEY` expression; uses `it` for current element
-  descending: boolean;
+  // length >= 1. `key` is undefined only on the single-clause plain form
+  // `sort xs [ascending|descending]` (no `by`).
+  keys: SortKey[];
 }
 
 export interface MapExpression {

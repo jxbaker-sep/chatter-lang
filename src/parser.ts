@@ -21,7 +21,7 @@ import {
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
   MakeStructExpression, FieldAccessExpression, StructWithExpression,
-  SortStatement, MapExpression, FilterExpression, ReduceExpression, HofStatement,
+  SortStatement, SortKey, MapExpression, FilterExpression, ReduceExpression, HofStatement,
 } from './ast';
 
 function locOfToken(t: Token): SourceLocation {
@@ -1125,22 +1125,78 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'ReadFileStatement', path };
   }
 
-  // `sort EXPR [by KEY-EXPR] [ascending|descending]`
+  // `sort EXPR [by KEY-EXPR] [ascending|descending] (then by KEY-EXPR [ascending|descending])*`
+  // Continuation `then by` may appear on the same line or on a following line
+  // at same-or-greater indent than `sort`. DEDENT before `then` is rejected.
   function parseSortStatement(): SortStatement {
     consume('KEYWORD', 'sort');
     const list = parseExpression();
-    let key: Expression | undefined;
+    const keys: SortKey[] = [];
+    let firstKey: Expression | undefined;
     if (peek().type === 'KEYWORD' && peek().value === 'by') {
       advance();
-      key = parseHofSlot(true, "'sort by'");
+      firstKey = parseHofSlot(true, "'sort by'");
     }
-    let descending = false;
+    let firstDesc = false;
     if (peek().type === 'KEYWORD' && (peek().value === 'ascending' || peek().value === 'descending')) {
-      descending = peek().value === 'descending';
+      firstDesc = peek().value === 'descending';
       advance();
     }
+    keys.push({ key: firstKey, descending: firstDesc });
+
+    let indentsConsumed = 0;
+    while (true) {
+      const savedPos = pos;
+      let sawDedent = false;
+      while (
+        peek().type === 'NEWLINE' ||
+        peek().type === 'INDENT' ||
+        peek().type === 'DEDENT'
+      ) {
+        if (peek().type === 'DEDENT') { sawDedent = true; advance(); continue; }
+        if (peek().type === 'INDENT') indentsConsumed++;
+        advance();
+      }
+      if (peek().type === 'IDENT' && peek().value === 'then') {
+        if (sawDedent) {
+          throw new ParseError(
+            `'then by' continuation must be at same or greater indent than 'sort'`,
+            peek(),
+          );
+        }
+        advance(); // 'then'
+        if (!(peek().type === 'KEYWORD' && peek().value === 'by')) {
+          throw new ParseError(`expected 'by' after 'then'`, peek());
+        }
+        advance(); // 'by'
+        const k = parseHofSlot(true, "'sort by'");
+        let desc = false;
+        if (peek().type === 'KEYWORD' && (peek().value === 'ascending' || peek().value === 'descending')) {
+          desc = peek().value === 'descending';
+          advance();
+        }
+        keys.push({ key: k, descending: desc });
+      } else {
+        // Restore: undo any consumed trivia (we don't want to swallow NEWLINE
+        // / INDENT / DEDENT that belong to the next statement).
+        pos = savedPos;
+        break;
+      }
+    }
+
+    if (keys.length > 1 && keys[0].key === undefined) {
+      throw new ParseError(
+        `cannot combine plain 'sort' with 'then by'; specify 'by' for the first key`,
+        peek(),
+      );
+    }
+
     consumeNewline();
-    return { type: 'SortStatement', list, key, descending };
+    // Consume trailing DEDENTs that match INDENTs we ate during continuation.
+    for (let i = 0; i < indentsConsumed; i++) {
+      consume('DEDENT');
+    }
+    return { type: 'SortStatement', list, keys };
   }
 
   function parseHofStatement(): HofStatement {

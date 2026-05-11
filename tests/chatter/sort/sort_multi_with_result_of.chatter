@@ -1,0 +1,12 @@
+struct Row
+    number n
+    string s
+end struct
+function neg takes number n returns number is
+    return 0 - n
+end function
+constant rs is list of (make Row with n 2, s "banana"), (make Row with n 1, s "cherry"), (make Row with n 2, s "apple"), (make Row with n 1, s "apple")
+sort rs by n of it then by the result of neg (length of s of it)
+repeat with r in rs
+    say n of r, s of r
+end repeat
