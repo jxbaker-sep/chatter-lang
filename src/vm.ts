@@ -902,8 +902,8 @@ export class VM {
           if (keys.items.length !== list.items.length) {
             throw new RuntimeError(`internal sort error: keys length mismatch`, instr.loc);
           }
-          if (keys.element !== 'number' && keys.element !== 'string') {
-            throw new RuntimeError(`'sort by KEY' keys must be number or string, got ${keys.element}`, instr.loc);
+          if (keys.element !== 'number' && keys.element !== 'string' && keys.element !== 'boolean') {
+            throw new RuntimeError(`'sort by KEY' keys must be number, string, or boolean, got ${keys.element}`, instr.loc);
           }
           // Build paired indices and stable-sort.
           const n = list.items.length;
@@ -915,6 +915,7 @@ export class VM {
             const kb = ks[b] as any;
             let c: number;
             if (typeof ka === 'number' && typeof kb === 'number') c = ka - kb;
+            else if (typeof ka === 'boolean' && typeof kb === 'boolean') c = Number(ka) - Number(kb);
             else c = String(ka) < String(kb) ? -1 : (String(ka) > String(kb) ? 1 : 0);
             if (c === 0) return a - b;  // stability fallback (Array.sort already stable in ES2019+)
             return desc ? -c : c;
@@ -927,8 +928,8 @@ export class VM {
           if (!isList(list)) {
             throw new RuntimeError(`Type mismatch: 'sort' target must be a list, got ${describe(list)}`, instr.loc);
           }
-          if (list.element !== 'number' && list.element !== 'string') {
-            throw new RuntimeError(`'sort' without 'by KEY' requires a list of number or string, got list of ${list.element}`, instr.loc);
+          if (list.element !== 'number' && list.element !== 'string' && list.element !== 'boolean') {
+            throw new RuntimeError(`'sort' without 'by KEY' requires a list of number, string, or boolean, got list of ${list.element}`, instr.loc);
           }
           const items = list.items;
           // Decorate with original index for stability.
@@ -940,6 +941,7 @@ export class VM {
             const vb = items[b] as any;
             let c: number;
             if (typeof va === 'number' && typeof vb === 'number') c = va - vb;
+            else if (typeof va === 'boolean' && typeof vb === 'boolean') c = Number(va) - Number(vb);
             else c = String(va) < String(vb) ? -1 : (String(va) > String(vb) ? 1 : 0);
             if (c === 0) return a - b;
             return desc ? -c : c;

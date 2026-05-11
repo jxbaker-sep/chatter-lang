@@ -1,0 +1,8 @@
+struct Task
+    string name
+    boolean done
+end struct
+
+constant tasks is list of (make Task with name "a", done true), (make Task with name "b", done false), (make Task with name "c", done true), (make Task with name "d", done false)
+sort tasks by done of it descending then by name of it ascending
+say tasks

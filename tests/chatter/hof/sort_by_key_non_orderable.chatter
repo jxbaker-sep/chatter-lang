@@ -1,5 +1,5 @@
 struct Box
-    boolean flag
+    string label
 end struct
-constant bs is list of (make Box with flag true), (make Box with flag false)
-sort bs by flag of it
+constant bs is list of (make Box with label "a"), (make Box with label "b")
+sort bs by it

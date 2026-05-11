@@ -2388,9 +2388,9 @@ export class Compiler {
     // Plain `sort xs [ascending|descending]` (single key, no `by`).
     if (stmt.keys.length === 1 && stmt.keys[0].key === undefined) {
       if (lt && lt.kind === 'list') {
-        if (lt.element !== 'number' && lt.element !== 'string') {
+        if (lt.element !== 'number' && lt.element !== 'string' && lt.element !== 'boolean') {
           throw new CompileError(
-            `'sort' without 'by KEY' requires a list of number or string, got ${typeToString(lt)}`,
+            `'sort' without 'by KEY' requires a list of number, string, or boolean, got ${typeToString(lt)}`,
           this.currentLoc);
         }
       }
@@ -2411,9 +2411,9 @@ export class Compiler {
           `cannot determine static type of 'sort by KEY' expression; consider using a typed function call`,
         this.currentLoc);
       }
-      if (keyType.kind !== 'scalar' || (keyType.name !== 'number' && keyType.name !== 'string')) {
+      if (keyType.kind !== 'scalar' || (keyType.name !== 'number' && keyType.name !== 'string' && keyType.name !== 'boolean')) {
         throw new CompileError(
-          `'sort by KEY' requires KEY to be number or string, got ${typeToString(keyType)}`,
+          `'sort by KEY' requires KEY to be number, string, or boolean, got ${typeToString(keyType)}`,
         this.currentLoc);
       }
       return;

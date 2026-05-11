@@ -1,1 +1,1 @@
-ERROR: requires KEY to be number or string
+ERROR: requires KEY to be number, string, or boolean

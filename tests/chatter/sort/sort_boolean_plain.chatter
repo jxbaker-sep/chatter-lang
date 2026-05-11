@@ -1,0 +1,5 @@
+constant flags is list of true, false, true, false, true
+sort flags ascending
+say flags
+sort flags descending
+say flags
