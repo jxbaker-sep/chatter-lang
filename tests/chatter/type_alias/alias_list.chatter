@@ -1,0 +1,13 @@
+type Numbers is list of number
+
+function sum takes Numbers ns returns number is
+    variable total is 0
+    repeat with n in ns
+        add n to total
+    end repeat
+    return total
+end function
+
+constant xs is list of 1, 2, 3, 4
+sum xs
+say it

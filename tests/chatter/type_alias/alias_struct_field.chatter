@@ -1,0 +1,9 @@
+type Age is number
+
+struct Person
+    string name
+    Age age
+end struct
+
+constant p is make Person with name "Remy", age 41
+say age of p

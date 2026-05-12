@@ -1,0 +1,9 @@
+type Counts is dictionary from string to number
+
+function size takes Counts c returns number is
+    return length of c
+end function
+
+constant xs is list of 1, 2
+size xs
+say it

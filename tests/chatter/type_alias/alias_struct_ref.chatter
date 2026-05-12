@@ -1,0 +1,14 @@
+struct Point
+    number x
+    number y
+end struct
+
+type P is Point
+
+function manhattan takes P p returns number is
+    return x of p + y of p
+end function
+
+constant origin is make Point with x 3, y 4
+manhattan origin
+say it

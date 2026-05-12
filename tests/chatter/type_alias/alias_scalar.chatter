@@ -1,0 +1,8 @@
+type Age is number
+
+function birthday takes Age a returns Age is
+    return a + 1
+end function
+
+birthday 30
+say it

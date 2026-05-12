@@ -1,0 +1,9 @@
+use Counts from "lib"
+
+function lookup takes Counts c key string k returns number is
+    return value of k in c
+end function
+
+constant inv is dictionary "apples" to 3, "pears" to 7
+lookup inv key "apples"
+say it

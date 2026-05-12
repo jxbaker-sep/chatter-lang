@@ -16,6 +16,7 @@ import {
   ExpectStatement,
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
+  TypeAliasDeclaration,
   MakeStructExpression, FieldAccessExpression, StructWithExpression,
   SortStatement, MapExpression, FilterExpression, ReduceExpression,
 } from './ast';
@@ -108,6 +109,18 @@ interface StructInfo {
   fields: Array<{ name: string; type: ChatterType }>;
   exported: boolean;
   imported: boolean;
+}
+
+interface AliasInfo {
+  mangled: string;
+  // For local aliases, `body` is the unresolved annotation. For imported
+  // aliases, `body` is null and `resolved` is pre-populated.
+  body: TypeAnnotation | null;
+  resolved: ChatterType | null;
+  resolving: boolean;
+  exported: boolean;
+  imported: boolean;
+  loc?: SourceLocation;
 }
 
 type BindingKind = 'constant' | 'var' | 'param' | 'loop';
@@ -210,10 +223,19 @@ export interface ImportedStruct {
   fields: Array<{ name: string; type: ChatterType }>;
 }
 
+export interface ImportedAlias {
+  // Aliases imported from another module are stored as the fully-expanded
+  // ChatterType produced by the source module. Importers do not need to
+  // re-walk the source's alias chain.
+  mangled: string;          // <sourceModuleId>::<Name>
+  resolved: ChatterType;
+}
+
 export interface CompileOptions {
   moduleId?: string;
   imports?: Map<string, ImportedFunction>;
   structImports?: Map<string, ImportedStruct>;
+  aliasImports?: Map<string, ImportedAlias>;
 }
 
 export interface CompiledModule {
@@ -221,6 +243,7 @@ export interface CompiledModule {
   topLevel: Instruction[];                  // module top-level instructions
   exports: Map<string, ImportedFunction>;   // local name -> info (for loader)
   structExports: Map<string, ImportedStruct>;
+  aliasExports: Map<string, ImportedAlias>;
 }
 
 export class Compiler {
@@ -249,6 +272,12 @@ export class Compiler {
   // local declarations (resolved fully) and imported structs.
   private structs = new Map<string, StructInfo>();
   private localStructDecls = new Map<string, StructDeclaration & Located>();
+
+  // Type-alias registry: local name -> info. Includes both local declarations
+  // (raw `body` field, resolved lazily during pass 1b with cycle detection)
+  // and imported aliases (already expanded by the source module).
+  private aliases = new Map<string, AliasInfo>();
+  private localAliasDecls = new Map<string, TypeAliasDeclaration & Located>();
 
   // Loop control stack: each entry records pending JUMP instruction indices
   // that must be patched to the loop's continue / exit targets.
@@ -301,14 +330,26 @@ export class Compiler {
     return name;
   }
 
-  // Resolve a TypeAnnotation to a ChatterType using the struct registry.
-  // Throws CompileError for unknown struct names.
+  // Resolve a TypeAnnotation to a ChatterType using the struct + alias
+  // registries. Throws CompileError for unknown names. Aliases are expanded
+  // (both local and imported); cycle detection is handled in pass 1b so by
+  // the time fromAnnotation runs in normal compilation flow, every local
+  // alias has a non-null `resolved` field.
   private fromAnnotation(a: TypeAnnotation, loc?: SourceLocation): ChatterType {
     if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
     if (a.kind === 'struct') {
+      // Bare IDENT: alias takes precedence over struct lookup, since names
+      // are unique across both registries (collision is checked in pass 1).
+      const ali = this.aliases.get(a.name);
+      if (ali) {
+        if (ali.resolved) return ali.resolved;
+        // Should be pre-resolved; fall back to on-demand resolution (e.g.,
+        // when fromAnnotation is reached during alias resolution itself).
+        return this.resolveLocalAlias(a.name, [], loc);
+      }
       const info = this.structs.get(a.name);
       if (!info) {
-        throw new CompileError(`unknown struct '${a.name}'`, loc ?? this.currentLoc);
+        throw new CompileError(`unknown type '${a.name}'`, loc ?? this.currentLoc);
       }
       return { kind: 'struct', mangled: info.mangled };
     }
@@ -319,16 +360,7 @@ export class Compiler {
     }
     // list/uniqueList
     const elem = a.element;
-    let elemCode: string;
-    if (elem.kind === 'scalar') {
-      elemCode = elem.name;
-    } else {
-      const info = this.structs.get(elem.name);
-      if (!info) {
-        throw new CompileError(`unknown struct '${elem.name}'`, loc ?? this.currentLoc);
-      }
-      elemCode = 'struct:' + info.mangled;
-    }
+    const elemCode = this.elementAnnotationToCode(elem, loc);
     if (a.kind === 'uniqueList') {
       return { kind: 'uniqueList', element: elemCode };
     }
@@ -337,9 +369,114 @@ export class Compiler {
 
   private elementAnnotationToCode(e: ElementTypeAnnotation, loc?: SourceLocation): string {
     if (e.kind === 'scalar') return e.name;
+    // Bare IDENT in element position: try alias first, then struct.
+    const ali = this.aliases.get(e.name);
+    if (ali) {
+      const t = ali.resolved ?? this.resolveLocalAlias(e.name, [], loc);
+      if (t.kind === 'list' || t.kind === 'uniqueList' || t.kind === 'dict') {
+        throw new CompileError(
+          `nested collections not supported (alias '${e.name}' expands to ${typeToString(t)})`,
+          loc ?? this.currentLoc,
+        );
+      }
+      if (t.kind === 'scalar') return t.name;
+      return 'struct:' + t.mangled;
+    }
     const info = this.structs.get(e.name);
     if (!info) {
-      throw new CompileError(`unknown struct '${e.name}'`, loc ?? this.currentLoc);
+      throw new CompileError(`unknown type '${e.name}'`, loc ?? this.currentLoc);
+    }
+    return 'struct:' + info.mangled;
+  }
+
+  // Resolve a local alias to a ChatterType, walking through alias-of-alias
+  // chains and detecting cycles. Also enforces the v1 rule that an alias
+  // body cannot reference an imported name.
+  private resolveLocalAlias(localName: string, chain: string[], loc?: SourceLocation): ChatterType {
+    const info = this.aliases.get(localName)!;
+    if (info.resolved) return info.resolved;
+    if (info.resolving) {
+      const startIdx = chain.indexOf(localName);
+      const cycle = startIdx >= 0
+        ? chain.slice(startIdx).concat(localName)
+        : chain.concat(localName);
+      throw new CompileError(
+        `circular type alias: ${cycle.join(' → ')}`,
+        info.loc ?? loc ?? this.currentLoc,
+      );
+    }
+    info.resolving = true;
+    try {
+      const t = this.expandAliasBody(info.body!, chain.concat(localName), info.loc);
+      info.resolved = t;
+      return t;
+    } finally {
+      info.resolving = false;
+    }
+  }
+
+  // Walk an alias body, rejecting any reference to an imported name.
+  // Local struct refs and local alias refs are allowed (recurses for
+  // alias-of-alias). Cycle detection lives in resolveLocalAlias.
+  private expandAliasBody(a: TypeAnnotation, chain: string[], loc?: SourceLocation): ChatterType {
+    if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
+    if (a.kind === 'struct') {
+      const name = a.name;
+      // Reject imported names (function, struct, or alias).
+      if (
+        this.imports.has(name) ||
+        (this.structs.get(name)?.imported === true) ||
+        (this.aliases.get(name)?.imported === true)
+      ) {
+        throw new CompileError(
+          `aliasing imported names is not supported in v1`,
+          loc ?? this.currentLoc,
+        );
+      }
+      if (this.aliases.has(name)) return this.resolveLocalAlias(name, chain, loc);
+      const info = this.structs.get(name);
+      if (!info) {
+        throw new CompileError(`unknown type '${name}'`, loc ?? this.currentLoc);
+      }
+      return { kind: 'struct', mangled: info.mangled };
+    }
+    if (a.kind === 'dict') {
+      const kCode = this.expandAliasElement(a.keyType, chain, loc);
+      const vCode = this.expandAliasElement(a.valueType, chain, loc);
+      return { kind: 'dict', keyType: kCode, valueType: vCode };
+    }
+    const elemCode = this.expandAliasElement(a.element, chain, loc);
+    if (a.kind === 'uniqueList') return { kind: 'uniqueList', element: elemCode };
+    return { kind: 'list', element: elemCode };
+  }
+
+  private expandAliasElement(e: ElementTypeAnnotation, chain: string[], loc?: SourceLocation): string {
+    if (e.kind === 'scalar') return e.name;
+    const name = e.name;
+    if (
+      this.imports.has(name) ||
+      (this.structs.get(name)?.imported === true) ||
+      (this.aliases.get(name)?.imported === true)
+    ) {
+      throw new CompileError(
+        `aliasing imported names is not supported in v1`,
+        loc ?? this.currentLoc,
+      );
+    }
+    if (this.aliases.has(name)) {
+      const t = this.resolveLocalAlias(name, chain, loc);
+      if (t.kind === 'list' || t.kind === 'uniqueList' || t.kind === 'dict') {
+        throw new CompileError(
+          `nested collections not supported (alias '${name}' expands to ${typeToString(t)})`,
+          loc ?? this.currentLoc,
+        );
+      }
+      if (t.kind === 'scalar') return t.name;
+      return 'struct:' + t.mangled;
+    }
+    const info = this.structs.get(name);
+    if (!info) {
+      throw new CompileError(`unknown type '${name}'`, loc ?? this.currentLoc);
     }
     return 'struct:' + info.mangled;
   }
@@ -353,9 +490,10 @@ export class Compiler {
     this.moduleId = opts.moduleId ?? null;
     this.imports = opts.imports ?? new Map();
     const structImports = opts.structImports ?? new Map<string, ImportedStruct>();
+    const aliasImports = opts.aliasImports ?? new Map<string, ImportedAlias>();
 
-    // Pass 1a: register all structs (local + imported) by local name.
-    // Imported structs first.
+    // Pass 1a: register all structs (local + imported) and aliases (local +
+    // imported) by local name. Imported entries first.
     for (const [localName, info] of structImports) {
       this.structs.set(localName, {
         mangled: info.mangled,
@@ -364,16 +502,32 @@ export class Compiler {
         imported: true,
       });
     }
+    for (const [localName, info] of aliasImports) {
+      this.aliases.set(localName, {
+        mangled: info.mangled,
+        body: null,
+        resolved: info.resolved,
+        resolving: false,
+        exported: false,
+        imported: true,
+      });
+    }
+
+    // Helper for collision checks across the unified namespace
+    // (struct, alias, function, import).
+    const checkCollision = (name: string, loc?: SourceLocation) => {
+      if (this.structs.has(name) || this.aliases.has(name) || this.imports.has(name)) {
+        throw new CompileError(
+          `name '${name}' is already defined`,
+          loc,
+        );
+      }
+    };
 
     // Local struct declarations: collect names with mangled, fields filled later.
     for (const stmt of program.body) {
       if (stmt.type !== 'StructDeclaration') continue;
-      if (this.structs.has(stmt.name)) {
-        throw new CompileError(
-          `name '${stmt.name}' is already defined`,
-          locOf(stmt),
-        );
-      }
+      checkCollision(stmt.name, locOf(stmt));
       const mangled = this.moduleId ? `${this.moduleId}::${stmt.name}` : stmt.name;
       // Validate empty / duplicate fields here (don't need full type resolution).
       if (stmt.fields.length === 0) {
@@ -399,6 +553,29 @@ export class Compiler {
         imported: false,
       });
       this.localStructDecls.set(stmt.name, stmt);
+    }
+
+    // Local type alias declarations: collect (raw bodies; resolved in pass 1a').
+    for (const stmt of program.body) {
+      if (stmt.type !== 'TypeAliasDeclaration') continue;
+      checkCollision(stmt.name, locOf(stmt));
+      const mangled = this.moduleId ? `${this.moduleId}::${stmt.name}` : stmt.name;
+      this.aliases.set(stmt.name, {
+        mangled,
+        body: stmt.body,
+        resolved: null,
+        resolving: false,
+        exported: stmt.exported,
+        imported: false,
+        loc: locOf(stmt),
+      });
+      this.localAliasDecls.set(stmt.name, stmt as TypeAliasDeclaration & Located);
+    }
+
+    // Pass 1a': resolve every local alias (DFS via resolveLocalAlias).
+    // This populates `resolved` and detects cycles + import-name refs.
+    for (const localName of this.localAliasDecls.keys()) {
+      this.resolveLocalAlias(localName, []);
     }
 
     // Pass 1b: resolve each local struct's field types (forward refs OK now).
@@ -466,7 +643,7 @@ export class Compiler {
     // First pass: collect local function signatures, return types, outer bindings
     for (const stmt of program.body) {
       if (stmt.type === 'FunctionDeclaration') {
-        if (this.imports.has(stmt.name) || this.structs.has(stmt.name)) {
+        if (this.imports.has(stmt.name) || this.structs.has(stmt.name) || this.aliases.has(stmt.name)) {
           throw new CompileError(
             `name '${stmt.name}' is already defined`,
             locOf(stmt),
@@ -501,6 +678,7 @@ export class Compiler {
     for (const stmt of program.body) {
       if (stmt.type === 'UseStatement') continue;
       if (stmt.type === 'StructDeclaration') continue;  // already processed in pass 1
+      if (stmt.type === 'TypeAliasDeclaration') continue;  // pure compile-time
       this.compileStatement(stmt, topLevel, bindings);
     }
 
@@ -540,7 +718,16 @@ export class Compiler {
       });
     }
 
-    return { functions: this.functions, topLevel, exports, structExports };
+    const aliasExports = new Map<string, ImportedAlias>();
+    for (const [localName, info] of this.aliases) {
+      if (info.imported || !info.exported) continue;
+      aliasExports.set(localName, {
+        mangled: info.mangled,
+        resolved: info.resolved!,
+      });
+    }
+
+    return { functions: this.functions, topLevel, exports, structExports, aliasExports };
   }
 
   private compileStatement(

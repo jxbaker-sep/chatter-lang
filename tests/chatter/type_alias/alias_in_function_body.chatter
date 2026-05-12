@@ -1,0 +1,7 @@
+function f returns number is
+    type Bad is number
+    return 1
+end function
+
+f
+say it

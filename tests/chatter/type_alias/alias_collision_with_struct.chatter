@@ -1,0 +1,7 @@
+struct X
+    number n
+end struct
+
+type X is number
+
+say "unreachable"

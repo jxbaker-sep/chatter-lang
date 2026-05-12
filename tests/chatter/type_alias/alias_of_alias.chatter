@@ -1,0 +1,9 @@
+type A is number
+type B is A
+
+function double takes B x returns B is
+    return x * 2
+end function
+
+double 21
+say it

@@ -1,0 +1,4 @@
+type A is B
+type B is A
+
+say "unreachable"

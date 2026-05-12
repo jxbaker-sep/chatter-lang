@@ -81,6 +81,7 @@ export type Statement = (
   | ExitRepeatStatement
   | NextRepeatStatement
   | StructDeclaration
+  | TypeAliasDeclaration
   | SortStatement
   | HofStatement
 ) & Located;
@@ -94,6 +95,13 @@ export interface StructDeclaration {
   type: 'StructDeclaration';
   name: string;             // unmangled
   fields: StructField[];
+  exported: boolean;
+}
+
+export interface TypeAliasDeclaration {
+  type: 'TypeAliasDeclaration';
+  name: string;             // unmangled
+  body: TypeAnnotation;
   exported: boolean;
 }
 

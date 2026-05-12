@@ -20,6 +20,7 @@ import {
   ExpectStatement, UseStatement,
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
+  TypeAliasDeclaration,
   MakeStructExpression, FieldAccessExpression, StructWithExpression,
   SortStatement, SortKey, MapExpression, FilterExpression, ReduceExpression, HofStatement,
 } from './ast';
@@ -51,6 +52,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'expect',
   'use', 'export',
   'struct', 'make',
+  'type',
   'sort', 'map', 'filter', 'reduce',
   'using', 'where', 'starting', 'ascending', 'descending', 'accumulator',
 ]);;
@@ -121,6 +123,8 @@ export function parse(tokens: Token[], source?: string): Program {
     consume('NEWLINE');
   }
 
+  let functionBodyDepth = 0;
+
   function parseProgram(): Program {
     const body: Statement[] = [];
     let seenNonUse = false;
@@ -171,6 +175,7 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'function': return parseFunctionDeclaration(false);
         case 'export':   return parseExportStatement();
         case 'struct':   return parseStructDeclaration(false);
+        case 'type':     return parseTypeAliasDeclaration(false);
         case 'use':      return parseUseStatement();
         case 'return':   return parseReturnStatement();
         case 'if':       return parseIfStatement();
@@ -759,9 +764,14 @@ export function parse(tokens: Token[], source?: string): Program {
     consume('INDENT');
 
     const body: Statement[] = [];
-    while (peek().type !== 'DEDENT' && peek().type !== 'EOF') {
-      if (peek().type === 'NEWLINE') { advance(); continue; }
-      body.push(parseStatement());
+    functionBodyDepth++;
+    try {
+      while (peek().type !== 'DEDENT' && peek().type !== 'EOF') {
+        if (peek().type === 'NEWLINE') { advance(); continue; }
+        body.push(parseStatement());
+      }
+    } finally {
+      functionBodyDepth--;
     }
 
     consume('DEDENT');
@@ -772,7 +782,7 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'FunctionDeclaration', name: nameTok.value, params, returnType, body, exported };
   }
 
-  function parseExportStatement(): FunctionDeclaration | StructDeclaration {
+  function parseExportStatement(): FunctionDeclaration | StructDeclaration | TypeAliasDeclaration {
     const exportTok = consume('KEYWORD', 'export');
     if (peek().type === 'KEYWORD' && peek().value === 'struct') {
       const sd = parseStructDeclaration(true);
@@ -782,9 +792,17 @@ export function parse(tokens: Token[], source?: string): Program {
       (sd as any).file = exportTok.file;
       return sd;
     }
+    if (peek().type === 'KEYWORD' && peek().value === 'type') {
+      const td = parseTypeAliasDeclaration(true);
+      (td as any).line = exportTok.line;
+      (td as any).col = exportTok.col;
+      (td as any).length = Math.max(1, exportTok.value.length);
+      (td as any).file = exportTok.file;
+      return td;
+    }
     if (peek().type !== 'KEYWORD' || peek().value !== 'function') {
       throw new ParseError(
-        `'export' must be followed by 'function' or 'struct'`,
+        `'export' must be followed by 'function', 'struct', or 'type'`,
         peek(),
       );
     }
@@ -825,6 +843,31 @@ export function parse(tokens: Token[], source?: string): Program {
     (node as any).col = structTok.col;
     (node as any).length = Math.max(1, structTok.value.length);
     (node as any).file = structTok.file;
+    return node;
+  }
+
+  function parseTypeAliasDeclaration(exported: boolean): TypeAliasDeclaration {
+    const typeTok = consume('KEYWORD', 'type');
+    if (functionBodyDepth > 0) {
+      throw new ParseError(
+        `'type' alias declarations may only appear at module top level`,
+        typeTok,
+      );
+    }
+    const nameTok = consume('IDENT');
+    consume('KEYWORD', 'is');
+    const body = parseTypeAnnotation();
+    consumeNewline();
+    const node: TypeAliasDeclaration = {
+      type: 'TypeAliasDeclaration',
+      name: nameTok.value,
+      body,
+      exported,
+    };
+    (node as any).line = typeTok.line;
+    (node as any).col = typeTok.col;
+    (node as any).length = Math.max(1, typeTok.value.length);
+    (node as any).file = typeTok.file;
     return node;
   }
 

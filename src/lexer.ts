@@ -36,6 +36,7 @@ const KEYWORDS = new Set([
   'expect',
   'use', 'export',
   'struct', 'make',
+  'type',
   'sort', 'map', 'filter', 'reduce',
   'using', 'where', 'starting', 'ascending', 'descending', 'accumulator',
 ]);

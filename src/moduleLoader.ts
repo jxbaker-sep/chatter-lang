@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { lex } from './lexer';
 import { parse } from './parser';
-import { Compiler, CompileError, CompiledModule, ImportedFunction, ImportedStruct } from './compiler';
+import { Compiler, CompileError, CompiledModule, ImportedFunction, ImportedStruct, ImportedAlias } from './compiler';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 import { Program, UseStatement } from './ast';
 import { SourceLocation } from './errors';
@@ -180,23 +180,26 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
     // Now all deps are compiled (post-order). Compile this module with imports.
     const imports = new Map<string, ImportedFunction>();
     const structImports = new Map<string, ImportedStruct>();
+    const aliasImports = new Map<string, ImportedAlias>();
     for (const stmt of ast.body) {
       if (stmt.type !== 'UseStatement') continue;
       const depInfo = depModules.get(stmt.path)!;
       const depExports = depInfo.compiled!.exports;
       const depStructExports = depInfo.compiled!.structExports;
+      const depAliasExports = depInfo.compiled!.aliasExports;
       for (let i = 0; i < stmt.names.length; i++) {
         const n = stmt.names[i];
         const nameLoc = nameLocation(stmt, i);
         const isFunc = depExports.has(n);
         const isStruct = depStructExports.has(n);
-        if (!isFunc && !isStruct) {
+        const isAlias = depAliasExports.has(n);
+        if (!isFunc && !isStruct && !isAlias) {
           throw new CompileError(
             `module "${stmt.path}" does not export '${n}'`,
             nameLoc,
           );
         }
-        if (imports.has(n) || structImports.has(n)) {
+        if (imports.has(n) || structImports.has(n) || aliasImports.has(n)) {
           throw new CompileError(
             `name '${n}' is already defined`,
             nameLoc,
@@ -204,14 +207,16 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
         }
         if (isFunc) {
           imports.set(n, depExports.get(n)!);
-        } else {
+        } else if (isStruct) {
           structImports.set(n, depStructExports.get(n)!);
+        } else {
+          aliasImports.set(n, depAliasExports.get(n)!);
         }
       }
     }
 
     const compiler = new Compiler();
-    const compiled = compiler.compileModule(ast, { moduleId, imports, structImports });
+    const compiled = compiler.compileModule(ast, { moduleId, imports, structImports, aliasImports });
     info.compiled = compiled;
 
     loading.delete(registryKey);

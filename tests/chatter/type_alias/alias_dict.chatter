@@ -1,0 +1,9 @@
+type Counts is dictionary from string to number
+
+function bumped takes Counts c key string k returns number is
+    return value of k in c
+end function
+
+constant d is dictionary "apples" to 3, "pears" to 5
+bumped d key "pears"
+say it
