@@ -1,0 +1,7 @@
+use integers from "std:parser"
+integers "x=-7, y=42"
+say it
+integers "-3 -4 -5"
+say it
+integers "temperature: -40 degrees"
+say it

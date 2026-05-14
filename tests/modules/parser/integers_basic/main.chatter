@@ -1,0 +1,9 @@
+use integers from "std:parser"
+integers "3 14 159"
+say it
+integers "1,2,3,4,5"
+say it
+integers "    42    "
+say it
+integers "abc 100 def 200 ghi"
+say it

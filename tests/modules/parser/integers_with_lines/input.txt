@@ -1,0 +1,3 @@
+Game 1: 3 red, 4 blue
+Game 2: 10 green, 5 red
+Game 12: 1 blue

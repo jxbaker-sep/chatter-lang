@@ -1,0 +1,5 @@
+use integers from "std:parser"
+integers "007"
+say it
+integers "0 00 007 0123"
+say it

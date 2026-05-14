@@ -1,0 +1,59 @@
+# Chatter standard library: parser
+#
+# Utilities for extracting structured data from strings. Aimed at the kinds
+# of inputs that show up in puzzle / one-off parsing tasks (e.g. Advent of
+# Code), not at building general-purpose grammars.
+
+use parse from "std:strings"
+
+# integers: pull every signed integer out of a string, in order.
+#
+# A `-` immediately followed by a digit is treated as part of the number
+# (so it doesn't matter what came before it). This matches the Python
+# `re.findall(r'-?\d+', s)` convention.
+#
+#   integers "Game 1: 3 red, 4 blue"  -> [1, 3, 4]
+#   integers "x=-7, y=42"             -> [-7, 42]
+#   integers "5-3"                    -> [5, -3]
+#   integers "a-b"                    -> []
+#   integers ""                       -> []
+#
+# Returns a fresh mutable list of number.
+export function integers takes string s returns list of number is
+  variable result is empty list of number
+  variable i is 1
+  constant n is length of s
+  repeat while i is at most n
+    constant c is character i of s
+    variable starts is false
+    if c is a digit
+      change starts to true
+    else if c is "-"
+      if i is less than n
+        if character i + 1 of s is a digit
+          change starts to true
+        end if
+      end if
+    end if
+    if starts
+      variable j is i
+      if character j of s is "-"
+        change j to j + 1
+      end if
+      repeat while j is at most n
+        if character j of s is a digit
+          change j to j + 1
+        else
+          exit repeat
+        end if
+      end repeat
+      constant numstr is characters i to j - 1 of s
+      constant value is the result of parse numstr
+      append value to result
+      change i to j
+    else
+      change i to i + 1
+    end if
+  end repeat
+  return result
+end function

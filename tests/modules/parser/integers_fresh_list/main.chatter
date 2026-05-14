@@ -1,0 +1,8 @@
+use integers from "std:parser"
+integers "1 2 3"
+constant a is it
+append 99 to a
+integers "1 2 3"
+constant b is it
+say a
+say b

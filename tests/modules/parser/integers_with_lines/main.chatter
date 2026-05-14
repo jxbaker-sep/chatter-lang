@@ -1,0 +1,10 @@
+use integers from "std:parser"
+use sum from "std:math"
+read file "tests/modules/parser/integers_with_lines/input.txt"
+constant rows is it
+repeat with line in rows
+  integers line
+  constant nums is it
+  constant s is the result of sum nums
+  say nums, "sum:", s
+end repeat

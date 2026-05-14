@@ -1,0 +1,7 @@
+use integers from "std:parser"
+integers "--5"
+say it
+integers "---10---"
+say it
+integers "+5"
+say it
