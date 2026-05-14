@@ -134,6 +134,8 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 ### Keywords reserved for mutable vars
 `variable`, `change`, `add`, `subtract`, `multiply`, `divide`, `by`
 
+Note: `by` is reserved (it has special meaning in `multiply X by Y`, `divide X by Y`, `sort NAME by KEY`, and `repeat with i from A to B by STEP`) but is **not** a stop keyword — it may be used as a function parameter / call-site separator label (e.g. `function multiply_complex takes ComplexNumber lhs by ComplexNumber rhs ...`). The four constructs above each begin with their own reserved keyword (`multiply` / `divide` / `sort` / `repeat`), so dere is no parse-time ambiguity.
+
 ### Keywords reserved for loop control
 `exit`, `next` (each only meaningful in the two-word sequences `exit repeat` / `next repeat`; bare `exit` / `next` is a parse error).
 

@@ -44,7 +44,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'true', 'false', 'is', 'say', 'constant', 'function', 'takes', 'returns', 'return',
   'repeat', 'times', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
-  'variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'by', 'mod',
+  'variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'mod',
   'list', 'of', 'empty', 'unique', 'dictionary',
   'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'remove',
@@ -986,7 +986,24 @@ export function parse(tokens: Token[], source?: string): Program {
       break;
     }
 
-    if (consumeTerminator) consumeNewline();
+    if (consumeTerminator) {
+      // Targeted error: if the next token is a reserved keyword that the user
+      // likely intended as a separator label, point that out rather than the
+      // generic "Expected NEWLINE" message.
+      const tok = peek();
+      if (
+        tok.type === 'KEYWORD' &&
+        NAMED_ARG_STOP_KEYWORDS.has(tok.value) &&
+        tok.value !== 'end' &&
+        tok.value !== 'else'
+      ) {
+        throw new ParseError(
+          `Cannot use reserved keyword '${tok.value}' as a named-argument label in call to '${nameTok.value}'`,
+          tok,
+        );
+      }
+      consumeNewline();
+    }
     return { type: 'CallStatement', name: nameTok.value, args };
   }
 

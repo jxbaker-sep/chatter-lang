@@ -1,0 +1,5 @@
+function foo takes number a is
+    say a
+end function
+
+foo 1 times 2

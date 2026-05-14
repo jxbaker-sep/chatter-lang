@@ -1,0 +1,10 @@
+function multiply_complex takes
+    number lhs
+    by number rhs
+    returns number
+is
+    return lhs * rhs
+end function
+
+constant answer is the result of multiply_complex 6 by 7
+say answer
