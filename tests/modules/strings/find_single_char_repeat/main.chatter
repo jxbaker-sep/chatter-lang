@@ -1,4 +1,0 @@
-use find from "std:strings"
-
-find "a" in "banana" from 3
-say it

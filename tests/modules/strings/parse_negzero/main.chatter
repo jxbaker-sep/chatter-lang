@@ -1,5 +1,0 @@
-use parse from "std:strings"
-
-# "-0" — accepted as a signed integer, equals 0
-parse "-0"
-say it

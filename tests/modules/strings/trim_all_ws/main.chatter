@@ -1,4 +1,0 @@
-use trim from "std:strings"
-
-trim "   "
-say "[" & it & "]"

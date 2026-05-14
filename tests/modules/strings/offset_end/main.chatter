@@ -1,4 +1,0 @@
-use offset from "std:strings"
-
-offset "er" in "scatter"
-say it

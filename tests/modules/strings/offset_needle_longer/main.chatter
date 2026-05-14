@@ -1,4 +1,0 @@
-use offset from "std:strings"
-
-offset "helloworld" in "hello"
-say it

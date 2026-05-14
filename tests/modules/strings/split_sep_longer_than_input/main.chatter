@@ -1,4 +1,0 @@
-use split from "std:strings"
-
-split "hi" on "hello"
-say it

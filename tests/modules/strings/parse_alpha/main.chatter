@@ -1,4 +1,0 @@
-use parse from "std:strings"
-
-parse "42x"
-say it

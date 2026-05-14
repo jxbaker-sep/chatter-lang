@@ -1,4 +1,0 @@
-use find from "std:strings"
-
-find "x" in "" from 1
-say it

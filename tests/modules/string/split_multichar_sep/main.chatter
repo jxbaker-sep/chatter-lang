@@ -1,0 +1,4 @@
+use split from "std:string"
+
+split "aXXbXXc" on "XX"
+say it

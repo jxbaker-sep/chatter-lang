@@ -1,0 +1,4 @@
+use trim from "std:string"
+
+trim "x"
+say it

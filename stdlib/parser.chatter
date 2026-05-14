@@ -4,7 +4,7 @@
 # of inputs that show up in puzzle / one-off parsing tasks (e.g. Advent of
 # Code), not at building general-purpose grammars.
 
-use parse from "std:strings"
+use parse from "std:string"
 
 # integers: pull every signed integer out of a string, in order.
 #

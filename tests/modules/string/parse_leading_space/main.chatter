@@ -1,0 +1,4 @@
+use parse from "std:string"
+
+parse " 42"
+say it

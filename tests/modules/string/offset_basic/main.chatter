@@ -1,0 +1,4 @@
+use offset from "std:string"
+
+offset "lo" in "hello"
+say it

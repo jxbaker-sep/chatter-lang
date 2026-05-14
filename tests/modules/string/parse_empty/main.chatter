@@ -1,0 +1,4 @@
+use parse from "std:string"
+
+parse ""
+say it

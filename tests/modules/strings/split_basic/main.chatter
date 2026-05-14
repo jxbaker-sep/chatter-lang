@@ -1,4 +1,0 @@
-use split from "std:strings"
-
-split "a,b,c" on ","
-say it

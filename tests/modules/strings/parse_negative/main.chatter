@@ -1,4 +1,0 @@
-use parse from "std:strings"
-
-parse "-7"
-say it
