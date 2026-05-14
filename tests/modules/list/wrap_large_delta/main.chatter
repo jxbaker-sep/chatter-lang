@@ -1,0 +1,5 @@
+use wrap from "std:list"
+wrap 1000003 in 7
+say it
+wrap -1000003 in 7
+say it

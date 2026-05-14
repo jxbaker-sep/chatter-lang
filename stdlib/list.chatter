@@ -1,0 +1,19 @@
+# Chatter standard library: list
+#
+# List utility functions written in Chatter itself.
+
+# wrap: snap a (possibly out-of-range) 1-based index into [1..size].
+#
+# Uses floored mod so negative values wrap correctly:
+#   wrap 7 in 5  -> 2     (one past the end)
+#   wrap 0 in 5  -> 5     (one before the start)
+#   wrap -3 in 5 -> 2
+#
+# Typical use: step an index by a signed delta with wrap-around:
+#   change idx to wrap idx + delta in length of items
+#
+# Runtime error if size is less than 1.
+export function wrap takes number n in number size returns number is
+  expect size is at least 1, "wrap size must be at least 1"
+  return ((n - 1) mod size) + 1
+end function

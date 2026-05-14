@@ -1,0 +1,7 @@
+use wrap from "std:list"
+wrap 1 in 1
+say it
+wrap 100 in 1
+say it
+wrap -5 in 1
+say it
