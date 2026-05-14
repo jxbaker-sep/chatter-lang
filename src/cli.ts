@@ -4,11 +4,12 @@ import { VM } from './vm';
 import { formatError } from './errors';
 
 export function run(args: string[]): number {
-  if (args.length !== 1) {
-    console.error('Usage: chatter <filepath>');
+  if (args.length < 1) {
+    console.error('Usage: chatter <filepath> [arg1 arg2 ...]');
     return 1;
   }
   const filepath = args[0];
+  const scriptArgs = args.slice(1);
   if (!fs.existsSync(filepath)) {
     console.error(`File does not exist: ${filepath}`);
     return 1;
@@ -17,7 +18,7 @@ export function run(args: string[]): number {
   let source = '';
   try {
     source = fs.readFileSync(filepath, 'utf8');
-    const program = loadProgram(filepath);
+    const program = loadProgram(filepath, { args: scriptArgs });
     const vm = new VM(program);
     vm.run();
     return 0;

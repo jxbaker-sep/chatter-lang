@@ -1,0 +1,5 @@
+use args from "std:cli"
+use parse from "std:strings"
+args
+constant n is the result of parse item 1 of it
+say n + 10

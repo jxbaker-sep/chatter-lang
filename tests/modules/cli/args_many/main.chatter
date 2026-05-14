@@ -1,0 +1,6 @@
+use args from "std:cli"
+args
+say "count:", length of it
+repeat with a in it
+  say "-", a
+end repeat

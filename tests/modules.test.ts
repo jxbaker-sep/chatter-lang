@@ -21,14 +21,23 @@ function loadExpectation(expectedPath: string): Expectation {
   return { stdout: trimmed, error: null };
 }
 
-function runEntry(entryPath: string): { stdout: string; error: Error | null } {
+function loadArgs(argsPath: string): string[] {
+  if (!fs.existsSync(argsPath)) return [];
+  const raw = fs.readFileSync(argsPath, 'utf8');
+  // Strip exactly one trailing newline (parallel to .expected handling).
+  const trimmed = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
+  if (trimmed.length === 0) return [];
+  return trimmed.split('\n');
+}
+
+function runEntry(entryPath: string, args: string[]): { stdout: string; error: Error | null } {
   const logs: string[] = [];
   const originalLog = console.log;
-  console.log = (...args: unknown[]) => {
-    logs.push(args.map((a) => String(a)).join(' '));
+  console.log = (...a: unknown[]) => {
+    logs.push(a.map((x) => String(x)).join(' '));
   };
   try {
-    const program = loadProgram(entryPath);
+    const program = loadProgram(entryPath, { args });
     const vm = new VM(program);
     vm.run();
     return { stdout: logs.join('\n'), error: null };
@@ -39,17 +48,19 @@ function runEntry(entryPath: string): { stdout: string; error: Error | null } {
   }
 }
 
-function discoverCases(): Array<{ name: string; entryPath: string; expectedPath: string }> {
+function discoverCases(): Array<{ name: string; entryPath: string; expectedPath: string; argsPath: string }> {
   if (!fs.existsSync(MODULES_DIR)) return [];
-  const cases: Array<{ name: string; entryPath: string; expectedPath: string }> = [];
+  const cases: Array<{ name: string; entryPath: string; expectedPath: string; argsPath: string }> = [];
   const walk = (dir: string): void => {
     const entryPath = path.join(dir, 'main.chatter');
     const expectedPath = path.join(dir, '.expected');
+    const argsPath = path.join(dir, 'args.txt');
     if (fs.existsSync(entryPath) && fs.existsSync(expectedPath)) {
       cases.push({
         name: path.relative(MODULES_DIR, dir).split(path.sep).join('/'),
         entryPath,
         expectedPath,
+        argsPath,
       });
       return;
     }
@@ -75,7 +86,8 @@ describe('chatter module golden tests', () => {
   for (const c of cases) {
     test(c.name, () => {
       const expectation = loadExpectation(c.expectedPath);
-      const result = runEntry(c.entryPath);
+      const args = loadArgs(c.argsPath);
+      const result = runEntry(c.entryPath, args);
 
       if (expectation.error !== null) {
         expect(result.error).not.toBeNull();

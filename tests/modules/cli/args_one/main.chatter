@@ -1,0 +1,4 @@
+use args from "std:cli"
+args
+say length of it
+say item 1 of it

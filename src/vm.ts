@@ -975,6 +975,15 @@ export class VM {
         break;
       }
 
+      case 'LOAD_ARGS': {
+        // Fresh mutable list of string each call — mutating the returned
+        // list never affects subsequent `args` calls.
+        const items: ChatterValue[] = (this.program.args ?? []).slice();
+        const list: ChatterList = { kind: 'list', element: 'string', items };
+        this.stack.push(list);
+        break;
+      }
+
       case 'CHAR_CODE': {
         const s = this.pop();
         if (typeof s !== 'string') {

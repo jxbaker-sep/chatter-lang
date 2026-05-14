@@ -55,6 +55,7 @@ export type InstructionKind =
   | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate
   | { op: 'LIST_REMOVE' }     // pop index, pop list, mutate
   | { op: 'READ_FILE_LINES' } // pop path string, push list of string
+  | { op: 'LOAD_ARGS' }       // push a fresh `list of string` containing the program's CLI arguments
   | { op: 'CHAR_CODE' }       // pop string (single code point), push code point number
   | { op: 'CHAR_FROM_CODE' }  // pop number (0..0x10FFFF, no surrogates), push 1-code-point string
   | { op: 'IS_DIGIT' }        // pop string, push boolean
@@ -88,4 +89,5 @@ export interface FunctionDef {
 export interface BytecodeProgram {
   functions: Map<string, FunctionDef>;
   main: Instruction[];      // top-level instructions
+  args?: string[];          // CLI arguments passed to the program (default: [])
 }

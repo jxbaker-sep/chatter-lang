@@ -1,0 +1,9 @@
+use args from "std:cli"
+args
+constant first is it
+append "MUTATED" to first
+say length of first
+args
+constant second is it
+say length of second
+say item 1 of second

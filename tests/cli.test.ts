@@ -20,7 +20,7 @@ describe('chatter CLI', () => {
   test('prints usage and exits non-zero when no args', () => {
     const code = run([]);
     expect(code).toBe(1);
-    expect(errSpy).toHaveBeenCalledWith('Usage: chatter <filepath>');
+    expect(errSpy).toHaveBeenCalledWith('Usage: chatter <filepath> [arg1 arg2 ...]');
   });
 
   test('prints error and exits non-zero when file missing', () => {

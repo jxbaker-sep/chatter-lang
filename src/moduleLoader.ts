@@ -25,6 +25,8 @@ const STD_PREFIX = 'std:';
 export interface LoadProgramOptions {
   /** Override the directory used to resolve `std:` imports (for tests). */
   stdlibDir?: string;
+  /** CLI arguments exposed to the program via `use args from "std:cli"`. */
+  args?: string[];
 }
 
 function defaultStdlibDir(): string {
@@ -89,6 +91,56 @@ function nameLocation(u: UseStatement, idx: number): SourceLocation | undefined 
   return useLocation(u);
 }
 
+// Build the synthetic `std:cli` module. It exports one typed function:
+//   args returns list of string is return <LOAD_ARGS> end
+// with no .chatter source file backing it. The function body is a literal
+// LOAD_ARGS + RETURN bytecode sequence; the VM resolves the CLI arguments
+// at LOAD_ARGS-execution time from BytecodeProgram.args.
+function buildStdCliModule(moduleId: string, registryKey: string, absPath: string): ModuleInfo {
+  const mangledArgs = `${moduleId}::args`;
+  const fn: FunctionDef = {
+    name: mangledArgs,
+    params: [],
+    instructions: [
+      { op: 'LOAD_ARGS' },
+      { op: 'RETURN' },
+    ],
+  };
+  const functions = new Map<string, FunctionDef>();
+  functions.set(mangledArgs, fn);
+
+  const argsImport: ImportedFunction = {
+    mangled: mangledArgs,
+    signature: [],
+    returnType: { kind: 'list', element: 'string' },
+    paramNames: [],
+  };
+  const exportsMap = new Map<string, ImportedFunction>();
+  exportsMap.set('args', argsImport);
+
+  const compiled: CompiledModule = {
+    functions,
+    topLevel: [],
+    exports: exportsMap,
+    structExports: new Map(),
+    aliasExports: new Map(),
+  };
+
+  // Synthetic AST: an empty Program is enough; the loader only consults `ast`
+  // to walk UseStatements (none here) and never re-parses this module.
+  const ast: Program = { type: 'Program', body: [] } as Program;
+
+  return {
+    absPath,
+    registryKey,
+    moduleId,
+    source: '',
+    ast,
+    compiled,
+    isStdlib: true,
+  };
+}
+
 export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}): BytecodeProgram {
   const stdlibDir = opts.stdlibDir ?? defaultStdlibDir();
   const entryAbs = path.resolve(entryFilePath);
@@ -122,6 +174,14 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
         );
       }
       return existing;
+    }
+    // Synthetic stdlib module: std:cli — exposes a single typed function
+    // `args` whose body is just LOAD_ARGS; RETURN. No .chatter file involved.
+    if (registryKey === 'std:cli') {
+      const info = buildStdCliModule(`m${nextId++}`, registryKey, absPath);
+      registry.set(registryKey, info);
+      orderPostOrder.push(info);
+      return info;
     }
     if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
       throw new CompileError(
@@ -257,5 +317,5 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
   }
   concatShifted(entryInfo.compiled!.topLevel);
 
-  return { functions, main };
+  return { functions, main, args: opts.args ?? [] };
 }

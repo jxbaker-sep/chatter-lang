@@ -1,0 +1,6 @@
+use args from "std:cli"
+args
+say length of it
+say "[" & item 1 of it & "]"
+say "[" & item 2 of it & "]"
+say length of item 1 of it
