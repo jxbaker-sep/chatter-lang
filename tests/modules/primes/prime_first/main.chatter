@@ -1,0 +1,4 @@
+use prime from "std:primes"
+
+prime 1
+say it
