@@ -2779,8 +2779,14 @@ export class Compiler {
           this.currentLoc);
         }
       }
+      const listTmp = this.freshName('sort_list');
       this.compileExpr(stmt.list, out, bindings);
+      this.emit(out, { op: 'STORE', name: listTmp });
+      this.emit(out, { op: 'LOAD', name: listTmp });
       this.emit(out, { op: 'SORT_LIST', byKey: false, descending: stmt.keys[0].descending });
+      this.emit(out, { op: 'LOAD', name: listTmp });
+      this.emit(out, { op: 'STORE_IT' });
+      this.emit(out, { op: 'DELETE', name: listTmp });
       return;
     }
 
@@ -2825,6 +2831,8 @@ export class Compiler {
       this.emit(out, { op: 'LOAD', name: tmps.listTmp });
       this.emit(out, { op: 'LOAD', name: keysTmp });
       this.emit(out, { op: 'SORT_LIST', byKey: true, descending: onlyKey.descending });
+      this.emit(out, { op: 'LOAD', name: tmps.listTmp });
+      this.emit(out, { op: 'STORE_IT' });
       this.emit(out, { op: 'DELETE', name: tmps.listTmp });
       this.emit(out, { op: 'DELETE', name: keysTmp });
       return;
@@ -2896,6 +2904,8 @@ export class Compiler {
       this.emit(out, { op: 'DELETE', name: keysTmp });
     }
 
+    this.emit(out, { op: 'LOAD', name: sharedListTmp });
+    this.emit(out, { op: 'STORE_IT' });
     this.emit(out, { op: 'DELETE', name: sharedListTmp });
   }
 

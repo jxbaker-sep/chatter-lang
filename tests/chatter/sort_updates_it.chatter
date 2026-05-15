@@ -1,0 +1,10 @@
+constant xs is list of 3, 1, 4, 1, 5, 9, 2, 6
+sort xs ascending
+say it
+sort xs descending
+say it
+constant words is list of "banana", "apple", "cherry"
+sort words by length of it
+say it
+sort xs by it mod 2 then by it
+say it
