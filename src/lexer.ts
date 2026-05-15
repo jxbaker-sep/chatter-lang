@@ -32,6 +32,7 @@ const KEYWORDS = new Set([
   'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'in', 'remove',
   'character', 'characters',
+  'items',
   'read', 'file', 'lines',
   'expect',
   'use', 'export',

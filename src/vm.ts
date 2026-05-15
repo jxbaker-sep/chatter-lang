@@ -873,6 +873,31 @@ export class VM {
         break;
       }
 
+      case 'LIST_SUBLIST': {
+        const to = this.pop();
+        const from = this.pop();
+        const lst = this.pop();
+        if (!isList(lst)) {
+          throw new RuntimeError(`Type mismatch: 'items A to B of X' requires a list, got ${describe(lst)}`, instr.loc);
+        }
+        if (typeof from !== 'number' || typeof to !== 'number') {
+          throw new RuntimeError(`Type mismatch: sublist bounds must be numbers`, instr.loc);
+        }
+        if (from > to) {
+          const empty: ChatterList = { kind: 'list', element: lst.element, items: [] };
+          this.stack.push(empty);
+          break;
+        }
+        if (from < 1 || to > lst.items.length) {
+          throw new RuntimeError(
+            `Index out of range: items ${from} to ${to} of list (length ${lst.items.length})`,
+          instr.loc);
+        }
+        const sliced: ChatterList = { kind: 'list', element: lst.element, items: lst.items.slice(from - 1, to) };
+        this.stack.push(sliced);
+        break;
+      }
+
       case 'LIST_APPEND': {
         const value = this.pop();
         const list = this.pop();

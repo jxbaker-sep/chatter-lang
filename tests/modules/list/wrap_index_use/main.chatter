@@ -1,10 +1,10 @@
 use wrap from "std:list"
-variable items is list of "a", "b", "c", "d"
+variable entries is list of "a", "b", "c", "d"
 variable idx is 1
 constant delta is -3
-change idx to the result of wrap idx + delta in length of items
-say item idx of items
-change idx to the result of wrap idx + 6 in length of items
-say item idx of items
-change idx to the result of wrap idx + 0 in length of items
-say item idx of items
+change idx to the result of wrap idx + delta in length of entries
+say item idx of entries
+change idx to the result of wrap idx + 6 in length of entries
+say item idx of entries
+change idx to the result of wrap idx + 0 in length of entries
+say item idx of entries

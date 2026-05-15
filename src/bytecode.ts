@@ -50,6 +50,7 @@ export type InstructionKind =
   | { op: 'CONCAT' }          // pop b, pop a; both coerced to string; push a+b
   | { op: 'STR_CHAR_AT' }     // pop index, pop string, push 1-char string
   | { op: 'STR_SUBSTRING' }   // pop to, pop from, pop string, push substring
+  | { op: 'LIST_SUBLIST' }    // pop to, pop from, pop list, push fresh sublist (1-indexed inclusive)
   | { op: 'LIST_APPEND' }     // pop value, pop list, mutate
   | { op: 'LIST_PREPEND' }    // pop value, pop list, mutate
   | { op: 'LIST_INSERT' }     // pop value, pop index, pop list, mutate

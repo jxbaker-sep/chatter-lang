@@ -1,0 +1,2 @@
+constant xs is empty list of number
+say items 1 to 0 of xs

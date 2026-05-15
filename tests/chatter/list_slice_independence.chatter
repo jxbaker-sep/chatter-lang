@@ -1,0 +1,8 @@
+variable xs is list of 1, 2, 3, 4, 5
+constant ys is items 2 to 4 of xs
+append 99 to ys
+say xs
+say ys
+append 7 to xs
+say xs
+say ys

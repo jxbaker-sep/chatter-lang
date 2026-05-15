@@ -11,6 +11,7 @@ import {
   TypeAnnotation, ScalarTypeName, ElementTypeAnnotation,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
+  ListSliceExpression,
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement,
@@ -46,6 +47,7 @@ function containsEndSentinel(expr: Expression | null | undefined): boolean {
     case 'CharacterAccessExpression':
     case 'ItemAccessExpression':
     case 'SubstringExpression':
+    case 'ListSliceExpression':
       return false;
     default:
       return false;
@@ -2411,6 +2413,54 @@ export class Compiler {
         }
         break;
       }
+      case 'ListSliceExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt !== null && tt.kind === 'uniqueList') {
+          throw new CompileError(
+            `'items A to B of' cannot be used on a unique list (no random access)`,
+          this.currentLoc);
+        }
+        if (tt !== null && tt.kind !== 'list') {
+          throw new CompileError(
+            `'items A to B of' requires a list, got ${typeToString(tt)}`,
+          this.currentLoc);
+        }
+        const ft = this.staticType(expr.from, bindings);
+        if (ft !== null && !(ft.kind === 'scalar' && ft.name === 'number')) {
+          throw new CompileError(
+            `'items A to B of' requires a number index, got ${typeToString(ft)}`,
+          this.currentLoc);
+        }
+        const tt2 = this.staticType(expr.to, bindings);
+        if (tt2 !== null && !(tt2.kind === 'scalar' && tt2.name === 'number')) {
+          throw new CompileError(
+            `'items A to B of' requires a number index, got ${typeToString(tt2)}`,
+          this.currentLoc);
+        }
+        if (containsEndSentinel(expr.from) || containsEndSentinel(expr.to)) {
+          const tgtTmp = this.freshName('tgt');
+          const lenTmp = this.freshName('len');
+          this.compileExpr(expr.target, out, bindings);
+          this.emit(out, { op: 'STORE', name: tgtTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.emit(out, { op: 'LENGTH' });
+          this.emit(out, { op: 'STORE', name: lenTmp });
+          this.emit(out, { op: 'LOAD', name: tgtTmp });
+          this.endLenTmpStack.push(lenTmp);
+          this.compileExpr(expr.from, out, bindings);
+          this.compileExpr(expr.to, out, bindings);
+          this.endLenTmpStack.pop();
+          this.emit(out, { op: 'LIST_SUBLIST' });
+          this.emit(out, { op: 'DELETE', name: tgtTmp });
+          this.emit(out, { op: 'DELETE', name: lenTmp });
+        } else {
+          this.compileExpr(expr.target, out, bindings);
+          this.compileExpr(expr.from, out, bindings);
+          this.compileExpr(expr.to, out, bindings);
+          this.emit(out, { op: 'LIST_SUBLIST' });
+        }
+        break;
+      }
       case 'EndIndexSentinel': {
         if (this.endLenTmpStack.length === 0) {
           throw new CompileError(
@@ -3493,6 +3543,13 @@ export class Compiler {
       case 'LastCharacterExpression':
       case 'SubstringExpression':
         return { kind: 'scalar', name: 'string' };
+      case 'ListSliceExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt && tt.kind === 'list') {
+          return { kind: 'list', element: tt.element };
+        }
+        return null;
+      }
       case 'ReadFileLinesExpression':
         return { kind: 'list', element: 'string' };
       case 'CodeOfExpression':

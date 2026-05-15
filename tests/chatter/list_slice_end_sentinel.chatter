@@ -1,0 +1,3 @@
+constant xs is list of 1, 2, 3, 4, 5
+say items 2 to end of xs
+say items end - 2 to end of xs

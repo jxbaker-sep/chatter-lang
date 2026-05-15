@@ -38,6 +38,7 @@ export type Expression = (
   | CharacterAccessExpression
   | LastCharacterExpression
   | SubstringExpression
+  | ListSliceExpression
   | ReadFileLinesExpression
   | CodeOfExpression
   | CharacterFromCodeExpression
@@ -307,6 +308,13 @@ export interface LastCharacterExpression {
 
 export interface SubstringExpression {
   type: 'SubstringExpression';
+  from: Expression;
+  to: Expression;
+  target: Expression;
+}
+
+export interface ListSliceExpression {
+  type: 'ListSliceExpression';
   from: Expression;
   to: Expression;
   target: Expression;

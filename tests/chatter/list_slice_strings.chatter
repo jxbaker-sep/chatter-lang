@@ -1,0 +1,2 @@
+constant xs is list of "a", "b", "c", "d"
+say items 1 to 2 of xs

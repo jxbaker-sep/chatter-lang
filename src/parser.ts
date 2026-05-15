@@ -15,6 +15,7 @@ import {
   TypeAnnotation, ScalarTypeName, ElementTypeAnnotation,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
+  ListSliceExpression,
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement, UseStatement,
@@ -49,6 +50,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'remove',
   'character', 'characters',
+  'items',
   'expect',
   'use', 'export',
   'struct', 'make',
@@ -65,6 +67,7 @@ const EXPRESSION_START_KEYWORDS = new Set([
   'length',
   'item',
   'character', 'characters',
+  'items',
   'empty',
   'list',
   'unique',
@@ -368,6 +371,7 @@ export function parse(tokens: Token[], source?: string): Program {
       t1.value === 'last' ||
       t1.value === 'character' ||
       t1.value === 'characters' ||
+      t1.value === 'items' ||
       t1.value === 'lines'
     )) {
       advance();
@@ -1785,6 +1789,19 @@ export function parse(tokens: Token[], source?: string): Program {
         consume('KEYWORD', 'of');
         const target = parsePrimary();
         return { type: 'SubstringExpression', from, to, target } as SubstringExpression;
+      }
+      if (tok.value === 'items') {
+        advance();
+        let from: Expression, to: Expression;
+        indexSlotDepth++;
+        try {
+          from = parseExpression();
+          consume('KEYWORD', 'to');
+          to = parseExpression();
+        } finally { indexSlotDepth--; }
+        consume('KEYWORD', 'of');
+        const target = parsePrimary();
+        return { type: 'ListSliceExpression', from, to, target } as ListSliceExpression;
       }
       if (tok.value === 'lines') {
         // `lines of file EXPR` — read text file into a list of strings.
