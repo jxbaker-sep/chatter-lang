@@ -68,9 +68,6 @@ function bigint_to_string takes BigInt value returns string is
   variable result is ""
   constant digits is Digits of value
   repeat with i from 1 to the length of digits
-    if i mod 3 is 1 and i is not 1
-      change result to "," & result
-    end if
     change result to item i of digits & result
   end repeat
   return result
