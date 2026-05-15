@@ -1,0 +1,9 @@
+constant xs is list of 1, 2, 3
+
+function push_one is
+    append 4 to xs
+end function
+
+push_one
+push_one
+say xs

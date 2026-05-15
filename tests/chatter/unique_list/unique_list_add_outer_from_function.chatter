@@ -1,0 +1,10 @@
+constant seen is empty unique list of string
+
+function note takes string s is
+    add s to seen
+end function
+
+note "alpha"
+note "beta"
+note "alpha"
+say length of seen

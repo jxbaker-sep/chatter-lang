@@ -1,0 +1,11 @@
+constant counts is empty dictionary from string to number
+
+function bump takes string key is
+    change value of key in counts to 1
+end function
+
+bump "a"
+bump "b"
+say length of counts
+say value of "a" in counts
+say value of "b" in counts

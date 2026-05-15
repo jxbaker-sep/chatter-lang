@@ -1,0 +1,16 @@
+constant counts is empty dictionary from string to number
+
+function tally takes string key is
+    if counts contains key
+        add 1 to value of key in counts
+    else
+        change value of key in counts to 1
+    end if
+end function
+
+tally "x"
+tally "y"
+tally "x"
+tally "x"
+say value of "x" in counts
+say value of "y" in counts

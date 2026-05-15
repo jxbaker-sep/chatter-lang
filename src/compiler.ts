@@ -330,6 +330,28 @@ export class Compiler {
     return name;
   }
 
+  // Look up a binding in the lexical scope chain, falling back to the module
+  // top-level scope if not found. Collection mutations (list/dict element
+  // assignment, append/prepend/insert/remove, unique-list add/remove, dict
+  // remove, compound assigns on item-of/value-of) operate on the underlying
+  // aggregate through its reference, so they're allowed to target any visible
+  // binding — including module-top-level `constant`s and `variable`s — from
+  // inside a function body. (Bare-NAME `change`/arithmetic sugar on number
+  // variables is still restricted to same-function scope; callers enforce
+  // that separately.)
+  private lookupBindingWithOuter(
+    name: string,
+    bindings: Scope,
+  ): { info: ScopedBindingInfo; fromOuter: boolean } | null {
+    const local = bindings.lookup(name);
+    if (local) return { info: local, fromOuter: false };
+    if (this.topLevelBindings && bindings !== this.topLevelBindings) {
+      const top = this.topLevelBindings.lookup(name);
+      if (top) return { info: top, fromOuter: true };
+    }
+    return null;
+  }
+
   // Resolve a TypeAnnotation to a ChatterType using the struct + alias
   // registries. Throws CompileError for unknown names. Aliases are expanded
   // (both local and imported); cycle detection is handled in pass 1b so by
@@ -1070,12 +1092,13 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const info = bindings.lookup(stmt.listName);
-    if (!info) {
+    const resolved = this.lookupBindingWithOuter(stmt.listName, bindings);
+    if (!resolved) {
       throw new CompileError(
         `Cannot change item of '${stmt.listName}': no such binding`,
       this.currentLoc);
     }
+    const info = resolved.info;
     if (info.type && info.type.kind === 'uniqueList') {
       throw new CompileError(
         `'change item N of NAME' is not a unique-list operation; unique lists do not support random access (name '${stmt.listName}')`,
@@ -1104,10 +1127,11 @@ export class Compiler {
   }
 
   private compileListMutationTarget(listName: string, bindings: Scope, op: string): { type: ChatterType | null; mangled: string } {
-    const info = bindings.lookup(listName);
-    if (!info) {
+    const resolved = this.lookupBindingWithOuter(listName, bindings);
+    if (!resolved) {
       throw new CompileError(`Cannot ${op} to '${listName}': no such binding`, this.currentLoc);
     }
+    const info = resolved.info;
     if (info.type && info.type.kind === 'uniqueList') {
       throw new CompileError(
         `'${op}' is a list operation; unique lists use 'add' / 'remove EXPR from NAME' instead (name '${listName}')`,
@@ -1196,12 +1220,13 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const info = bindings.lookup(stmt.listName);
-    if (!info) {
+    const resolved = this.lookupBindingWithOuter(stmt.listName, bindings);
+    if (!resolved) {
       throw new CompileError(
         `Cannot remove value from '${stmt.listName}': no such binding`,
       this.currentLoc);
     }
+    const info = resolved.info;
     if (info.type) {
       if (info.type.kind === 'list') {
         throw new CompileError(
@@ -1260,13 +1285,16 @@ export class Compiler {
       return;
     }
     const name = target.name;
-    const info = bindings.lookup(name);
-    if (!info) {
+    const resolved = this.lookupBindingWithOuter(name, bindings);
+    if (!resolved) {
       throw new CompileError(
         `Cannot ${stmt.op} '${name}': no such variable declared in this function`,
       this.currentLoc);
     }
+    const info = resolved.info;
     // `add EXPR to NAME` is overloaded: for unique-list bindings, route to UNIQUE_LIST_ADD.
+    // De underlying unique list is mutable through aliases, so dis works on any binding
+    // (including module top-level).
     if (stmt.op === 'add' && info.type && info.type.kind === 'uniqueList') {
       const rhs = this.staticType(stmt.value, bindings);
       const rc = elementCode(rhs);
@@ -1289,6 +1317,13 @@ export class Compiler {
     if (stmt.op === 'add' && info.type && info.type.kind === 'list') {
       throw new CompileError(
         `'add' cannot insert into a list (use 'append', 'prepend', or 'insert at' for '${name}')`,
+      this.currentLoc);
+    }
+    // Bare-NAME arithmetic sugar on a number variable is restricted to de
+    // current function body's scope chain (parallel to `change NAME to V`).
+    if (resolved.fromOuter) {
+      throw new CompileError(
+        `Cannot ${stmt.op} '${name}': arithmetic sugar can only target variables declared in this function (use 'change item N of L' or 'change value of K in D' to mutate module-top-level collections)`,
       this.currentLoc);
     }
     if (info.kind !== 'var') {
@@ -1323,12 +1358,13 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const info = bindings.lookup(target.listName);
-    if (!info) {
+    const resolved = this.lookupBindingWithOuter(target.listName, bindings);
+    if (!resolved) {
       throw new CompileError(
         `Cannot ${stmt.op} item of '${target.listName}': no such binding`,
       this.currentLoc);
     }
+    const info = resolved.info;
     if (info.type && info.type.kind === 'uniqueList') {
       throw new CompileError(
         `'${stmt.op} ... item N of NAME' is not a unique-list operation; unique lists do not support random access (name '${target.listName}')`,
@@ -1382,12 +1418,13 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const info = bindings.lookup(target.dictName);
-    if (!info) {
+    const resolved = this.lookupBindingWithOuter(target.dictName, bindings);
+    if (!resolved) {
       throw new CompileError(
         `Cannot ${stmt.op} value in '${target.dictName}': no such binding`,
       this.currentLoc);
     }
+    const info = resolved.info;
     if (info.type) {
       if (info.type.kind !== 'dict') {
         throw new CompileError(
@@ -2970,12 +3007,13 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const info = bindings.lookup(stmt.dictName);
-    if (!info) {
+    const resolved = this.lookupBindingWithOuter(stmt.dictName, bindings);
+    if (!resolved) {
       throw new CompileError(
         `Cannot change value in '${stmt.dictName}': no such binding`,
       this.currentLoc);
     }
+    const info = resolved.info;
     if (info.type) {
       if (info.type.kind !== 'dict') {
         throw new CompileError(

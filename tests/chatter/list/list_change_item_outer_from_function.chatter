@@ -1,0 +1,8 @@
+constant xs is list of 1, 2, 3
+
+function bump takes number i is
+    change item i of xs to 99
+end function
+
+bump 2
+say xs

@@ -1,0 +1,8 @@
+variable total is 0
+
+function bump is
+    add 1 to total
+end function
+
+bump
+say total
