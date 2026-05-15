@@ -1,0 +1,6 @@
+struct Bad
+    number v
+    format is "x: " & it
+end struct
+constant b is make Bad with v 1
+say b

@@ -109,6 +109,9 @@ interface StructInfo {
   fields: Array<{ name: string; type: ChatterType }>;
   exported: boolean;
   imported: boolean;
+  // If non-null, the mangled name of the formatter function for this struct.
+  // Populated during pass 1d (local structs) or pass 1a (imported structs).
+  formatterName?: string | null;
 }
 
 interface AliasInfo {
@@ -221,6 +224,10 @@ export interface ImportedFunction {
 export interface ImportedStruct {
   mangled: string;
   fields: Array<{ name: string; type: ChatterType }>;
+  // If the home module attached a `format is` clause, this is the mangled
+  // formatter function name (already present in the program's `functions`
+  // map). Importers don't need to recompile it.
+  formatterName?: string | null;
 }
 
 export interface ImportedAlias {
@@ -244,6 +251,10 @@ export interface CompiledModule {
   exports: Map<string, ImportedFunction>;   // local name -> info (for loader)
   structExports: Map<string, ImportedStruct>;
   aliasExports: Map<string, ImportedAlias>;
+  // Map from mangled struct type name -> mangled formatter function name.
+  // Populated for every struct (local or imported re-export) that has a
+  // `format is EXPR` clause in its home module.
+  structFormatters: Map<string, string>;
 }
 
 export class Compiler {
@@ -511,7 +522,7 @@ export class Compiler {
 
   compile(program: Program): BytecodeProgram {
     const m = this.compileModule(program, {});
-    return { functions: m.functions, main: m.topLevel };
+    return { functions: m.functions, main: m.topLevel, structFormatters: m.structFormatters };
   }
 
   compileModule(program: Program, opts: CompileOptions): CompiledModule {
@@ -528,6 +539,7 @@ export class Compiler {
         fields: info.fields,
         exported: false,
         imported: true,
+        formatterName: info.formatterName ?? null,
       });
     }
     for (const [localName, info] of aliasImports) {
@@ -703,6 +715,18 @@ export class Compiler {
     const bindings: Scope = new Scope(null, this.topLevelMangled);
     this.topLevelBindings = bindings;
 
+    // Pass 1d: compile format thunks for every local struct with a
+    // `format is EXPR` clause. Each thunk is a synthetic single-param
+    // function (`it` of struct type) whose body is the expression followed
+    // by RETURN. Registered in `this.functions` under name
+    // `<mangledStructType>::__format__`. Static type of the body must be
+    // `string` when statically known (pass-through otherwise).
+    for (const [localName, decl] of this.localStructDecls) {
+      if (!decl.formatExpr) continue;
+      const info = this.structs.get(localName)!;
+      this.compileFormatThunk(localName, info, decl.formatExpr, locOf(decl));
+    }
+
     for (const stmt of program.body) {
       if (stmt.type === 'UseStatement') continue;
       if (stmt.type === 'StructDeclaration') continue;  // already processed in pass 1
@@ -744,6 +768,7 @@ export class Compiler {
       structExports.set(localName, {
         mangled: info.mangled,
         fields: info.fields,
+        formatterName: info.formatterName ?? null,
       });
     }
 
@@ -756,7 +781,81 @@ export class Compiler {
       });
     }
 
-    return { functions: this.functions, topLevel, exports, structExports, aliasExports };
+    // Build the per-module structFormatters map. Includes both local structs
+    // (whose formatters were just compiled into `this.functions`) and
+    // imported structs that carry a formatterName from their home module.
+    // Both flavors contribute so the loader can pass a single map through.
+    const structFormatters = new Map<string, string>();
+    for (const info of this.structs.values()) {
+      if (info.formatterName) {
+        structFormatters.set(info.mangled, info.formatterName);
+      }
+    }
+
+    return { functions: this.functions, topLevel, exports, structExports, aliasExports, structFormatters };
+  }
+
+  // Compile a `format is EXPR` clause as a synthetic FunctionDef. `it` is the
+  // sole param (struct value); the body is the user expression followed by
+  // RETURN. The thunk lives in `this.functions` like any other function,
+  // sees the home module's top-level bindings, and is invoked directly by
+  // the VM's formatValue (not via the CALL opcode).
+  private compileFormatThunk(
+    localName: string,
+    info: StructInfo,
+    formatExpr: Expression,
+    declLoc: SourceLocation | undefined,
+  ): void {
+    const structType: ChatterType = { kind: 'struct', mangled: info.mangled };
+    const thunkName = `${info.mangled}::__format__`;
+    info.formatterName = thunkName;
+
+    const instructions: Instruction[] = [];
+    const funcDef: FunctionDef = { name: thunkName, params: ['it'], instructions };
+    this.functions.set(thunkName, funcDef);
+
+    // Set up compiler state mimicking a typed function body that returns string.
+    const funcBindings: Scope = new Scope(null, null);
+    const prevReturnType = this.currentFuncReturnType;
+    const prevFuncName = this.currentFuncName;
+    this.currentFuncReturnType = { kind: 'scalar', name: 'string' };
+    this.currentFuncName = `${localName}.__format__`;
+
+    // Push `it` onto hofItStack so ItExpression compiles to LOAD `it`
+    // (the param local) and staticType resolves `it` to the struct type.
+    this.hofItStack.push({ local: 'it', type: structType });
+    this.locStack.push(declLoc);
+    try {
+      // Static type check on the body. Must be `string` if knowable.
+      const bt = this.staticType(formatExpr, funcBindings);
+      if (bt !== null) {
+        if (!(bt.kind === 'scalar' && bt.name === 'string')) {
+          throw new CompileError(
+            `'format is' body must produce a string, got ${typeToString(bt)}`,
+            declLoc,
+          );
+        }
+      }
+      this.compileExpr(formatExpr, instructions, funcBindings);
+      // Defensive runtime check: enforce string if static type was unknown.
+      if (bt === null) {
+        this.emit(instructions, {
+          op: 'CHECK_TYPE',
+          expected: 'string',
+          context: `'format is' body must produce a string`,
+        });
+      }
+      this.emit(instructions, { op: 'RETURN' });
+    } finally {
+      this.hofItStack.pop();
+      this.locStack.pop();
+      this.currentFuncReturnType = prevReturnType;
+      this.currentFuncName = prevFuncName;
+    }
+
+    // Track the param `it` as a function local so the post-processor's
+    // binding-mangling step doesn't rewrite LOAD/STORE for it.
+    this.functionLocals.set(thunkName, new Set(['it', ...funcBindings.allMangledInFunction]));
   }
 
   private compileStatement(

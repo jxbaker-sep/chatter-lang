@@ -90,4 +90,8 @@ export interface BytecodeProgram {
   functions: Map<string, FunctionDef>;
   main: Instruction[];      // top-level instructions
   args?: string[];          // CLI arguments passed to the program (default: [])
+  // Map from mangled struct type name -> formatter function name (mangled).
+  // When formatValue renders a struct whose typeName is a key here, it
+  // invokes the named function instead of the default `Type(field: v, …)`.
+  structFormatters?: Map<string, string>;
 }

@@ -124,6 +124,7 @@ function buildStdCliModule(moduleId: string, registryKey: string, absPath: strin
     exports: exportsMap,
     structExports: new Map(),
     aliasExports: new Map(),
+    structFormatters: new Map(),
   };
 
   // Synthetic AST: an empty Program is enough; the loader only consults `ast`
@@ -317,5 +318,16 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
   }
   concatShifted(entryInfo.compiled!.topLevel);
 
-  return { functions, main, args: opts.args ?? [] };
+  // Aggregate structFormatters from every module into a single program-level
+  // map. Each module's CompiledModule already carries entries for both its
+  // own local structs and any imported structs that have formatters; the
+  // union here is therefore safe even if some entries are repeated.
+  const structFormatters = new Map<string, string>();
+  for (const m of orderPostOrder) {
+    for (const [k, v] of m.compiled!.structFormatters) {
+      structFormatters.set(k, v);
+    }
+  }
+
+  return { functions, main, args: opts.args ?? [], structFormatters };
 }

@@ -1,0 +1,4 @@
+use Point from "geom"
+constant p is make Point with x 3, y 4
+say p
+say "got " & p

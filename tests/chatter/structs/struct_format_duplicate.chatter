@@ -1,0 +1,5 @@
+struct Bad
+    number v
+    format is "a"
+    format is "b"
+end struct

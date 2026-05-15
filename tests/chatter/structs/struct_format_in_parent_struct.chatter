@@ -1,0 +1,11 @@
+struct Point
+    number x
+    number y
+    format is "(" & x of it & ", " & y of it & ")"
+end struct
+struct Region
+    Point center
+    number radius
+end struct
+constant r is make Region with center (make Point with x 1, y 2), radius 5
+say r

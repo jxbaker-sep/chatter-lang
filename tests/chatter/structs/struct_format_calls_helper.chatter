@@ -1,0 +1,10 @@
+function describe takes number n returns string is
+    return "n=" & n
+end function
+struct Box
+    number v
+    format is the result of describe v of it
+end struct
+constant b is make Box with v 7
+say b
+say "box: " & b

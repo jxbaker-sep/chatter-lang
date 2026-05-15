@@ -1,0 +1,6 @@
+struct P
+    number n
+    format is "<" & n of it & ">"
+end struct
+constant u is unique list of (make P with n 1), (make P with n 2), (make P with n 1)
+say u

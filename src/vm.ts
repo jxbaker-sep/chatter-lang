@@ -127,56 +127,6 @@ function formatScalar(v: number | string | boolean): string {
   return v;
 }
 
-function formatValue(v: ChatterValue): string {
-  if (isStruct(v)) {
-    const tname = unmangleStructName(v.typeName);
-    const parts: string[] = [];
-    for (const [fname, fval] of v.fields) {
-      const formatted = typeof fval === 'string'
-        ? `"${fval}"`
-        : formatValue(fval);
-      parts.push(`${fname}: ${formatted}`);
-    }
-    return `${tname}(${parts.join(', ')})`;
-  }
-  if (isUniqueList(v)) {
-    return '[' + uniqueListValues(v).map(e => {
-      if (isAnyList(e) || isDict(e)) return formatValue(e);
-      if (isStruct(e)) return formatValue(e);
-      if (typeof e === 'string') return `"${e}"`;
-      return formatScalar(e);
-    }).join(', ') + ']';
-  }
-  if (isList(v)) {
-    return '[' + v.items.map(e => {
-      if (isAnyList(e) || isDict(e)) return formatValue(e);
-      if (isStruct(e)) return formatValue(e);
-      if (typeof e === 'string') return `"${e}"`;
-      return formatScalar(e);
-    }).join(', ') + ']';
-  }
-  if (isDict(v)) {
-    if (v.items.size === 0) {
-      return 'empty dictionary from ' + elementCodeToHuman(v.keyType) + ' to ' + elementCodeToHuman(v.valueType);
-    }
-    const fmt = (e: ChatterValue): string => {
-      if (isAnyList(e) || isStruct(e) || isDict(e)) return formatValue(e);
-      if (typeof e === 'string') return `"${e}"`;
-      return formatScalar(e);
-    };
-    const parts: string[] = [];
-    for (const entry of v.items.values()) {
-      parts.push(fmt(entry.key) + ' to ' + fmt(entry.value));
-    }
-    return 'dictionary ' + parts.join(', ');
-  }
-  return formatScalar(v);
-}
-
-function stringify(v: ChatterValue): string {
-  return formatValue(v);
-}
-
 interface Frame {
   instructions: Instruction[];
   ip: number;
@@ -191,8 +141,111 @@ const INT_MAX = Number.MAX_SAFE_INTEGER;
 export class VM {
   private stack: ChatterValue[] = [];
   private callStack: Frame[] = [];
+  // Tracks struct values currently being rendered by a custom formatter,
+  // keyed by reference identity. Used to detect direct recursion (a
+  // formatter that re-renders its own value). Sequential renders of the
+  // same value (e.g. `list of p, p`) are fine because each add/remove pair
+  // is balanced.
+  private currentlyFormatting: Set<ChatterStruct> = new Set();
 
   constructor(private program: BytecodeProgram) {}
+
+  // Render a value to its display string. Structs with a registered
+  // custom formatter (see program.structFormatters) invoke the formatter
+  // synchronously through a freshly-pushed frame; all other values use
+  // the default formatting (recursing into elements).
+  private formatValue(v: ChatterValue): string {
+    if (isStruct(v)) {
+      const formatterName = this.program.structFormatters?.get(v.typeName);
+      if (formatterName) {
+        if (this.currentlyFormatting.has(v)) {
+          throw new RuntimeError(
+            `recursive formatter for struct '${unmangleStructName(v.typeName)}'`,
+          );
+        }
+        this.currentlyFormatting.add(v);
+        try {
+          return this.runFormatter(formatterName, v);
+        } finally {
+          this.currentlyFormatting.delete(v);
+        }
+      }
+      const tname = unmangleStructName(v.typeName);
+      const parts: string[] = [];
+      for (const [fname, fval] of v.fields) {
+        const formatted = typeof fval === 'string'
+          ? `"${fval}"`
+          : this.formatValue(fval);
+        parts.push(`${fname}: ${formatted}`);
+      }
+      return `${tname}(${parts.join(', ')})`;
+    }
+    if (isUniqueList(v)) {
+      return '[' + uniqueListValues(v).map(e => {
+        if (isAnyList(e) || isDict(e)) return this.formatValue(e);
+        if (isStruct(e)) return this.formatValue(e);
+        if (typeof e === 'string') return `"${e}"`;
+        return formatScalar(e);
+      }).join(', ') + ']';
+    }
+    if (isList(v)) {
+      return '[' + v.items.map(e => {
+        if (isAnyList(e) || isDict(e)) return this.formatValue(e);
+        if (isStruct(e)) return this.formatValue(e);
+        if (typeof e === 'string') return `"${e}"`;
+        return formatScalar(e);
+      }).join(', ') + ']';
+    }
+    if (isDict(v)) {
+      if (v.items.size === 0) {
+        return 'empty dictionary from ' + elementCodeToHuman(v.keyType) + ' to ' + elementCodeToHuman(v.valueType);
+      }
+      const fmt = (e: ChatterValue): string => {
+        if (isAnyList(e) || isStruct(e) || isDict(e)) return this.formatValue(e);
+        if (typeof e === 'string') return `"${e}"`;
+        return formatScalar(e);
+      };
+      const parts: string[] = [];
+      for (const entry of v.items.values()) {
+        parts.push(fmt(entry.key) + ' to ' + fmt(entry.value));
+      }
+      return 'dictionary ' + parts.join(', ');
+    }
+    return formatScalar(v);
+  }
+
+  private stringify(v: ChatterValue): string {
+    return this.formatValue(v);
+  }
+
+  // Synchronously invoke a struct's format function and return its (string)
+  // result. The formatter is a synthetic FunctionDef with a single `it`
+  // param; we push a fresh frame and run it to completion.
+  private runFormatter(formatterName: string, value: ChatterStruct): string {
+    const fdef = this.program.functions.get(formatterName);
+    if (!fdef) {
+      throw new RuntimeError(`Missing formatter function '${formatterName}'`);
+    }
+    const locals = new Map<string, ChatterValue>();
+    locals.set('it', value);
+    const frame: Frame = {
+      instructions: fdef.instructions,
+      ip: 0,
+      locals,
+      varTypes: new Map(),
+      it: null,
+    };
+    this.callStack.push(frame);
+    this.executeFrame();
+    this.callStack.pop();
+    const result = this.stack.pop();
+    if (typeof result !== 'string') {
+      throw new RuntimeError(
+        `'format is' body must produce a string, got ${describe(result as ChatterValue)}`,
+      );
+    }
+    return result;
+  }
 
   run(): void {
     const mainFrame: Frame = {
@@ -358,7 +411,7 @@ export class VM {
         if (val === undefined) {
           throw new RuntimeError('Stack underflow in SAY', instr.loc);
         }
-        console.log(formatValue(val));
+        console.log(this.formatValue(val));
         break;
       }
 
@@ -372,7 +425,7 @@ export class VM {
           }
           vals[i] = v;
         }
-        console.log(vals.map(formatValue).join(' '));
+        console.log(vals.map(v => this.formatValue(v)).join(' '));
         break;
       }
 
@@ -777,7 +830,7 @@ export class VM {
       case 'CONCAT': {
         const b = this.pop();
         const a = this.pop();
-        this.stack.push(stringify(a) + stringify(b));
+        this.stack.push(this.stringify(a) + this.stringify(b));
         break;
       }
 

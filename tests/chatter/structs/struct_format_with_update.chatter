@@ -1,0 +1,7 @@
+struct Point
+    number x
+    number y
+    format is "(" & x of it & ", " & y of it & ")"
+end struct
+constant p is make Point with x 1, y 2
+say p with x 5

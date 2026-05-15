@@ -819,10 +819,56 @@ export function parse(tokens: Token[], source?: string): Program {
     const nameTok = consume('IDENT');
     consumeNewline();
     const fields: StructField[] = [];
+    let formatExpr: Expression | null = null;
     if (peek().type === 'INDENT') {
       consume('INDENT');
       while (peek().type !== 'DEDENT' && peek().type !== 'EOF') {
         if (peek().type === 'NEWLINE') { advance(); continue; }
+        // Contextual recognition of `format is EXPR` clause. Must appear
+        // after all fields and at most once. After it, no more fields.
+        if (peek().type === 'IDENT' && peek().value === 'format'
+            && pos + 1 < tokens.length
+            && tokens[pos + 1].type === 'KEYWORD'
+            && tokens[pos + 1].value === 'is') {
+          const formatTok = advance(); // 'format' IDENT
+          consume('KEYWORD', 'is');
+          if (formatExpr !== null) {
+            throw new ParseError(
+              `duplicate 'format is' in struct '${nameTok.value}'`,
+              formatTok,
+            );
+          }
+          // Accept `[the] result of CALL` as the body (parallel to other `is`
+          // host slots like `constant X is the result of f y`). Otherwise
+          // parse a normal expression.
+          const callForm = tryConsumeTheResultOf(false);
+          if (callForm) {
+            formatExpr = callForm;
+          } else {
+            formatExpr = parseExpression();
+          }
+          consumeNewline();
+          // After `format is`, only blank lines may appear before DEDENT.
+          while (peek().type === 'NEWLINE') advance();
+          if (peek().type !== 'DEDENT' && peek().type !== 'EOF') {
+            const next = peek();
+            // Could be another format is (dup) or a field decl.
+            if (next.type === 'IDENT' && next.value === 'format'
+                && pos + 1 < tokens.length
+                && tokens[pos + 1].type === 'KEYWORD'
+                && tokens[pos + 1].value === 'is') {
+              throw new ParseError(
+                `duplicate 'format is' in struct '${nameTok.value}'`,
+                next,
+              );
+            }
+            throw new ParseError(
+              `field declaration after 'format is' in struct '${nameTok.value}'`,
+              next,
+            );
+          }
+          continue;
+        }
         const fieldType = parseTypeAnnotation();
         const fieldNameTok = consume('IDENT');
         fields.push({ name: fieldNameTok.value, fieldType });
@@ -838,6 +884,7 @@ export function parse(tokens: Token[], source?: string): Program {
       name: nameTok.value,
       fields,
       exported,
+      formatExpr,
     };
     (node as any).line = structTok.line;
     (node as any).col = structTok.col;

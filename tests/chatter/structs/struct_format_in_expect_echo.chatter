@@ -1,0 +1,8 @@
+struct Point
+    number x
+    number y
+    format is "(" & x of it & ", " & y of it & ")"
+end struct
+constant p is make Point with x 1, y 2
+constant q is make Point with x 3, y 4
+expect p is q, "expected " & q & " but got " & p

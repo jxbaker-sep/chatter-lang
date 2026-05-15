@@ -1,0 +1,9 @@
+function brackets takes string s returns string is
+    return "[" & s & "]"
+end function
+
+export struct Point
+    number x
+    number y
+    format is the result of brackets x of it & "," & y of it
+end struct

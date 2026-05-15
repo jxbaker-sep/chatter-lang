@@ -1,0 +1,4 @@
+struct Bad
+    number v
+    format is 42
+end struct

@@ -96,6 +96,7 @@ export interface StructDeclaration {
   name: string;             // unmangled
   fields: StructField[];
   exported: boolean;
+  formatExpr?: Expression | null;  // optional custom `format is EXPR` body
 }
 
 export interface TypeAliasDeclaration {
