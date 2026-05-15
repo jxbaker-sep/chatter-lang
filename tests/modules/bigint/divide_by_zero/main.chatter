@@ -1,0 +1,8 @@
+use bigint_from_number, bigint_divide, bigint_to_string from "std:bigint"
+
+bigint_from_number 42
+constant a is it
+bigint_from_number 0
+constant b is it
+bigint_divide a by b
+say "unreachable"

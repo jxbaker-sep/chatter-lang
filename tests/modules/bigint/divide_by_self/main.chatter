@@ -1,0 +1,8 @@
+use bigint_from_number, bigint_divide, bigint_to_string from "std:bigint"
+
+# 12345 / 12345 = 1
+bigint_from_number 12345
+constant a is it
+bigint_divide a by a
+bigint_to_string it
+say it

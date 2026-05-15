@@ -1,0 +1,10 @@
+use bigint_from_number, bigint_divide, bigint_to_string from "std:bigint"
+
+# 9876 / 1 = 9876
+bigint_from_number 9876
+constant a is it
+bigint_from_number 1
+constant b is it
+bigint_divide a by b
+bigint_to_string it
+say it

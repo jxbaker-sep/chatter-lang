@@ -2,6 +2,7 @@ use max from "std:math"
 
 export struct BigInt
   list of number Digits
+  format is the result of bigint_to_string it
 end struct
 
 export function bigint_from_string takes string value returns BigInt is
@@ -73,4 +74,110 @@ export function bigint_to_string takes BigInt value returns string is
     change result to item i of digits & result
   end repeat
   return result
+end function
+
+function bigint_normalize takes BigInt value returns BigInt is
+  constant digits is Digits of value
+  variable n is length of digits
+  repeat while n is greater than 1
+    if item n of digits is not 0
+      exit repeat
+    end if
+    subtract 1 from n
+  end repeat
+  return make BigInt with Digits items 1 to n of digits
+end function
+
+function bigint_compare takes BigInt lhs to BigInt rhs returns number is
+  constant l is the result of bigint_normalize lhs
+  constant r is the result of bigint_normalize rhs
+  constant ld is Digits of l
+  constant rd is Digits of r
+  if length of ld is greater than length of rd
+    return 1
+  end if
+  if length of ld is less than length of rd
+    return -1
+  end if
+  variable i is length of ld
+  repeat while i is at least 1
+    if item i of ld is greater than item i of rd
+      return 1
+    end if
+    if item i of ld is less than item i of rd
+      return -1
+    end if
+    subtract 1 from i
+  end repeat
+  return 0
+end function
+
+function bigint_subtract takes BigInt rhs from BigInt lhs returns BigInt is
+  # Precondition: lhs is at least rhs. Returns lhs - rhs.
+  constant ld is Digits of lhs
+  constant rd is Digits of rhs
+  variable result is empty list of number
+  variable borrow is 0
+  repeat with i from 1 to length of ld
+    variable temp is item i of ld - borrow
+    if i is at most length of rd
+      change temp to temp - item i of rd
+    end if
+    if temp is less than 0
+      add 10 to temp
+      change borrow to 1
+    else
+      change borrow to 0
+    end if
+    append temp to result
+  end repeat
+  return the result of bigint_normalize make BigInt with Digits result
+end function
+
+function bigint_shift_and_add takes BigInt value plus number d returns BigInt is
+  # Returns (value * 10) + d. Implemented by prepending d to the LSB-first
+  # digit list, then normalizing to strip leading zeros.
+  variable new_digits is empty list of number
+  append d to new_digits
+  repeat with old in Digits of value
+    append old to new_digits
+  end repeat
+  return the result of bigint_normalize make BigInt with Digits new_digits
+end function
+
+export function bigint_divide takes BigInt dividend by BigInt divisor returns BigInt is
+  # Schoolbook long division. Processes dividend digits from most-significant
+  # to least-significant, maintaining a running remainder `current`. For each
+  # new digit pulled down, trial-subtract `divisor` from `current` up to 9
+  # times to produce the next quotient digit.
+  constant zero is the result of bigint_from_number 0
+  constant zero_cmp is the result of bigint_compare divisor to zero
+  expect zero_cmp is greater than 0, "bigint_divide: division by zero"
+
+  constant ddigits is Digits of dividend
+  constant n is length of ddigits
+  variable quotient_digits is empty list of number
+  variable current is zero
+
+  repeat with i from 1 to n
+    # Pull down the next-most-significant dividend digit.
+    constant d is item n - i + 1 of ddigits
+    change current to the result of bigint_shift_and_add current plus d
+
+    # Trial-subtract to find this position's quotient digit (0..9).
+    variable q is 0
+    repeat while true
+      constant cmp is the result of bigint_compare current to divisor
+      if cmp is less than 0
+        exit repeat
+      end if
+      change current to the result of bigint_subtract divisor from current
+      add 1 to q
+    end repeat
+
+    # Quotient digits are generated MSB-first; prepend to keep LSB-first form.
+    prepend q to quotient_digits
+  end repeat
+
+  return the result of bigint_normalize make BigInt with Digits quotient_digits
 end function
