@@ -248,6 +248,12 @@ export interface CompiledModule {
 
 export class Compiler {
   private functions = new Map<string, FunctionDef>();
+  // Per-function set of locally-bound mangled names (params + block-scope
+  // locals + compiler temps). The post-processor consults this when rewriting
+  // top-level binding names so it doesn't accidentally rewrite a function-local
+  // that shadows a top-level binding (e.g. a param named `x` when the caller
+  // also has top-level `x`).
+  private functionLocals = new Map<string, Set<string>>();
   private functionSignatures = new Map<string, Array<{ name: string; label: string | null; type: ChatterType }>>();
   private functionReturnTypes = new Map<string, ChatterType | null>();  // null = void
   private functionMangled = new Map<string, string>();   // local name -> mangled
@@ -705,18 +711,19 @@ export class Compiler {
     }
 
     // Post-process: apply mangling to binding names (outer) and function-call names
-    const rewriteInstrs = (instrs: Instruction[]) => {
+    const rewriteInstrs = (instrs: Instruction[], skip: Set<string> | null) => {
       for (const i of instrs) {
         if (i.op === 'LOAD' || i.op === 'STORE' || i.op === 'STORE_VAR' || i.op === 'DELETE') {
+          if (skip && skip.has(i.name)) continue;
           i.name = this.mangleBinding(i.name);
         } else if (i.op === 'CALL') {
           i.name = this.mangleFunction(i.name);
         }
       }
     };
-    rewriteInstrs(topLevel);
-    for (const fdef of this.functions.values()) {
-      rewriteInstrs(fdef.instructions);
+    rewriteInstrs(topLevel, null);
+    for (const [mangledName, fdef] of this.functions) {
+      rewriteInstrs(fdef.instructions, this.functionLocals.get(mangledName) ?? null);
     }
 
     // Build exports table
@@ -1514,6 +1521,11 @@ export class Compiler {
       this.emit(instructions, { op: 'PUSH_INT', value: 0 });
       this.emit(instructions, { op: 'RETURN' });
     }
+    // Snapshot every name minted inside this function (params + block-scope
+    // locals + compiler temps). The post-processor uses this to avoid
+    // rewriting local references when a local shares a name with a top-level
+    // binding.
+    this.functionLocals.set(mangledName, new Set(funcBindings.allMangledInFunction));
   }
 
   private compileCallStmt(

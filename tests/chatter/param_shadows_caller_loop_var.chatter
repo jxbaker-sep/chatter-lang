@@ -1,0 +1,9 @@
+function record takes number x by number y is
+    say "x=", x, "y=", y
+end function
+
+repeat with x from 0 to 2
+    repeat with xx from x * 10 to x * 10 + 1
+        record xx by 0
+    end repeat
+end repeat
