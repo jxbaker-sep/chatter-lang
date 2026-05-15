@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# 7927 is the 1001st prime — past the table, must blow up.
+factors 7927
+say it

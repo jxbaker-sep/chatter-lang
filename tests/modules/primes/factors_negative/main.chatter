@@ -1,0 +1,4 @@
+use factors from "std:primes"
+
+factors -5
+say it

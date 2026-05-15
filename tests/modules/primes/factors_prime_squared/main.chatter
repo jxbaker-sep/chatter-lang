@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# 97 * 97 = 9409 → repeats correctly handled.
+factors 9409
+say it

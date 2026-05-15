@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# Smallest prime.
+factors 2
+say it

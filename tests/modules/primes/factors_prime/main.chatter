@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# Mid-table prime stays whole.
+factors 97
+say it

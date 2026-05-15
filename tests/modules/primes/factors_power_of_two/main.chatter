@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# 2^10 = 1024 — exercises the inner repeat loop deeply with a single prime.
+factors 1024
+say it

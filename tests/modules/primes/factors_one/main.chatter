@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# 1 has no prime factors.
+factors 1
+say it

@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# 7919 is the 1000th and largest prime in the table — boundary case.
+factors 7919
+say it

@@ -1,0 +1,5 @@
+use factors from "std:primes"
+
+# factors 40 = [2, 2, 2, 5]
+factors 40
+say it

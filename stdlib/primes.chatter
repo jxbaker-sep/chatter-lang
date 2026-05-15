@@ -7,3 +7,24 @@ export function prime takes number n returns number is
   expect n to be at most 1000, "prime: index must be at most 1000, got " & n
   return item n of FIRST_1000
 end function
+
+# factors: prime factorization of n, lowest to highest, with repeats.
+# e.g. factors 40 = [2, 2, 2, 5]; factors 1 = []; factors 7 = [7].
+# Runtime error on n < 1, or on n whose largest prime factor exceeds
+# the 1000th prime (7919) — i.e. roughly n > 6.27e7 with bad luck.
+export function factors takes number n returns list of number is
+  expect n to be at least 1, "factors: n must be at least 1, got " & n
+  variable result is empty list of number
+  variable current is n
+  repeat with p in FIRST_1000
+    if p is greater than current
+      exit repeat
+    end if
+    repeat while current mod p is 0
+      append p to result
+      divide current by p
+    end repeat
+  end repeat
+  expect current to be 1, "Cannot calculate factors of " & n & "; library error: need more primes!"
+  return result
+end function
