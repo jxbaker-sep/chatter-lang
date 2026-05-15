@@ -1,0 +1,9 @@
+use bigint_from_number, bigint_multiply from "std:bigint"
+
+# 12345 * 0 = 0
+bigint_from_number 12345
+constant a is it
+bigint_from_number 0
+constant b is it
+bigint_multiply a by b
+say it

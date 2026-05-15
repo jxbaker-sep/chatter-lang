@@ -1,0 +1,9 @@
+use bigint_from_number, bigint_multiply from "std:bigint"
+
+# 6 * 7 = 42
+bigint_from_number 6
+constant a is it
+bigint_from_number 7
+constant b is it
+bigint_multiply a by b
+say it

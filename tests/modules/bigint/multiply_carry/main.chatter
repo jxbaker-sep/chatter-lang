@@ -1,0 +1,7 @@
+use bigint_from_number, bigint_multiply from "std:bigint"
+
+# 999 * 999 = 998,001 — exercises carry propagation through every slot.
+bigint_from_number 999
+constant a is it
+bigint_multiply a by a
+say it

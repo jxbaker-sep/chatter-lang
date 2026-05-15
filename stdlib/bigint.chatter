@@ -145,6 +145,46 @@ function bigint_shift_and_add takes BigInt value plus number d returns BigInt is
   return the result of bigint_normalize make BigInt with Digits new_digits
 end function
 
+export function bigint_multiply takes BigInt lhs by BigInt rhs returns BigInt is
+  # Schoolbook long multiplication. Accumulates lhs[i] * rhs[j] into
+  # result[i + j - 1] (LSB-first, 1-indexed), then sweeps once to propagate
+  # carries. Intermediate slot values can temporarily exceed 9.
+  constant ld is Digits of lhs
+  constant rd is Digits of rhs
+  constant ln is length of ld
+  constant rn is length of rd
+  constant total_slots is ln + rn
+  variable result is empty list of number
+  repeat total_slots times
+    append 0 to result
+  end repeat
+
+  repeat with i from 1 to ln
+    repeat with j from 1 to rn
+      add item i of ld * item j of rd to item i + j - 1 of result
+    end repeat
+  end repeat
+
+  # Propagate carries. Use a while loop so the result list may grow if the
+  # top slot overflows (mathematically it shouldn't for a faithful product,
+  # but the bookkeeping is cleaner this way).
+  variable k is 1
+  repeat while k is at most length of result
+    constant v is item k of result
+    if v is at least 10
+      change item k of result to v mod 10
+      if k is length of result
+        append v / 10 to result
+      else
+        add v / 10 to item k + 1 of result
+      end if
+    end if
+    add 1 to k
+  end repeat
+
+  return the result of bigint_normalize make BigInt with Digits result
+end function
+
 export function bigint_divide takes BigInt dividend by BigInt divisor returns BigInt is
   # Schoolbook long division. Processes dividend digits from most-significant
   # to least-significant, maintaining a running remainder `current`. For each

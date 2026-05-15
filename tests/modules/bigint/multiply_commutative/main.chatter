@@ -1,0 +1,11 @@
+use bigint_from_number, bigint_multiply from "std:bigint"
+
+# Confirm a * b == b * a for non-trivial operands.
+bigint_from_number 1234
+constant a is it
+bigint_from_number 567
+constant b is it
+bigint_multiply a by b
+say it
+bigint_multiply b by a
+say it

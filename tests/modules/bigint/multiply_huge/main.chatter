@@ -1,0 +1,11 @@
+use bigint_from_string, bigint_multiply from "std:bigint"
+
+# 12,345,678,901,234,567,890 * 98,765,432,109,876,543,210
+#   = 1,219,326,311,370,217,952,237,463,801,111,263,526,900
+# Well beyond JS safe-integer range; exercises full long-multiplication.
+bigint_from_string "12345678901234567890"
+constant a is it
+bigint_from_string "98765432109876543210"
+constant b is it
+bigint_multiply a by b
+say it
