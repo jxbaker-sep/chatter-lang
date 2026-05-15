@@ -1,6 +1,5 @@
-use bigint_from_number, bigint_to_string from "std:bigint"
+use bigint_from_number from "std:bigint"
 
 # Nine-digit value 123,456,789 — three full groups, no leftover lead.
 bigint_from_number 123456789
-bigint_to_string it
 say it

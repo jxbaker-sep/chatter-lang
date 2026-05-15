@@ -1,4 +1,4 @@
-use bigint_from_number, bigint_add, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_add from "std:bigint"
 
 # Commutativity check: a + b should equal b + a, even when the operands
 # have different lengths and a carry is involved on one column.
@@ -9,9 +9,7 @@ bigint_from_number 5
 constant b is it
 
 bigint_add a to b
-bigint_to_string it
 say it
 
 bigint_add b to a
-bigint_to_string it
 say it

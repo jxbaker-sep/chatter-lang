@@ -1,6 +1,5 @@
-use bigint_from_number, bigint_to_string from "std:bigint"
+use bigint_from_number from "std:bigint"
 
 # Multi-group number — exercises comma insertion.
 bigint_from_number 123456789
-bigint_to_string it
 say it

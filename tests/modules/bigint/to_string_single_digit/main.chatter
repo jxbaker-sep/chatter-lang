@@ -1,6 +1,5 @@
-use bigint_from_number, bigint_to_string from "std:bigint"
+use bigint_from_number from "std:bigint"
 
 # Single-digit value 7.
 bigint_from_number 7
-bigint_to_string it
 say it

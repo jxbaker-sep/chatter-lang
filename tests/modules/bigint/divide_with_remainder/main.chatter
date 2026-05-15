@@ -1,4 +1,4 @@
-use bigint_from_number, bigint_divide, bigint_to_string from "std:bigint"
+use bigint_from_number, bigint_divide from "std:bigint"
 
 # 12345 / 67 = 184 (12345 = 184 * 67 + 17)
 bigint_from_number 12345
@@ -6,5 +6,4 @@ constant a is it
 bigint_from_number 67
 constant b is it
 bigint_divide a by b
-bigint_to_string it
 say it

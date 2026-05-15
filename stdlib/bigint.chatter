@@ -64,7 +64,7 @@ export function bigint_add takes BigInt lhs to BigInt rhs returns BigInt is
   return make BigInt with Digits result
 end function
 
-export function bigint_to_string takes BigInt value returns string is
+function bigint_to_string takes BigInt value returns string is
   variable result is ""
   constant digits is Digits of value
   repeat with i from 1 to the length of digits

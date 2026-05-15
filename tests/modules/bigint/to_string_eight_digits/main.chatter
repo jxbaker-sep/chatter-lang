@@ -1,6 +1,5 @@
-use bigint_from_number, bigint_to_string from "std:bigint"
+use bigint_from_number from "std:bigint"
 
 # Eight-digit value 12,345,678 — full 3-digit groups bookended by a 2-digit lead.
 bigint_from_number 12345678
-bigint_to_string it
 say it

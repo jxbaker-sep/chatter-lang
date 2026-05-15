@@ -1,4 +1,4 @@
-use bigint_from_string, bigint_from_number, bigint_add, bigint_to_string from "std:bigint"
+use bigint_from_string, bigint_from_number, bigint_add from "std:bigint"
 
 # Beyond Chatter's safe-integer range (2^53 - 1 = 9,007,199,254,740,991).
 # 9,999,999,999,999,999 (16 nines) + 1 = 10,000,000,000,000,000.
@@ -9,5 +9,4 @@ constant nines is it
 bigint_from_number 1
 constant one is it
 bigint_add nines to one
-bigint_to_string it
 say it
