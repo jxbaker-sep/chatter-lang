@@ -1228,10 +1228,29 @@ export class Compiler {
       }
     }
     // Emit: LOAD list; <index>; <value>; LIST_SET
-    this.emit(out, { op: 'LOAD', name: info.mangled });
-    this.compileExpr(stmt.index, out, bindings);
-    this.compileExpr(stmt.value, out, bindings);
-    this.emit(out, { op: 'LIST_SET' });
+    // If `end` sentinel appears in the index, stash the list in a tmp first
+    // so we can compute length once for the sentinel.
+    if (containsEndSentinel(stmt.index)) {
+      const listTmp = this.freshName('chgitem_list');
+      const lenTmp = this.freshName('chgitem_len');
+      this.emit(out, { op: 'LOAD', name: info.mangled });
+      this.emit(out, { op: 'STORE', name: listTmp });
+      this.emit(out, { op: 'LOAD', name: listTmp });
+      this.emit(out, { op: 'LENGTH' });
+      this.emit(out, { op: 'STORE', name: lenTmp });
+      this.emit(out, { op: 'LOAD', name: listTmp });
+      this.endLenTmpStack.push(lenTmp);
+      try { this.compileExpr(stmt.index, out, bindings); } finally { this.endLenTmpStack.pop(); }
+      this.compileExpr(stmt.value, out, bindings);
+      this.emit(out, { op: 'LIST_SET' });
+      this.emit(out, { op: 'DELETE', name: listTmp });
+      this.emit(out, { op: 'DELETE', name: lenTmp });
+    } else {
+      this.emit(out, { op: 'LOAD', name: info.mangled });
+      this.compileExpr(stmt.index, out, bindings);
+      this.compileExpr(stmt.value, out, bindings);
+      this.emit(out, { op: 'LIST_SET' });
+    }
   }
 
   private compileListMutationTarget(listName: string, bindings: Scope, op: string): { type: ChatterType | null; mangled: string } {

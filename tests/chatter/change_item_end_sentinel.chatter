@@ -1,0 +1,5 @@
+constant xs is list of "a", "b", "c", "d"
+change item end of xs to "Z"
+say xs
+change item end - 1 of xs to "Y"
+say xs
