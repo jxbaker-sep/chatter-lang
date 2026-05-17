@@ -120,3 +120,25 @@ export function find takes string needle in string haystack from number start re
   end repeat
   return 0
 end function
+
+# starts_with: true iff `input` begins with `prefix`.
+# Empty prefix -> true. Prefix longer than input -> false.
+# "hello" starts with "he"    -> true
+# "hello" starts with "lo"    -> false
+# "hi"    starts with ""      -> true
+# ""      starts with ""      -> true
+# ""      starts with "x"     -> false
+export function starts_with takes string input with string prefix returns boolean is
+  if length of prefix is greater than length of input
+    return false
+  end if
+  if prefix is empty
+    return true
+  end if
+  repeat with i from 1 to length of prefix
+    if character i of input is not character i of prefix
+      return false
+    end if
+  end repeat
+  return true
+end function

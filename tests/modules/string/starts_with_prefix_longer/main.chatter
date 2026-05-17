@@ -1,0 +1,4 @@
+use starts_with from "std:string"
+
+starts_with "hi" with "hello"
+say it
