@@ -34,7 +34,7 @@ describe('Compiler', () => {
     expect(bc.functions.has('double')).toBe(true);
     const fn = bc.functions.get('double')!;
     expect(fn.params).toEqual(['a']);
-    expect(fn.instructions).toContainEqual({ op: 'LOAD', name: 'a' });
+    expect(fn.instructions).toContainEqual(expect.objectContaining({ op: 'LOAD_SLOT', slot: 0, name: 'a' }));
     expect(fn.instructions).toContainEqual({ op: 'PUSH_INT', value: 2 });
     expect(fn.instructions).toContainEqual({ op: 'MUL' });
     expect(fn.instructions).toContainEqual({ op: 'RETURN' });
@@ -188,7 +188,7 @@ describe('Compiler', () => {
     const fn = bc.functions.get('double')!;
     expect(fn.params).toEqual(['a']);
     expect(fn.instructions).toEqual([
-      { op: 'LOAD', name: 'a' },
+      expect.objectContaining({ op: 'LOAD_SLOT', slot: 0, name: 'a' }),
       { op: 'PUSH_INT', value: 2 },
       { op: 'MUL' },
       { op: 'RETURN' },

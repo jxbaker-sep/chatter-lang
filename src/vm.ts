@@ -130,13 +130,21 @@ function formatScalar(v: number | string | boolean): string {
 interface Frame {
   instructions: Instruction[];
   ip: number;
-  locals: Map<string, ChatterValue>;
+  locals: Map<string, ChatterValue>;          // used by main/top-level frame
+  localsArr: ChatterValue[] | null;           // used by function frames (slot-indexed)
   varTypes: Map<string, 'number' | 'string' | 'boolean' | string> | null;
+  varTypesArr: (string | undefined)[] | null;  // parallel to localsArr, lazy
   it: ChatterValue | null;
 }
 
 const INT_MIN = Number.MIN_SAFE_INTEGER;
 const INT_MAX = Number.MAX_SAFE_INTEGER;
+
+// Sentinel empty Map shared across all function frames. Function bodies
+// never STORE into frame.locals (they use STORE_SLOT into localsArr), so
+// this Map remains read-only at runtime — sharing one instance is safe and
+// saves allocating an empty Map per pooled frame.
+const EMPTY_MAP: Map<string, ChatterValue> = new Map();
 
 export class VM {
   private stack: ChatterValue[] = [];
@@ -152,33 +160,35 @@ export class VM {
   // allocating a fresh { locals, varTypes, ... } pair per call.
   private framePool: Frame[] = [];
 
-  private acquireFrame(instructions: Instruction[]): Frame {
+  private acquireFrame(instructions: Instruction[], slotCount: number): Frame {
     const f = this.framePool.pop();
     if (f !== undefined) {
       f.instructions = instructions;
       f.ip = 0;
-      f.locals.clear();
-      // varTypes left as-is from prior use; we'll null it out on release. If
-      // it was used, we cleared it on release; if it was never used, it's
-      // still null. Either way, lazy-init in STORE_VAR is correct.
+      // Resize/clear the slot array in place.
+      const arr = f.localsArr!;
+      arr.length = slotCount;
+      for (let i = 0; i < slotCount; i++) arr[i] = undefined as unknown as ChatterValue;
       f.it = null;
       return f;
     }
     return {
       instructions,
       ip: 0,
-      locals: new Map(),
+      locals: EMPTY_MAP,
+      localsArr: new Array(slotCount),
       varTypes: null,
+      varTypesArr: null,
       it: null,
     };
   }
 
   private releaseFrame(f: Frame): void {
-    // Clear varTypes lazily — only most frames don't use it. If it was
-    // populated, clear it so the next acquirer doesn't see stale entries.
-    if (f.varTypes !== null) f.varTypes.clear();
-    // locals is cleared at acquire-time so it can be re-used straight from
-    // the pool by recursive callers without an extra clear cycle here.
+    if (f.varTypesArr !== null) {
+      // Clear so the next acquirer doesn't see stale type-locks.
+      const a = f.varTypesArr;
+      for (let i = 0; i < a.length; i++) a[i] = undefined;
+    }
     this.framePool.push(f);
   }
 
@@ -260,18 +270,15 @@ export class VM {
     if (!fdef) {
       throw new RuntimeError(`Missing formatter function '${formatterName}'`);
     }
-    const locals = new Map<string, ChatterValue>();
-    locals.set('it', value);
-    const frame: Frame = {
-      instructions: fdef.instructions,
-      ip: 0,
-      locals,
-      varTypes: null,
-      it: null,
-    };
+    const slotCount = fdef.slotCount ?? fdef.params.length;
+    const frame = this.acquireFrame(fdef.instructions, slotCount);
+    // Format functions take a single `it` param at slot 0 (per
+    // compileFormatThunk).
+    frame.localsArr![0] = value;
     this.callStack.push(frame);
     this.executeFrame();
     this.callStack.pop();
+    this.releaseFrame(frame);
     const result = this.stack.pop();
     if (typeof result !== 'string') {
       throw new RuntimeError(
@@ -286,7 +293,9 @@ export class VM {
       instructions: this.program.main,
       ip: 0,
       locals: new Map(),
+      localsArr: null,
       varTypes: null,
+      varTypesArr: null,
       it: null,
     };
     this.callStack.push(mainFrame);
@@ -322,17 +331,19 @@ export class VM {
         break;
 
       case 'LOAD': {
-        // Lexical scoping: check current frame, then the top-level (frame 0).
-        // Chatter values are never `undefined`, so a single `get` + undefined
-        // check is sufficient (no need for a separate `has` probe).
+        // Globals (frame[0]) — emitted only at module-init top level or for
+        // cross-module names like `m0::foo`. Function-frame locals use
+        // LOAD_SLOT (see below). At top-level execution this.callStack
+        // length is 1 and frame === callStack[0], so the first lookup is on
+        // the only frame. From inside a function, frame.locals is the
+        // shared EMPTY_MAP and we fall through to frame[0].
         const v = frame.locals.get(instr.name);
         if (v !== undefined) {
           this.stack.push(v);
           return;
         }
         if (this.callStack.length > 1) {
-          const top0 = this.callStack[0];
-          const w = top0.locals.get(instr.name);
+          const w = this.callStack[0].locals.get(instr.name);
           if (w !== undefined) {
             this.stack.push(w);
             return;
@@ -341,8 +352,22 @@ export class VM {
         throw new RuntimeError(`Undefined variable: '${instr.name}'`, instr.loc);
       }
 
+      case 'LOAD_SLOT': {
+        const v = frame.localsArr![instr.slot];
+        if (v === undefined) {
+          throw new RuntimeError(`Undefined variable: '${instr.name}'`, instr.loc);
+        }
+        this.stack.push(v);
+        return;
+      }
+
       case 'STORE': {
         frame.locals.set(instr.name, this.pop());
+        break;
+      }
+
+      case 'STORE_SLOT': {
+        frame.localsArr![instr.slot] = this.pop();
         break;
       }
 
@@ -373,8 +398,43 @@ export class VM {
         break;
       }
 
+      case 'STORE_VAR_SLOT': {
+        const val = this.pop();
+        let valType: string;
+        if (isStruct(val)) valType = 'struct:' + val.typeName;
+        else if (isUniqueList(val)) valType = `uniqueList:${val.element}`;
+        else if (isList(val)) valType = `list:${val.element}`;
+        else if (isDict(val)) valType = `dict:${val.keyType}:${val.valueType}`;
+        else valType = typeof val as string;
+        let vta = frame.varTypesArr;
+        if (vta === null) {
+          vta = new Array(frame.localsArr!.length);
+          frame.varTypesArr = vta;
+          vta[instr.slot] = valType;
+        } else {
+          const existing = vta[instr.slot];
+          if (existing === undefined) {
+            vta[instr.slot] = valType;
+          } else if (existing !== valType) {
+            throw new RuntimeError(
+              `Type mismatch: cannot change '${instr.name}' (expected ${existing}, got ${valType})`,
+            instr.loc);
+          }
+        }
+        frame.localsArr![instr.slot] = val;
+        break;
+      }
+
       case 'DELETE': {
         frame.locals.delete(instr.name);
+        break;
+      }
+
+      case 'DELETE_SLOT': {
+        frame.localsArr![instr.slot] = undefined as unknown as ChatterValue;
+        if (frame.varTypesArr !== null) {
+          frame.varTypesArr[instr.slot] = undefined;
+        }
         break;
       }
 
@@ -435,19 +495,17 @@ export class VM {
           funcDef = fd;
           instr.cachedFn = fd;
         }
-        // Acquire a frame from the pool (or alloc fresh) and bind args
-        // directly off the stack — no intermediate args array.
-        const newFrame = this.acquireFrame(funcDef.instructions);
-        const params = funcDef.params;
-        const paramCount = params.length;
+        // Acquire a frame from the pool (or alloc fresh) sized for this
+        // function's slot table, and bind args directly into slots 0..n-1.
+        const slotCount = funcDef.slotCount ?? funcDef.params.length;
+        const newFrame = this.acquireFrame(funcDef.instructions, slotCount);
+        const paramCount = funcDef.params.length;
         const argCount = instr.argCount;
         const stack = this.stack;
-        const localsMap = newFrame.locals;
-        // Args were pushed left-to-right; the topmost stack slot is the last
-        // arg, so we walk the params right-to-left binding from the stack top.
+        const localsArr = newFrame.localsArr!;
         const baseIdx = stack.length - argCount;
         for (let i = 0; i < paramCount; i++) {
-          localsMap.set(params[i], stack[baseIdx + i]);
+          localsArr[i] = stack[baseIdx + i];
         }
         stack.length = baseIdx;
         this.callStack.push(newFrame);

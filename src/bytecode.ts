@@ -77,6 +77,10 @@ export type InstructionKind =
   | { op: 'STRUCT_GET'; fieldName: string }
   | { op: 'STRUCT_WITH'; fieldNames: string[] }
   | { op: 'SORT_LIST'; byKey: boolean; descending: boolean }
+  | { op: 'LOAD_SLOT'; slot: number; name: string }   // function-frame local read; name for error
+  | { op: 'STORE_SLOT'; slot: number }                // function-frame local write
+  | { op: 'STORE_VAR_SLOT'; slot: number; name: string }
+  | { op: 'DELETE_SLOT'; slot: number }
   | { op: 'ERROR'; message: string };
 
 export type Instruction = InstructionKind & { loc?: SourceLocation };
@@ -85,6 +89,7 @@ export interface FunctionDef {
   name: string;
   params: string[];         // parameter names in order
   instructions: Instruction[];
+  slotCount?: number;       // count of locals slots (params + body locals + temps)
 }
 
 export interface BytecodeProgram {

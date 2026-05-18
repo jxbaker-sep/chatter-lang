@@ -752,6 +752,49 @@ export class Compiler {
       rewriteInstrs(fdef.instructions, this.functionLocals.get(mangledName) ?? null);
     }
 
+    // Slot-allocation pass: within each function body, rewrite name-based
+    // local accesses to slot-indexed variants. A name is treated as a
+    // function-local slot iff it appears in the function's own
+    // `functionLocals` set (params + block-scope locals), OR it isn't a
+    // module-top-level binding and isn't a mangled global (compiler temps
+    // from `freshName` fall in the latter bucket). This handles the case
+    // where a function param shadows a same-named top-level binding.
+    for (const [mangledName, fdef] of this.functions) {
+      const localSet = this.functionLocals.get(mangledName) ?? new Set<string>();
+      const isLocal = (n: string): boolean => {
+        if (localSet.has(n)) return true;
+        if (n.indexOf('::') >= 0) return false;
+        if (this.topLevelMangled.has(n)) return false;
+        return true;
+      };
+      const slotOf = new Map<string, number>();
+      for (const p of fdef.params) {
+        if (!slotOf.has(p)) slotOf.set(p, slotOf.size);
+      }
+      const instrs = fdef.instructions;
+      for (let idx = 0; idx < instrs.length; idx++) {
+        const i = instrs[idx];
+        if (i.op === 'LOAD' && isLocal(i.name)) {
+          let s = slotOf.get(i.name);
+          if (s === undefined) { s = slotOf.size; slotOf.set(i.name, s); }
+          instrs[idx] = { op: 'LOAD_SLOT', slot: s, name: i.name, loc: i.loc };
+        } else if (i.op === 'STORE' && isLocal(i.name)) {
+          let s = slotOf.get(i.name);
+          if (s === undefined) { s = slotOf.size; slotOf.set(i.name, s); }
+          instrs[idx] = { op: 'STORE_SLOT', slot: s, loc: i.loc };
+        } else if (i.op === 'STORE_VAR' && isLocal(i.name)) {
+          let s = slotOf.get(i.name);
+          if (s === undefined) { s = slotOf.size; slotOf.set(i.name, s); }
+          instrs[idx] = { op: 'STORE_VAR_SLOT', slot: s, name: i.name, loc: i.loc };
+        } else if (i.op === 'DELETE' && isLocal(i.name)) {
+          let s = slotOf.get(i.name);
+          if (s === undefined) { s = slotOf.size; slotOf.set(i.name, s); }
+          instrs[idx] = { op: 'DELETE_SLOT', slot: s, loc: i.loc };
+        }
+      }
+      fdef.slotCount = slotOf.size;
+    }
+
     // Build exports table
     const exports = new Map<string, ImportedFunction>();
     for (const [localName, decl] of this.localFunctions) {
