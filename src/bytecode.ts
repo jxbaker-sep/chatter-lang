@@ -30,7 +30,7 @@ export type InstructionKind =
   | { op: 'EXPECT_BOOL_OP'; logicalOp: 'and' | 'or' }                // peek; throw "Type mismatch: '<op>' requires booleans, got X" if not boolean; stack unchanged
   | { op: 'JUMP'; target: number }
   | { op: 'JUMP_IF_FALSE'; target: number }
-  | { op: 'CALL'; name: string; argCount: number }
+  | { op: 'CALL'; name: string; argCount: number; cachedFn?: FunctionDef }
   | { op: 'RETURN' }
   | { op: 'SAY' }
   | { op: 'SAY_MULTI'; count: number }

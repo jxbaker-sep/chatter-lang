@@ -131,7 +131,7 @@ interface Frame {
   instructions: Instruction[];
   ip: number;
   locals: Map<string, ChatterValue>;
-  varTypes: Map<string, 'number' | 'string' | 'boolean' | string>;
+  varTypes: Map<string, 'number' | 'string' | 'boolean' | string> | null;
   it: ChatterValue | null;
 }
 
@@ -147,6 +147,40 @@ export class VM {
   // same value (e.g. `list of p, p`) are fine because each add/remove pair
   // is balanced.
   private currentlyFormatting: Set<ChatterStruct> = new Set();
+
+  // Frame pool: hot reuse of Frame objects across CALL/return to avoid
+  // allocating a fresh { locals, varTypes, ... } pair per call.
+  private framePool: Frame[] = [];
+
+  private acquireFrame(instructions: Instruction[]): Frame {
+    const f = this.framePool.pop();
+    if (f !== undefined) {
+      f.instructions = instructions;
+      f.ip = 0;
+      f.locals.clear();
+      // varTypes left as-is from prior use; we'll null it out on release. If
+      // it was used, we cleared it on release; if it was never used, it's
+      // still null. Either way, lazy-init in STORE_VAR is correct.
+      f.it = null;
+      return f;
+    }
+    return {
+      instructions,
+      ip: 0,
+      locals: new Map(),
+      varTypes: null,
+      it: null,
+    };
+  }
+
+  private releaseFrame(f: Frame): void {
+    // Clear varTypes lazily — only most frames don't use it. If it was
+    // populated, clear it so the next acquirer doesn't see stale entries.
+    if (f.varTypes !== null) f.varTypes.clear();
+    // locals is cleared at acquire-time so it can be re-used straight from
+    // the pool by recursive callers without an extra clear cycle here.
+    this.framePool.push(f);
+  }
 
   constructor(private program: BytecodeProgram) {}
 
@@ -232,7 +266,7 @@ export class VM {
       instructions: fdef.instructions,
       ip: 0,
       locals,
-      varTypes: new Map(),
+      varTypes: null,
       it: null,
     };
     this.callStack.push(frame);
@@ -252,7 +286,7 @@ export class VM {
       instructions: this.program.main,
       ip: 0,
       locals: new Map(),
-      varTypes: new Map(),
+      varTypes: null,
       it: null,
     };
     this.callStack.push(mainFrame);
@@ -262,19 +296,18 @@ export class VM {
 
   private executeFrame(): void {
     const frame = this.callStack[this.callStack.length - 1];
-    while (frame.ip < frame.instructions.length) {
-      const instr = frame.instructions[frame.ip++];
+    const instructions = frame.instructions;
+    while (frame.ip < instructions.length) {
+      const instr = instructions[frame.ip++];
       if (instr.op === 'RETURN') {
         // Return value is already on the stack from the expression before RETURN.
         return;
       }
-      this.executeInstr(instr);
+      this.executeInstr(instr, frame);
     }
   }
 
-  private executeInstr(instr: Instruction): void {
-    const frame = this.callStack[this.callStack.length - 1];
-
+  private executeInstr(instr: Instruction, frame: Frame): void {
     switch (instr.op) {
       case 'PUSH_INT':
         this.stack.push(instr.value);
@@ -290,15 +323,20 @@ export class VM {
 
       case 'LOAD': {
         // Lexical scoping: check current frame, then the top-level (frame 0).
-        // Intermediate caller frames are NOT consulted.
-        const top = this.callStack[this.callStack.length - 1];
-        if (top.locals.has(instr.name)) {
-          this.stack.push(top.locals.get(instr.name)!);
+        // Chatter values are never `undefined`, so a single `get` + undefined
+        // check is sufficient (no need for a separate `has` probe).
+        const v = frame.locals.get(instr.name);
+        if (v !== undefined) {
+          this.stack.push(v);
           return;
         }
-        if (this.callStack.length > 1 && this.callStack[0].locals.has(instr.name)) {
-          this.stack.push(this.callStack[0].locals.get(instr.name)!);
-          return;
+        if (this.callStack.length > 1) {
+          const top0 = this.callStack[0];
+          const w = top0.locals.get(instr.name);
+          if (w !== undefined) {
+            this.stack.push(w);
+            return;
+          }
         }
         throw new RuntimeError(`Undefined variable: '${instr.name}'`, instr.loc);
       }
@@ -316,13 +354,20 @@ export class VM {
         else if (isList(val)) valType = `list:${val.element}`;
         else if (isDict(val)) valType = `dict:${val.keyType}:${val.valueType}`;
         else valType = typeof val as string;
-        const existing = frame.varTypes.get(instr.name);
-        if (existing === undefined) {
-          frame.varTypes.set(instr.name, valType);
-        } else if (existing !== valType) {
-          throw new RuntimeError(
-            `Type mismatch: cannot change '${instr.name}' (expected ${existing}, got ${valType})`,
-          instr.loc);
+        let vts = frame.varTypes;
+        if (vts === null) {
+          vts = new Map();
+          frame.varTypes = vts;
+          vts.set(instr.name, valType);
+        } else {
+          const existing = vts.get(instr.name);
+          if (existing === undefined) {
+            vts.set(instr.name, valType);
+          } else if (existing !== valType) {
+            throw new RuntimeError(
+              `Type mismatch: cannot change '${instr.name}' (expected ${existing}, got ${valType})`,
+            instr.loc);
+          }
         }
         frame.locals.set(instr.name, val);
         break;
@@ -379,29 +424,36 @@ export class VM {
       }
 
       case 'CALL': {
-        const funcDef = this.program.functions.get(instr.name);
-        if (!funcDef) {
-          throw new RuntimeError(`Undefined function: '${instr.name}'`, instr.loc);
+        // Resolve + cache the target function on first execution. Subsequent
+        // calls skip the Map lookup entirely.
+        let funcDef = instr.cachedFn;
+        if (funcDef === undefined) {
+          const fd = this.program.functions.get(instr.name);
+          if (!fd) {
+            throw new RuntimeError(`Undefined function: '${instr.name}'`, instr.loc);
+          }
+          funcDef = fd;
+          instr.cachedFn = fd;
         }
-        // Pop args in reverse order so args[0] corresponds to params[0].
-        const args: ChatterValue[] = new Array(instr.argCount);
-        for (let i = instr.argCount - 1; i >= 0; i--) {
-          args[i] = this.pop();
+        // Acquire a frame from the pool (or alloc fresh) and bind args
+        // directly off the stack — no intermediate args array.
+        const newFrame = this.acquireFrame(funcDef.instructions);
+        const params = funcDef.params;
+        const paramCount = params.length;
+        const argCount = instr.argCount;
+        const stack = this.stack;
+        const localsMap = newFrame.locals;
+        // Args were pushed left-to-right; the topmost stack slot is the last
+        // arg, so we walk the params right-to-left binding from the stack top.
+        const baseIdx = stack.length - argCount;
+        for (let i = 0; i < paramCount; i++) {
+          localsMap.set(params[i], stack[baseIdx + i]);
         }
-        const locals = new Map<string, ChatterValue>();
-        for (let i = 0; i < funcDef.params.length; i++) {
-          locals.set(funcDef.params[i], args[i]);
-        }
-        const newFrame: Frame = {
-          instructions: funcDef.instructions,
-          ip: 0,
-          locals,
-          varTypes: new Map(),
-          it: null,
-        };
+        stack.length = baseIdx;
         this.callStack.push(newFrame);
         this.executeFrame();
         this.callStack.pop();
+        this.releaseFrame(newFrame);
         // The return value was left on the stack by RETURN's expression.
         break;
       }
