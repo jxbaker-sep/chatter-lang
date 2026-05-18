@@ -40,3 +40,13 @@ end function
 export function sum takes list of number xs returns number is
   return reduce xs starting 0 using accumulator + it 
 end function
+
+export function sign takes number n returns number is
+  if n is less than 0
+    return -1
+  else if n is 0
+    return 0
+  else
+    return 1
+  end if
+end function

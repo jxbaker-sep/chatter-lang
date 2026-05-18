@@ -1,0 +1,5 @@
+use sign from "std:math"
+
+constant a is the result of sign 9007199254740991
+constant b is the result of sign -9007199254740991
+say a, b

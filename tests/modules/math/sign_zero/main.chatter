@@ -1,0 +1,4 @@
+use sign from "std:math"
+
+constant r is the result of sign 0
+say r
