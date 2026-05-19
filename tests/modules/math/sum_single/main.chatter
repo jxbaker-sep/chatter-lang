@@ -1,0 +1,4 @@
+use sum from "std:math"
+constant xs is list of 42
+constant r is the result of sum xs
+say r

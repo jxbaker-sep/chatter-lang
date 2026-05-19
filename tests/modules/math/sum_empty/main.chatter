@@ -1,0 +1,4 @@
+use sum from "std:math"
+constant xs is empty list of number
+constant r is the result of sum xs
+say r

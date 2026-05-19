@@ -1,0 +1,4 @@
+use product from "std:math"
+constant xs is empty list of number
+constant r is the result of product xs
+say r
