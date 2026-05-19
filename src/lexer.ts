@@ -34,7 +34,7 @@ const KEYWORDS = new Set([
   'character', 'characters',
   'items',
   'read', 'file', 'lines',
-  'expect',
+  'expect', 'fail',
   'use', 'export',
   'struct', 'make',
   'type',

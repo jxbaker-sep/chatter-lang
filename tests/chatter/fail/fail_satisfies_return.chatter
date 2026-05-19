@@ -1,0 +1,6 @@
+function bad returns number is
+    fail "wrong type"
+end function
+
+constant x is the result of bad
+say x

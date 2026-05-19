@@ -1,0 +1,10 @@
+function pick takes number n returns string is
+    if n is 1
+        return "one"
+    else
+        fail "bad n"
+    end if
+end function
+
+constant x is the result of pick 0
+say x

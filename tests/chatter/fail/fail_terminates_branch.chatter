@@ -1,0 +1,14 @@
+function classify takes number n returns string is
+    if n is 0
+        return "zero"
+    else if n is greater than 0
+        return "positive"
+    else
+        fail "unreachable for non-negative inputs"
+    end if
+end function
+
+constant a is the result of classify 0
+constant b is the result of classify 5
+say a
+say b

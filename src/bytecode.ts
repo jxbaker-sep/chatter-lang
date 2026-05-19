@@ -66,6 +66,7 @@ export type InstructionKind =
   | { op: 'EXPECT'; source: string }
   | { op: 'EXPECT_BOOL_CHECK' }       // peeks top; throws "expect requires a boolean, got X" if not boolean
   | { op: 'EXPECT_FAIL_WITH_MSG' }    // pops string message; throws "expect failed: <msg>"
+  | { op: 'FAIL' }  // pops string message; throws "fail: <msg>"
   | { op: 'MAKE_DICT'; count: number; keyType: string; valueType: string }
   | { op: 'MAKE_EMPTY_DICT'; keyType: string; valueType: string }
   | { op: 'DICT_GET' }

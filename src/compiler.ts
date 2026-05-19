@@ -15,6 +15,7 @@ import {
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
   ExpectStatement,
+  FailStatement,
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
   TypeAliasDeclaration,
@@ -987,6 +988,9 @@ export class Compiler {
       case 'ExpectStatement':
         this.compileExpect(stmt, out, bindings);
         break;
+      case 'FailStatement':
+        this.compileFail(stmt, out, bindings);
+        break;
       case 'UseStatement':
         // Module system handled at loader level; nothing to emit here.
         break;
@@ -1075,6 +1079,22 @@ export class Compiler {
     const endLabel = out.length;
     (out[jmpFail] as any).target = failLabel;
     (out[jmpEnd] as any).target = endLabel;
+  }
+
+  private compileFail(
+    stmt: FailStatement,
+    out: Instruction[],
+    bindings: Scope,
+  ): void {
+    const mt = this.staticType(stmt.message, bindings);
+    if (mt && !(mt.kind === 'scalar' && mt.name === 'string')) {
+      throw new CompileError(
+        `fail message must be a string, got ${typeToString(mt)}`,
+        this.currentLoc,
+      );
+    }
+    this.compileExpr(stmt.message, out, bindings);
+    this.emit(out, { op: 'FAIL' });
   }
 
   private compileReadFileStatement(
@@ -3693,6 +3713,7 @@ export class Compiler {
 
 export function statementTerminates(stmt: Statement): boolean {
   if (stmt.type === 'ReturnStatement') return true;
+  if (stmt.type === 'FailStatement') return true;
   if (stmt.type === 'IfStatement') {
     if (stmt.elseBody === null) return false;
     for (const b of stmt.branches) {

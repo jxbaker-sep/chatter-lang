@@ -18,7 +18,7 @@ import {
   ListSliceExpression,
   EndIndexSentinel,
   ReadFileLinesExpression, ReadFileStatement,
-  ExpectStatement, UseStatement,
+  ExpectStatement, FailStatement, UseStatement,
   ExitRepeatStatement, NextRepeatStatement,
   StructDeclaration, StructField,
   TypeAliasDeclaration,
@@ -51,7 +51,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'append', 'prepend', 'insert', 'remove',
   'character', 'characters',
   'items',
-  'expect',
+  'expect', 'fail',
   'use', 'export',
   'struct', 'make',
   'type',
@@ -189,6 +189,7 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'remove':   return parseRemoveStatement();
         case 'read':     return parseReadFileStatement();
         case 'expect':   return parseExpectStatement();
+        case 'fail':     return parseFailStatement();
         case 'exit':     return parseExitRepeatStatement();
         case 'next':     return parseNextRepeatStatement();
         case 'sort':     return parseSortStatement();
@@ -285,6 +286,16 @@ export function parse(tokens: Token[], source?: string): Program {
 
     consumeNewline();
     return { type: 'ExpectStatement', expression, source: snippet, message };
+  }
+
+  function parseFailStatement(): FailStatement {
+    consume('KEYWORD', 'fail');
+    if (peek().type === 'NEWLINE' || peek().type === 'EOF') {
+      throw new ParseError('fail requires a message expression', peek());
+    }
+    const message = parseExpression();
+    consumeNewline();
+    return { type: 'FailStatement', message };
   }
 
   // Parse the tail after `to be`, returning a comparison/char-class AST node

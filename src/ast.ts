@@ -78,6 +78,7 @@ export type Statement = (
   | RemoveValueStatement
   | ReadFileStatement
   | ExpectStatement
+  | FailStatement
   | UseStatement
   | ExitRepeatStatement
   | NextRepeatStatement
@@ -358,6 +359,11 @@ export interface ExpectStatement {
   expression: Expression;
   source: string;
   message?: Expression;
+}
+
+export interface FailStatement {
+  type: 'FailStatement';
+  message: Expression;
 }
 
 export interface AppendStatement {

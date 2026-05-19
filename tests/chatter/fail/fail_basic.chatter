@@ -1,0 +1,3 @@
+say "before"
+fail "oops"
+say "after"

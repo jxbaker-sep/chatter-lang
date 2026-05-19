@@ -601,6 +601,14 @@ export class VM {
         throw new RuntimeError(`expect failed: ${m}`, instr.loc);
       }
 
+      case 'FAIL': {
+        const m = this.pop();
+        if (typeof m !== 'string') {
+          throw new RuntimeError(`fail message must be a string, got ${describe(m)}`, instr.loc);
+        }
+        throw new RuntimeError(`fail: ${m}`, instr.loc);
+      }
+
       case 'DROP': {
         this.pop();
         break;
