@@ -1,0 +1,14 @@
+struct Node
+    number Leaf
+end struct
+
+constant head is make Node with Leaf 5
+
+function get_leaves returns list of number is
+    constant open_nodes is list of head
+    map open_nodes using Leaf of it
+    return it
+end function
+
+get_leaves
+say it

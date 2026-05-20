@@ -3897,7 +3897,12 @@ export class Compiler {
           return this.hofAccStack[this.hofAccStack.length - 1].type ?? null;
         }
         const info = bindings.lookup(expr.name);
-        return info?.type ?? null;
+        if (info) return info.type ?? null;
+        if (this.topLevelBindings && bindings !== this.topLevelBindings) {
+          const top = this.topLevelBindings.lookup(expr.name);
+          if (top) return top.type ?? null;
+        }
+        return null;
       }
       case 'CallStatement': {
         const genInfo = this.genericFunctions.get(expr.name);
