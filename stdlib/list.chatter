@@ -17,3 +17,11 @@ export function wrap takes number n in number size returns number is
   expect size is at least 1, "wrap size must be at least 1"
   return ((n - 1) mod size) + 1
 end function
+
+export function range takes number first to number stop returns list of number is
+  constant output is empty list of number
+  repeat with i from first to stop
+    append i to output
+  end repeat
+  return output
+end function

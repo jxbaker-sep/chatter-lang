@@ -1,0 +1,4 @@
+use range from "std:list"
+range 5 to 1
+say it
+say length of it

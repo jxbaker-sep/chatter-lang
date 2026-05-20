@@ -1,0 +1,7 @@
+use range from "std:list"
+constant xs is the result of range 1 to 4
+constant total is reduce xs starting 0 using accumulator + it
+say total
+say length of xs
+say item 1 of xs
+say item 4 of xs

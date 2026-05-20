@@ -1,0 +1,3 @@
+use range from "std:list"
+range 7 to 7
+say it
