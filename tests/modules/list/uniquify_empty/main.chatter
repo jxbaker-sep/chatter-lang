@@ -1,0 +1,5 @@
+use uniquify from "std:list"
+constant xs is empty list of number
+uniquify xs
+say it
+say length of it

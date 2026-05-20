@@ -25,3 +25,11 @@ export function range takes number first to number stop returns list of number i
   end repeat
   return output
 end function
+
+export function uniquify over T takes list of T input returns unique list of T is
+  constant output is empty unique list of T
+  repeat with i in input
+    add i to output
+  end repeat
+  return output
+end function

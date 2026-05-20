@@ -1,0 +1,4 @@
+use uniquify from "std:list"
+constant xs is list of 1, 2, 2, 3, 1, 4
+uniquify xs
+say it

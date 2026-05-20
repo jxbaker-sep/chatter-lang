@@ -1,0 +1,4 @@
+use uniquify from "std:list"
+constant words is list of "a", "b", "a", "c", "b", "a"
+uniquify words
+say it
