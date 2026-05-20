@@ -21,6 +21,7 @@ export function run(args: string[]): number {
     const program = loadProgram(filepath, { args: scriptArgs });
     const vm = new VM(program);
     vm.run();
+    if (process.env.CHATTER_PROFILE) vm.dumpOpProfile();
     return 0;
   } catch (e) {
     if (e instanceof Error) {

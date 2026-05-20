@@ -269,6 +269,25 @@ export class Compiler {
   private hofAccStack: Array<{ local: string; type: ChatterType | undefined }> = [];
   private inHofBody = false;
 
+  // Static type of `it` at the current point in the statement stream. Updated
+  // after each statement that writes `it` (typed CALL, HOF statement form,
+  // `the result of` host statements, `read file`). Reset to null at function
+  // body entry and conservatively merged across if/else/repeat branches.
+  // Outside a HOF body this is what `staticType(ItExpression)` returns.
+  private currentItType: ChatterType | null = null;
+
+  private mergeItTypes(types: (ChatterType | null)[]): ChatterType | null {
+    if (types.length === 0) return null;
+    const first = types[0];
+    if (first === null) return null;
+    for (let i = 1; i < types.length; i++) {
+      const t = types[i];
+      if (t === null) return null;
+      if (!typesEqual(first, t)) return null;
+    }
+    return first;
+  }
+
   private get currentLoc(): SourceLocation | undefined {
     return this.locStack[this.locStack.length - 1];
   }
@@ -865,6 +884,7 @@ export class Compiler {
           this.emit(out, { op: 'DROP' });
         } else {
           this.emit(out, { op: 'STORE_IT' });
+          this.currentItType = rt ?? null;
         }
         break;
       }
@@ -874,9 +894,14 @@ export class Compiler {
       case 'IfStatement':
         this.compileIf(stmt, out, bindings);
         break;
-      case 'RepeatStatement':
+      case 'RepeatStatement': {
+        // Loop body may run zero times → merge the pre-loop `it` type with
+        // whatever the body ends with.
+        const itTypeBefore = this.currentItType;
         this.compileRepeat(stmt, out, bindings);
+        this.currentItType = this.mergeItTypes([itTypeBefore, this.currentItType]);
         break;
+      }
       case 'AppendStatement':
         this.compileAppend(stmt, out, bindings);
         break;
@@ -933,10 +958,15 @@ export class Compiler {
       case 'SortStatement':
         this.compileSort(stmt, out, bindings);
         break;
-      case 'HofStatement':
+      case 'HofStatement': {
+        // Compute static result type before compiling so we can update
+        // `currentItType` precisely without re-walking.
+        const resultType = this.staticType(stmt.expr, bindings);
         this.compileExpr(stmt.expr, out, bindings);
         this.emit(out, { op: 'STORE_IT' });
+        this.currentItType = resultType;
         break;
+      }
     }
   }
 
@@ -1021,6 +1051,7 @@ export class Compiler {
     this.compileExpr(stmt.path, out, bindings);
     this.emit(out, { op: 'READ_FILE_LINES' });
     this.emit(out, { op: 'STORE_IT' });
+    this.currentItType = { kind: 'list', element: { kind: 'scalar', name: 'string' } };
   }
 
   private compileSay(
@@ -1059,6 +1090,7 @@ export class Compiler {
     }
     this.compileCallStmt(precall, out, bindings);
     this.emit(out, { op: 'STORE_IT' });
+    this.currentItType = rt;
     return rt;
   }
 
@@ -1584,8 +1616,10 @@ export class Compiler {
     }
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
+    const prevItType = this.currentItType;
     this.currentFuncReturnType = stmt.returnType === null ? null : this.fromAnnotation(stmt.returnType);
     this.currentFuncName = stmt.name;
+    this.currentItType = null;  // `it` is per-frame; unknown at function entry
     try {
       for (const bodyStmt of stmt.body) {
         this.compileStatement(bodyStmt, instructions, funcBindings);
@@ -1593,6 +1627,7 @@ export class Compiler {
     } finally {
       this.currentFuncReturnType = prevReturnType;
       this.currentFuncName = prevFuncName;
+      this.currentItType = prevItType;
     }
     if (stmt.returnType === null) {
       // Void: implicit `return 0` so the call site has a value to DROP.
@@ -1690,6 +1725,9 @@ export class Compiler {
   ): void {
     const exitJumps: number[] = [];
 
+    const itTypeBefore = this.currentItType;
+    const branchEndItTypes: (ChatterType | null)[] = [];
+
     for (const branch of stmt.branches) {
       const ct = this.staticType(branch.condition, bindings);
       if (ct && !(ct.kind === 'scalar' && ct.name === 'boolean')) {
@@ -1701,10 +1739,12 @@ export class Compiler {
       const jifIdx = out.length;
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
+      this.currentItType = itTypeBefore;
       const branchScope = new Scope(bindings);
       for (const s of branch.body) {
         this.compileStatement(s, out, branchScope);
       }
+      branchEndItTypes.push(this.currentItType);
 
       const exitIdx = out.length;
       this.emit(out, { op: 'JUMP', target: -1 });
@@ -1714,16 +1754,23 @@ export class Compiler {
     }
 
     if (stmt.elseBody) {
+      this.currentItType = itTypeBefore;
       const elseScope = new Scope(bindings);
       for (const s of stmt.elseBody) {
         this.compileStatement(s, out, elseScope);
       }
+      branchEndItTypes.push(this.currentItType);
+    } else {
+      // No else: fall-through carries the pre-statement `it` type.
+      branchEndItTypes.push(itTypeBefore);
     }
 
     const endIdx = out.length;
     for (const j of exitJumps) {
       (out[j] as { op: 'JUMP'; target: number }).target = endIdx;
     }
+
+    this.currentItType = this.mergeItTypes(branchEndItTypes);
   }
 
   private compileRepeat(
@@ -3501,7 +3548,7 @@ export class Compiler {
         if (this.hofItStack.length > 0) {
           return this.hofItStack[this.hofItStack.length - 1].type ?? null;
         }
-        return null;
+        return this.currentItType;
       default:
         return null;
     }

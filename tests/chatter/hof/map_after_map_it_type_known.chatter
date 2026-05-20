@@ -1,0 +1,7 @@
+function tail takes string s returns string is
+    return characters 2 to end of s
+end function
+constant data is list of "abc", "def", "ghi"
+map data using the result of tail it
+map it using character 1 of it
+say it

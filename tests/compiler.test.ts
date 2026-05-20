@@ -502,7 +502,28 @@ describe('Compiler', () => {
     });
 
     test('typed function: return uses CHECK_TYPE when static type unknown', () => {
-      // `it` has unknown static type, so a runtime check must be emitted.
+      // `it` has unknown static type after a `repeat` body that sets it
+      // (the loop may run zero times, so post-loop `it` merges with the
+      // pre-loop null). A runtime CHECK_TYPE must be emitted.
+      const src = [
+        'function g returns string is',
+        '    return "hi"',
+        'end function',
+        'function f returns number is',
+        '    repeat 1 times',
+        '        g',
+        '    end repeat',
+        '    return it',
+        'end function',
+      ].join('\n');
+      const bc = compileSource(src);
+      const fn = bc.functions.get('f')!;
+      expect(fn.instructions.some(i => i.op === 'CHECK_TYPE')).toBe(true);
+    });
+
+    test('typed function: return-type mismatch caught statically when it-type is known', () => {
+      // After calling a typed function, `it`'s static type is known, so a
+      // mismatch with the declared return type is a compile error.
       const src = [
         'function g returns string is',
         '    return "hi"',
@@ -512,9 +533,9 @@ describe('Compiler', () => {
         '    return it',
         'end function',
       ].join('\n');
-      const bc = compileSource(src);
-      const fn = bc.functions.get('f')!;
-      expect(fn.instructions.some(i => i.op === 'CHECK_TYPE')).toBe(true);
+      expect(() => compileSource(src)).toThrow(
+        /declared to return number, but return expression has type string/,
+      );
     });
 
     test('void function used as value in set → compile error', () => {
