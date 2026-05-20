@@ -1,0 +1,12 @@
+function reverse over T takes list of T xs returns list of T is
+    constant result is empty list of T
+    repeat with x in xs
+        prepend x to result
+    end repeat
+    return result
+end function
+
+constant a is the result of reverse list of 1, 2, 3
+say a
+constant b is the result of reverse list of "x", "y", "z"
+say b

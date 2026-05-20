@@ -42,7 +42,7 @@ export class ParseError extends ChatterError {
 // These start new statements or form expression operators.
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
-  'true', 'false', 'is', 'say', 'constant', 'function', 'takes', 'returns', 'return',
+  'true', 'false', 'is', 'say', 'constant', 'function', 'over', 'takes', 'returns', 'return',
   'repeat', 'times', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
   'variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'mod',
@@ -686,6 +686,24 @@ export function parse(tokens: Token[], source?: string): Program {
       );
     };
 
+    const typeVars: string[] = [];
+    if (peek().type === 'KEYWORD' && peek().value === 'over') {
+      advance(); // consume `over`
+      const firstTv = consume('IDENT');
+      const seenTv = new Set<string>();
+      seenTv.add(firstTv.value);
+      typeVars.push(firstTv.value);
+      while (peek().type === 'KEYWORD' && peek().value === 'and') {
+        advance(); // consume `and`
+        const tvTok = consume('IDENT');
+        if (seenTv.has(tvTok.value)) {
+          throw new ParseError(`duplicate type variable '${tvTok.value}' in 'over' clause`, tvTok);
+        }
+        seenTv.add(tvTok.value);
+        typeVars.push(tvTok.value);
+      }
+    }
+
     const params: FunctionParam[] = [];
 
     // Reject the legacy paren form with an explicit error mentioning `takes`.
@@ -768,7 +786,7 @@ export function parse(tokens: Token[], source?: string): Program {
     consume('KEYWORD', 'function');
     consumeNewline();
 
-    return { type: 'FunctionDeclaration', name: nameTok.value, params, returnType, body, exported };
+    return { type: 'FunctionDeclaration', name: nameTok.value, typeVars, params, returnType, body, exported };
   }
 
   function parseExportStatement(): FunctionDeclaration | StructDeclaration | TypeAliasDeclaration {

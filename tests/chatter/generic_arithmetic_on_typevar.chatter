@@ -1,0 +1,5 @@
+function bad over T takes T value is
+    say value + 1
+end function
+
+say "unreachable"

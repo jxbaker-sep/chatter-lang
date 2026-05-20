@@ -1,0 +1,8 @@
+function identity over T takes T value returns T is
+    return value
+end function
+
+constant n is the result of identity 42
+say n
+constant s is the result of identity "hi"
+say s

@@ -1,0 +1,6 @@
+function bad returns list of T is
+    return empty list of T
+end function
+
+bad
+say it

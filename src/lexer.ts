@@ -23,7 +23,7 @@ export interface Token {
 }
 
 const KEYWORDS = new Set([
-  'say', 'constant', 'to', 'function', 'takes', 'returns', 'is', 'end', 'return',
+  'say', 'constant', 'to', 'function', 'over', 'takes', 'returns', 'is', 'end', 'return',
   'true', 'false', 'not', 'and', 'or', 'if', 'else',
   'repeat', 'times', 'with', 'from', 'while', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',

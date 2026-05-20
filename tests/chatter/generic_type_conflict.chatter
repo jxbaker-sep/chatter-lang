@@ -1,0 +1,6 @@
+function choose over T takes T left with T right returns T is
+    return left
+end function
+
+constant x is the result of choose 1 with "two"
+say x

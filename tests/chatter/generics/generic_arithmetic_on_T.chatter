@@ -1,0 +1,6 @@
+function bad over T takes T value returns T is
+    return value + 1
+end function
+
+constant x is the result of bad 1
+say x

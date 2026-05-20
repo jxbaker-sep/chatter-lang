@@ -3,6 +3,7 @@ import * as path from 'path';
 import { lex } from '../src/lexer';
 import { parse } from '../src/parser';
 import { compile, CompileError } from '../src/compiler';
+import { loadProgram } from '../src/moduleLoader';
 
 function compileSource(source: string) {
   return compile(parse(lex(source)));
@@ -742,4 +743,40 @@ describe('Compiler', () => {
       expect(() => compileSource('say true & 1')).not.toThrow();
     });
   });
+
+  describe('generic functions', () => {
+    test('monomorphization produces distinct mangled names for different bindings', () => {
+      const bc = compileSource([
+        'function id over T takes T value returns T is',
+        '    return value',
+        'end function',
+        'constant a is the result of id 1',
+        'constant b is the result of id "x"',
+      ].join('\n'));
+      const names = [...bc.functions.keys()].filter(n => n.startsWith('id$'));
+      expect(names).toEqual(expect.arrayContaining(['id$number', 'id$string']));
+      expect(names).toHaveLength(2);
+    });
+
+    test('re-instantiation with the same binding is cached', () => {
+      const bc = compileSource([
+        'function id over T takes T value returns T is',
+        '    return value',
+        'end function',
+        'constant a is the result of id 1',
+        'constant b is the result of id 2',
+      ].join('\n'));
+      const names = [...bc.functions.keys()].filter(n => n.startsWith('id$number'));
+      expect(names).toHaveLength(1);
+    });
+
+    test('cross-module export/import monomorphizes generic functions', () => {
+      const entry = path.join(__dirname, 'modules/generic_cross_module/main.chatter');
+      const bc = loadProgram(entry);
+      const genericInstances = [...bc.functions.keys()].filter(n => n.includes('::mirror$'));
+      expect(genericInstances.some(n => n.endsWith('$number'))).toBe(true);
+      expect(genericInstances.some(n => n.endsWith('$string'))).toBe(true);
+    });
+  });
+
 });

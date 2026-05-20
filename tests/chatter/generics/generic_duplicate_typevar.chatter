@@ -1,0 +1,3 @@
+function bad over T and T takes T value returns T is
+    return value
+end function

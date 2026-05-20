@@ -1,0 +1,6 @@
+use mirror from "lib"
+
+constant nums is the result of mirror list of 1, 2
+say nums
+constant words is the result of mirror list of "x", "y"
+say words

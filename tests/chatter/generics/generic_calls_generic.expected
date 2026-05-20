@@ -1,0 +1,1 @@
+ERROR: 'id' is a generic function; calling it from inside a generic function is not supported in v1

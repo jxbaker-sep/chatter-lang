@@ -189,6 +189,7 @@ export interface FunctionParam {
 export interface FunctionDeclaration {
   type: 'FunctionDeclaration';
   name: string;
+  typeVars?: string[];
   params: FunctionParam[];
   returnType: TypeAnnotation | null;  // null = void
   body: Statement[];

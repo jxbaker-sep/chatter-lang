@@ -1,0 +1,18 @@
+function recursive_reverse over T takes list of T xs returns list of T is
+    if length of xs is 0
+        return empty list of T
+    end if
+    constant rest is empty list of T
+    repeat with x in xs
+        append x to rest
+    end repeat
+    remove item 1 from rest
+    constant tail is the result of recursive_reverse rest
+    append item 1 of xs to tail
+    return tail
+end function
+
+constant nums is the result of recursive_reverse list of 1, 2, 3, 4
+say nums
+constant words is the result of recursive_reverse list of "a", "b"
+say words

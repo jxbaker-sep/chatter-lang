@@ -1,6 +1,6 @@
 import {
   Program, Statement, Expression, Located,
-  SayStatement, ConstantDeclaration, FunctionDeclaration,
+  SayStatement, ConstantDeclaration, FunctionDeclaration, FunctionParam,
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
   IfStatement, RepeatStatement,
   VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
@@ -24,7 +24,7 @@ import {
 } from './ast';
 import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
 import { ChatterError, SourceLocation } from './errors';
-import { ChatterType, typesEqual, typeToString, unmangleTypeName } from './types';
+import { ChatterType, typesEqual, typeToString, typeCode, unmangleTypeName, substituteTypeVars, bindTypeVars } from './types';
 export type { ChatterType } from './types';
 
 export class CompileError extends ChatterError {
@@ -83,6 +83,16 @@ interface AliasInfo {
   exported: boolean;
   imported: boolean;
   loc?: SourceLocation;
+}
+
+interface GenericFunctionInfo {
+  localName: string;
+  mangled: string;
+  typeVars: string[];
+  params: FunctionParam[];
+  returnType: TypeAnnotation | null;
+  body: Statement[];
+  exported: boolean;
 }
 
 type BindingKind = 'constant' | 'var' | 'param' | 'loop';
@@ -178,6 +188,10 @@ export interface ImportedFunction {
   signature: Array<{ name: string; label: string | null; type: ChatterType }>;
   returnType: ChatterType | null;
   paramNames: string[];
+  typeVars?: string[];
+  genericParams?: FunctionParam[];
+  genericReturnType?: TypeAnnotation | null;
+  genericBody?: Statement[];
 }
 
 export interface ImportedStruct {
@@ -227,6 +241,13 @@ export class Compiler {
   private functionSignatures = new Map<string, Array<{ name: string; label: string | null; type: ChatterType }>>();
   private functionReturnTypes = new Map<string, ChatterType | null>();  // null = void
   private functionMangled = new Map<string, string>();   // local name -> mangled
+  private genericFunctions = new Map<string, GenericFunctionInfo>();
+  private currentTypeVarSet = new Set<string>();
+  private currentTypeVarBindings = new Map<string, ChatterType>();
+  private isInsideGenericBody = false;
+  private currentGenericBaseName: string | null = null;
+  private inGenericValidation = false;
+  private monomorphizedCache = new Set<string>();
   private outerBindings = new Set<string>();
   // Superset of `outerBindings`: also includes block-scoped top-level mangled
   // names (e.g. `a$1` for `constant a` declared inside an `if` branch at
@@ -355,6 +376,11 @@ export class Compiler {
   private fromAnnotation(a: TypeAnnotation, loc?: SourceLocation): ChatterType {
     if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
     if (a.kind === 'struct') {
+      const boundTypeVar = this.currentTypeVarBindings.get(a.name);
+      if (boundTypeVar) return boundTypeVar;
+      if (this.currentTypeVarSet.has(a.name)) {
+        return { kind: 'typeVar', name: a.name };
+      }
       // Bare IDENT: alias takes precedence over struct lookup, since names
       // are unique across both registries (collision is checked in pass 1).
       const ali = this.aliases.get(a.name);
@@ -364,6 +390,9 @@ export class Compiler {
       }
       const info = this.structs.get(a.name);
       if (!info) {
+        if (/^[A-Z][A-Za-z0-9_]*$/.test(a.name)) {
+          throw new CompileError(`unknown type variable '${a.name}'`, loc ?? this.currentLoc);
+        }
         throw new CompileError(`unknown type '${a.name}'`, loc ?? this.currentLoc);
       }
       return { kind: 'struct', mangled: info.mangled };
@@ -606,10 +635,24 @@ export class Compiler {
       }
     }
 
-    // Seed signatures / returnTypes from imports (callable by local name)
+    // Seed signatures / returnTypes from imports (callable by local name).
+    // Generic imports are stored separately and monomorphized at call sites.
     for (const [localName, info] of this.imports) {
-      this.functionSignatures.set(localName, info.signature);
-      this.functionReturnTypes.set(localName, info.returnType);
+      if (info.typeVars && info.typeVars.length > 0) {
+        this.genericFunctions.set(localName, {
+          localName,
+          mangled: info.mangled,
+          typeVars: info.typeVars,
+          params: info.genericParams!,
+          returnType: info.genericReturnType ?? null,
+          body: info.genericBody!,
+          exported: false,
+        });
+        this.functionMangled.set(localName, info.mangled);
+      } else {
+        this.functionSignatures.set(localName, info.signature);
+        this.functionReturnTypes.set(localName, info.returnType);
+      }
     }
 
     // First pass: collect local function signatures, return types, outer bindings
@@ -621,21 +664,46 @@ export class Compiler {
             locOf(stmt),
           );
         }
-        this.functionSignatures.set(
-          stmt.name,
-          stmt.params.map(p => ({ name: p.name, label: p.label, type: this.fromAnnotation(p.paramType, locOf(stmt)) })),
-        );
-        this.functionReturnTypes.set(
-          stmt.name,
-          stmt.returnType === null ? null : this.fromAnnotation(stmt.returnType, locOf(stmt)),
-        );
         const mangled = this.moduleId ? `${this.moduleId}::${stmt.name}` : stmt.name;
-        this.functionMangled.set(stmt.name, mangled);
-        this.localFunctions.set(stmt.name, stmt);
+        if (stmt.typeVars && stmt.typeVars.length > 0) {
+          for (const tv of stmt.typeVars) {
+            if (this.structs.has(tv) || this.aliases.has(tv) || this.imports.has(tv) || this.functionMangled.has(tv)) {
+              throw new CompileError(`name '${tv}' is already defined`, locOf(stmt));
+            }
+          }
+          this.genericFunctions.set(stmt.name, {
+            localName: stmt.name,
+            mangled,
+            typeVars: stmt.typeVars,
+            params: stmt.params,
+            returnType: stmt.returnType,
+            body: stmt.body,
+            exported: stmt.exported,
+          });
+          this.functionMangled.set(stmt.name, mangled);
+          this.localFunctions.set(stmt.name, stmt);
+        } else {
+          this.functionSignatures.set(
+            stmt.name,
+            stmt.params.map(p => ({ name: p.name, label: p.label, type: this.fromAnnotation(p.paramType, locOf(stmt)) })),
+          );
+          this.functionReturnTypes.set(
+            stmt.name,
+            stmt.returnType === null ? null : this.fromAnnotation(stmt.returnType, locOf(stmt)),
+          );
+          this.functionMangled.set(stmt.name, mangled);
+          this.localFunctions.set(stmt.name, stmt);
+        }
       }
       if (stmt.type === 'ConstantDeclaration' || stmt.type === 'VarDeclaration') {
         this.outerBindings.add(stmt.name);
         this.topLevelMangled.add(stmt.name);
+      }
+    }
+
+    for (const decl of this.localFunctions.values()) {
+      if (decl.typeVars && decl.typeVars.length > 0) {
+        this.validateGenericFunction(decl);
       }
     }
 
@@ -729,12 +797,26 @@ export class Compiler {
     const exports = new Map<string, ImportedFunction>();
     for (const [localName, decl] of this.localFunctions) {
       if (!decl.exported) continue;
-      exports.set(localName, {
-        mangled: this.functionMangled.get(localName)!,
-        signature: this.functionSignatures.get(localName)!,
-        returnType: this.functionReturnTypes.get(localName)!,
-        paramNames: decl.params.map(p => p.name),
-      });
+      const genInfo = this.genericFunctions.get(localName);
+      if (genInfo) {
+        exports.set(localName, {
+          mangled: genInfo.mangled,
+          signature: [],
+          returnType: null,
+          paramNames: genInfo.params.map(p => p.name),
+          typeVars: genInfo.typeVars,
+          genericParams: genInfo.params,
+          genericReturnType: genInfo.returnType,
+          genericBody: genInfo.body,
+        });
+      } else {
+        exports.set(localName, {
+          mangled: this.functionMangled.get(localName)!,
+          signature: this.functionSignatures.get(localName)!,
+          returnType: this.functionReturnTypes.get(localName)!,
+          paramNames: decl.params.map(p => p.name),
+        });
+      }
     }
 
     const structExports = new Map<string, ImportedStruct>();
@@ -877,14 +959,25 @@ export class Compiler {
         this.compileFuncDecl(stmt);
         break;
       case 'CallStatement': {
-        this.compileCallStmt(stmt, out, bindings);
-        const rt = this.functionReturnTypes.get(stmt.name);
-        if (rt === null) {
-          // Void call: discard the implicit 0 returned by the callee. Does NOT update `it`.
-          this.emit(out, { op: 'DROP' });
+        const genInfo = this.genericFunctions.get(stmt.name);
+        if (genInfo !== undefined) {
+          const rt = this.compileGenericCallStmt(stmt, genInfo, out, bindings);
+          if (rt === null) {
+            this.emit(out, { op: 'DROP' });
+          } else {
+            this.emit(out, { op: 'STORE_IT' });
+            this.currentItType = rt;
+          }
         } else {
-          this.emit(out, { op: 'STORE_IT' });
-          this.currentItType = rt ?? null;
+          this.compileCallStmt(stmt, out, bindings);
+          const rt = this.functionReturnTypes.get(stmt.name);
+          if (rt === null) {
+            // Void call: discard the implicit 0 returned by the callee. Does NOT update `it`.
+            this.emit(out, { op: 'DROP' });
+          } else {
+            this.emit(out, { op: 'STORE_IT' });
+            this.currentItType = rt ?? null;
+          }
         }
         break;
       }
@@ -1075,6 +1168,25 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): ChatterType {
+    const genInfo = this.genericFunctions.get(precall.name);
+    if (genInfo !== undefined) {
+      if (!genInfo.returnType) {
+        throw new CompileError(
+          `'the result of' requires a typed function, but '${precall.name}' is void`,
+          this.currentLoc,
+        );
+      }
+      const rt = this.compileGenericCallStmt(precall, genInfo, out, bindings);
+      if (rt === null) {
+        throw new CompileError(
+          `'the result of' requires a typed function, but '${precall.name}' is void`,
+          this.currentLoc,
+        );
+      }
+      this.emit(out, { op: 'STORE_IT' });
+      this.currentItType = rt;
+      return rt;
+    }
     if (!this.functionReturnTypes.has(precall.name)) {
       throw new CompileError(
         `'the result of' refers to unknown function '${precall.name}'`,
@@ -1102,6 +1214,16 @@ export class Compiler {
   private validateHofResultOfSlot(slot: Expression | undefined): void {
     if (!slot || slot.type !== 'CallStatement') return;
     const call = slot as CallStatement;
+    const genInfo = this.genericFunctions.get(call.name);
+    if (genInfo !== undefined) {
+      if (!genInfo.returnType) {
+        throw new CompileError(
+          `'the result of' requires a typed function, but '${call.name}' is void`,
+          this.currentLoc,
+        );
+      }
+      return;
+    }
     if (!this.functionReturnTypes.has(call.name)) {
       throw new CompileError(
         `'the result of' refers to unknown function '${call.name}'`,
@@ -1582,6 +1704,7 @@ export class Compiler {
   }
 
   private compileFuncDecl(stmt: FunctionDeclaration): void {
+    if (stmt.typeVars && stmt.typeVars.length > 0) return;
     const params = stmt.params.map(p => p.name);
 
     // Params may not shadow outer-scope bindings
@@ -1639,6 +1762,309 @@ export class Compiler {
     // rewriting local references when a local shares a name with a top-level
     // binding.
     this.functionLocals.set(mangledName, new Set(funcBindings.allMangledInFunction));
+  }
+
+  private validateGenericFunction(decl: FunctionDeclaration): void {
+    const typeVars = decl.typeVars ?? [];
+    if (typeVars.length === 0) return;
+
+    const prevTypeVarSet = this.currentTypeVarSet;
+    const prevTypeVarBindings = this.currentTypeVarBindings;
+    const prevIsInsideGenericBody = this.isInsideGenericBody;
+    const prevGenericBaseName = this.currentGenericBaseName;
+    const prevInGenericValidation = this.inGenericValidation;
+    const prevReturnType = this.currentFuncReturnType;
+    const prevFuncName = this.currentFuncName;
+    const prevItType = this.currentItType;
+
+    this.currentTypeVarSet = new Set(typeVars);
+    this.currentTypeVarBindings = new Map();
+    this.isInsideGenericBody = true;
+    this.currentGenericBaseName = decl.name;
+    this.inGenericValidation = true;
+
+    const dummyOut: Instruction[] = [];
+    const funcBindings: Scope = new Scope(null, null);
+    const declLoc = locOf(decl as Located);
+    this.locStack.push(declLoc ?? this.currentLoc);
+    try {
+      for (const p of decl.params) {
+        if (this.outerBindings.has(p.name)) {
+          throw new CompileError(
+            `Parameter '${p.name}' in function '${decl.name}' shadows outer binding`,
+            declLoc,
+          );
+        }
+      }
+      for (const p of decl.params) {
+        funcBindings.declare(p.name, {
+          kind: 'param',
+          type: this.fromAnnotation(p.paramType, declLoc),
+        }, declLoc);
+      }
+      const rt = decl.returnType ? this.fromAnnotation(decl.returnType, declLoc) : null;
+      if (rt !== null && !blockTerminates(decl.body)) {
+        throw new CompileError(
+          `missing return in typed function '${decl.name}'; every path must return a ${typeToString(rt)}`,
+          declLoc,
+        );
+      }
+      this.currentFuncReturnType = rt;
+      this.currentFuncName = decl.name;
+      this.currentItType = null;
+      for (const bodyStmt of decl.body) {
+        this.compileStatement(bodyStmt, dummyOut, funcBindings);
+      }
+    } finally {
+      this.locStack.pop();
+      this.currentTypeVarSet = prevTypeVarSet;
+      this.currentTypeVarBindings = prevTypeVarBindings;
+      this.isInsideGenericBody = prevIsInsideGenericBody;
+      this.currentGenericBaseName = prevGenericBaseName;
+      this.inGenericValidation = prevInGenericValidation;
+      this.currentFuncReturnType = prevReturnType;
+      this.currentFuncName = prevFuncName;
+      this.currentItType = prevItType;
+    }
+  }
+
+  private withGenericTypeVars<T>(genInfo: GenericFunctionInfo, concreteBindings: Map<string, ChatterType> | null, fn: () => T): T {
+    const prevTypeVarSet = this.currentTypeVarSet;
+    const prevTypeVarBindings = this.currentTypeVarBindings;
+    this.currentTypeVarSet = new Set(genInfo.typeVars);
+    this.currentTypeVarBindings = concreteBindings ?? new Map();
+    try {
+      return fn();
+    } finally {
+      this.currentTypeVarSet = prevTypeVarSet;
+      this.currentTypeVarBindings = prevTypeVarBindings;
+    }
+  }
+
+  private annotatedGenericParamType(genInfo: GenericFunctionInfo, param: FunctionParam): ChatterType {
+    return this.withGenericTypeVars(genInfo, null, () => this.fromAnnotation(param.paramType, this.currentLoc));
+  }
+
+  private buildGenericBoundArgs(call: CallStatement, genInfo: GenericFunctionInfo): Expression[] {
+    const sig = genInfo.params;
+    const bound: Array<Expression | undefined> = new Array(sig.length).fill(undefined);
+    let positionalUsed = false;
+    for (const arg of call.args) {
+      if (arg.name === null) {
+        if (positionalUsed) {
+          throw new CompileError(`Multiple positional arguments in call to '${call.name}'`, this.currentLoc);
+        }
+        if (sig.length === 0) {
+          throw new CompileError(`Function '${call.name}' takes no arguments`, this.currentLoc);
+        }
+        bound[0] = arg.value;
+        positionalUsed = true;
+      } else {
+        let idx = -1;
+        for (let i = 0; i < sig.length; i++) {
+          if (bound[i] === undefined && sig[i].label === arg.name) { idx = i; break; }
+        }
+        if (idx === -1) {
+          const anyMatch = sig.some(p => p.label === arg.name);
+          if (anyMatch) {
+            throw new CompileError(`Too many arguments with label '${arg.name}' in call to '${call.name}'`, this.currentLoc);
+          }
+          throw new CompileError(`Unknown argument label '${arg.name}' in call to '${call.name}'`, this.currentLoc);
+        }
+        bound[idx] = arg.value;
+      }
+    }
+    for (let i = 0; i < sig.length; i++) {
+      if (bound[i] === undefined) {
+        throw new CompileError(`Missing argument for parameter '${sig[i].name}' in call to '${call.name}'`, this.currentLoc);
+      }
+    }
+    return bound as Expression[];
+  }
+
+  private bindGenericTypeVarsForCall(
+    call: CallStatement,
+    genInfo: GenericFunctionInfo,
+    boundArgs: Expression[],
+    bindings: Scope,
+    allowTypeVarArgs: boolean,
+  ): Map<string, ChatterType> {
+    const typeBindings = new Map<string, ChatterType>();
+    const tvBoundBy = new Map<string, string>();
+
+    const bind = (annotated: ChatterType, concrete: ChatterType, paramName: string): void => {
+      if (annotated.kind === 'typeVar') {
+        const existing = typeBindings.get(annotated.name);
+        if (existing !== undefined) {
+          if (!typesEqual(existing, concrete)) {
+            throw new CompileError(
+              `cannot resolve type variable '${annotated.name}' in call to '${call.name}': bound to ${typeToString(existing)} by arg '${tvBoundBy.get(annotated.name) ?? '?'}', but ${typeToString(concrete)} by arg '${paramName}'`,
+              this.currentLoc,
+            );
+          }
+        } else {
+          typeBindings.set(annotated.name, concrete);
+          tvBoundBy.set(annotated.name, paramName);
+        }
+        return;
+      }
+      if (annotated.kind !== concrete.kind) {
+        throw new CompileError(
+          `Type mismatch in call to '${call.name}' arg '${paramName}': expected ${typeToString(annotated)}, got ${typeToString(concrete)}`,
+          this.currentLoc,
+        );
+      }
+      switch (annotated.kind) {
+        case 'scalar':
+          if (concrete.kind !== 'scalar' || annotated.name !== concrete.name) {
+            throw new CompileError(`Type mismatch in call to '${call.name}' arg '${paramName}': expected ${typeToString(annotated)}, got ${typeToString(concrete)}`, this.currentLoc);
+          }
+          return;
+        case 'struct':
+          if (concrete.kind !== 'struct' || annotated.mangled !== concrete.mangled) {
+            throw new CompileError(`Type mismatch in call to '${call.name}' arg '${paramName}': expected ${typeToString(annotated)}, got ${typeToString(concrete)}`, this.currentLoc);
+          }
+          return;
+        case 'list': bind(annotated.element, (concrete as Extract<ChatterType, { kind: 'list' }>).element, paramName); return;
+        case 'uniqueList': bind(annotated.element, (concrete as Extract<ChatterType, { kind: 'uniqueList' }>).element, paramName); return;
+        case 'dict': {
+          const c = concrete as Extract<ChatterType, { kind: 'dict' }>;
+          bind(annotated.keyType, c.keyType, paramName);
+          bind(annotated.valueType, c.valueType, paramName);
+          return;
+        }
+      }
+    };
+
+    for (let i = 0; i < genInfo.params.length; i++) {
+      const argType = this.staticType(boundArgs[i], bindings);
+      if (argType === null) {
+        throw new CompileError(
+          `cannot call generic function '${call.name}' with arg of unknown type; consider using a typed function call or annotating the source list`,
+          this.currentLoc,
+        );
+      }
+      if (argType.kind === 'typeVar' && !allowTypeVarArgs) {
+        throw new CompileError(
+          `cannot call generic function '${call.name}' with arg of unknown type; consider using a typed function call or annotating the source list`,
+          this.currentLoc,
+        );
+      }
+      bind(this.annotatedGenericParamType(genInfo, genInfo.params[i]), argType, genInfo.params[i].name);
+    }
+
+    for (const tv of genInfo.typeVars) {
+      if (!typeBindings.has(tv)) {
+        throw new CompileError(`cannot resolve type variable '${tv}' in call to '${call.name}': no argument provides this type`, this.currentLoc);
+      }
+    }
+    return typeBindings;
+  }
+
+  private monomorphize(
+    genInfo: GenericFunctionInfo,
+    typeBindings: Map<string, ChatterType>,
+    loc: SourceLocation | undefined,
+  ): string {
+    const instanceName = `${genInfo.mangled}$${genInfo.typeVars.map(tv => typeCode(typeBindings.get(tv)!)).join('|')}`;
+    if (this.monomorphizedCache.has(instanceName)) return instanceName;
+
+    this.monomorphizedCache.add(instanceName);
+    const instructions: Instruction[] = [];
+    const params = genInfo.params.map(p => p.name);
+    const funcDef: FunctionDef = { name: instanceName, params, instructions };
+    this.functions.set(instanceName, funcDef);
+
+    const prevTypeVarSet = this.currentTypeVarSet;
+    const prevTypeVarBindings = this.currentTypeVarBindings;
+    const prevIsInsideGenericBody = this.isInsideGenericBody;
+    const prevGenericBaseName = this.currentGenericBaseName;
+    const prevInGenericValidation = this.inGenericValidation;
+    const prevReturnType = this.currentFuncReturnType;
+    const prevFuncName = this.currentFuncName;
+    const prevItType = this.currentItType;
+
+    this.currentTypeVarSet = new Set(genInfo.typeVars);
+    this.currentTypeVarBindings = typeBindings;
+    this.isInsideGenericBody = true;
+    this.currentGenericBaseName = genInfo.localName;
+    this.inGenericValidation = false;
+
+    const funcBindings: Scope = new Scope(null, null);
+    this.locStack.push(loc ?? this.currentLoc);
+    try {
+      for (const p of genInfo.params) {
+        funcBindings.declare(p.name, {
+          kind: 'param',
+          type: this.fromAnnotation(p.paramType, loc),
+        }, loc);
+      }
+      const concreteReturnType = genInfo.returnType ? this.fromAnnotation(genInfo.returnType, loc) : null;
+      this.currentFuncReturnType = concreteReturnType;
+      this.currentFuncName = genInfo.localName;
+      this.currentItType = null;
+      for (const bodyStmt of genInfo.body) {
+        this.compileStatement(bodyStmt, instructions, funcBindings);
+      }
+      if (concreteReturnType === null) {
+        this.emit(instructions, { op: 'PUSH_INT', value: 0 });
+        this.emit(instructions, { op: 'RETURN' });
+      }
+    } finally {
+      this.locStack.pop();
+      this.currentTypeVarSet = prevTypeVarSet;
+      this.currentTypeVarBindings = prevTypeVarBindings;
+      this.isInsideGenericBody = prevIsInsideGenericBody;
+      this.currentGenericBaseName = prevGenericBaseName;
+      this.inGenericValidation = prevInGenericValidation;
+      this.currentFuncReturnType = prevReturnType;
+      this.currentFuncName = prevFuncName;
+      this.currentItType = prevItType;
+    }
+
+    this.functionLocals.set(instanceName, new Set(funcBindings.allMangledInFunction));
+    return instanceName;
+  }
+
+  private compileGenericCallStmt(
+    stmt: CallStatement,
+    genInfo: GenericFunctionInfo,
+    out: Instruction[],
+    bindings: Scope,
+  ): ChatterType | null {
+    if (this.isInsideGenericBody && stmt.name !== this.currentGenericBaseName) {
+      throw new CompileError(
+        `'${stmt.name}' is a generic function; calling it from inside a generic function is not supported in v1`,
+        this.currentLoc,
+      );
+    }
+
+    const boundArgs = this.buildGenericBoundArgs(stmt, genInfo);
+    if (this.inGenericValidation && stmt.name === this.currentGenericBaseName) {
+      for (const argExpr of boundArgs) this.compileExpr(argExpr, out, bindings);
+      this.emit(out, { op: 'CALL', name: '__generic_validation_self_call__', argCount: genInfo.params.length });
+      return genInfo.returnType ? this.fromAnnotation(genInfo.returnType, this.currentLoc) : null;
+    }
+
+    const typeBindings = this.bindGenericTypeVarsForCall(stmt, genInfo, boundArgs, bindings, false);
+    const instanceName = this.monomorphize(genInfo, typeBindings, this.currentLoc);
+
+    for (const argExpr of boundArgs) this.compileExpr(argExpr, out, bindings);
+    this.emit(out, { op: 'CALL', name: instanceName, argCount: genInfo.params.length });
+
+    if (!genInfo.returnType) return null;
+    return this.withGenericTypeVars(genInfo, typeBindings, () => this.fromAnnotation(genInfo.returnType!, this.currentLoc));
+  }
+
+  private staticTypeForGenericCall(call: CallStatement, genInfo: GenericFunctionInfo, bindings: Scope): ChatterType | null {
+    if (!genInfo.returnType) return null;
+    try {
+      const boundArgs = this.buildGenericBoundArgs(call, genInfo);
+      const typeBindings = this.bindGenericTypeVarsForCall(call, genInfo, boundArgs, bindings, this.inGenericValidation);
+      return substituteTypeVars(this.withGenericTypeVars(genInfo, null, () => this.fromAnnotation(genInfo.returnType!, this.currentLoc)), typeBindings);
+    } catch {
+      return null;
+    }
   }
 
   private compileCallStmt(
@@ -2224,6 +2650,17 @@ export class Compiler {
         }
         break;
       case 'CallStatement': {
+        const genInfo = this.genericFunctions.get(expr.name);
+        if (genInfo !== undefined) {
+          if (!genInfo.returnType) {
+            throw new CompileError(
+              `void function '${expr.name}' cannot be used as a value`,
+              this.currentLoc,
+            );
+          }
+          this.compileGenericCallStmt(expr, genInfo, out, bindings);
+          break;
+        }
         const rt = this.functionReturnTypes.get(expr.name);
         if (rt === null) {
           throw new CompileError(
@@ -2295,9 +2732,13 @@ export class Compiler {
       }
       case 'LengthExpression': {
         const tt = this.staticType(expr.target, bindings);
-        if (tt !== null && tt.kind === 'scalar' && tt.name !== 'string') {
+        if (tt !== null
+            && !(tt.kind === 'scalar' && tt.name === 'string')
+            && tt.kind !== 'list'
+            && tt.kind !== 'uniqueList'
+            && tt.kind !== 'dict') {
           throw new CompileError(
-            `'length of' requires a list or string, got ${typeToString(tt)}`,
+            `'length of' requires a list or string or dictionary, got ${typeToString(tt)}`,
           this.currentLoc);
         }
         this.compileExpr(expr.target, out, bindings);
@@ -3266,6 +3707,10 @@ export class Compiler {
             `Type mismatch: 'contains' key type ${elementHuman(rc)} does not match dictionary key type ${elementHuman(lt.keyType)}`,
           this.currentLoc);
         }
+      } else if (lt !== null) {
+        throw new CompileError(
+          `'contains' requires a list, string, or dictionary on the left, got ${typeToString(lt)}`,
+        this.currentLoc);
       }
       this.compileExpr(expr.left, out, bindings);
       this.compileExpr(expr.right, out, bindings);
@@ -3395,7 +3840,29 @@ export class Compiler {
           return { kind: 'scalar', name: 'string' };
         }
         if (op === '+' || op === '-' || op === '*' || op === '/' || op === '**' || op === 'mod') {
+          const lt = this.staticType(expr.left, bindings);
+          const rt = this.staticType(expr.right, bindings);
+          if ((lt && !(lt.kind === 'scalar' && lt.name === 'number'))
+              || (rt && !(rt.kind === 'scalar' && rt.name === 'number'))) {
+            return null;
+          }
           return { kind: 'scalar', name: 'number' };
+        }
+        if (op === '<' || op === '<=' || op === '>' || op === '>=') {
+          const lt = this.staticType(expr.left, bindings);
+          const rt = this.staticType(expr.right, bindings);
+          if ((lt && !(lt.kind === 'scalar' && lt.name === 'number'))
+              || (rt && !(rt.kind === 'scalar' && rt.name === 'number'))) {
+            return null;
+          }
+        }
+        if (op === 'and' || op === 'or') {
+          const lt = this.staticType(expr.left, bindings);
+          const rt = this.staticType(expr.right, bindings);
+          if ((lt && !(lt.kind === 'scalar' && lt.name === 'boolean'))
+              || (rt && !(rt.kind === 'scalar' && rt.name === 'boolean'))) {
+            return null;
+          }
         }
         return { kind: 'scalar', name: 'boolean' };
       }
@@ -3407,6 +3874,10 @@ export class Compiler {
         return info?.type ?? null;
       }
       case 'CallStatement': {
+        const genInfo = this.genericFunctions.get(expr.name);
+        if (genInfo !== undefined) {
+          return this.staticTypeForGenericCall(expr, genInfo, bindings);
+        }
         const rt = this.functionReturnTypes.get(expr.name);
         return rt ?? null;
       }

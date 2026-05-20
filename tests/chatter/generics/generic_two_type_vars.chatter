@@ -1,0 +1,8 @@
+function pair_count over T and U takes list of T xs with list of U ys returns number is
+    return length of xs + length of ys
+end function
+
+constant n is the result of pair_count list of 1, 2 with list of "a", "b", "c"
+say n
+constant m is the result of pair_count list of true with list of 9, 8
+say m

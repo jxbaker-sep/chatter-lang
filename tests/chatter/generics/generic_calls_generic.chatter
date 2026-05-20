@@ -1,0 +1,10 @@
+function id over T takes T value returns T is
+    return value
+end function
+
+function bad over T takes T value returns T is
+    return the result of id value
+end function
+
+constant x is the result of bad 1
+say x

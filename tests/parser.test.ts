@@ -759,4 +759,39 @@ describe('Parser', () => {
       expect(fn.params[0].paramType).toEqual({ kind: 'struct', name: 'P' });
     });
   });
+
+  describe('generic function over clauses', () => {
+    test('parses over T', () => {
+      const ast = parseSource('function id over T takes T value returns T is\n    return value\nend function');
+      const fn = ast.body[0] as FunctionDeclaration;
+      expect(fn.typeVars).toEqual(['T']);
+      expect(fn.params[0].paramType).toEqual({ kind: 'struct', name: 'T' });
+      expect(fn.returnType).toEqual({ kind: 'struct', name: 'T' });
+    });
+
+    test('parses over T and U', () => {
+      const ast = parseSource('function pair over T and U takes T left with U right returns number is\n    return 2\nend function');
+      const fn = ast.body[0] as FunctionDeclaration;
+      expect(fn.typeVars).toEqual(['T', 'U']);
+    });
+
+    test('parses over T and U and V', () => {
+      const ast = parseSource('function f over T and U and V takes T value returns T is\n    return value\nend function');
+      const fn = ast.body[0] as FunctionDeclaration;
+      expect(fn.typeVars).toEqual(['T', 'U', 'V']);
+    });
+
+    test('rejects comma-separated type variables', () => {
+      expect(() => parseSource('function f over T, U takes T value returns T is\n    return value\nend function')).toThrow();
+    });
+
+    test('rejects adjacent type variables without and', () => {
+      expect(() => parseSource('function f over T U takes T value returns T is\n    return value\nend function')).toThrow();
+    });
+
+    test('rejects over without an identifier', () => {
+      expect(() => parseSource('function f over takes number n returns number is\n    return n\nend function')).toThrow();
+    });
+  });
+
 });

@@ -1,0 +1,6 @@
+function identity over T takes T value returns T is
+    return value
+end function
+
+constant x is the result of identity it
+say x

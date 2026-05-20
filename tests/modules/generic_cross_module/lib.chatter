@@ -1,0 +1,7 @@
+export function mirror over T takes list of T values returns list of T is
+    constant result is empty list of T
+    repeat with value in values
+        append value to result
+    end repeat
+    return result
+end function

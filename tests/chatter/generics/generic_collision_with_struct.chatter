@@ -1,0 +1,7 @@
+struct T
+    number x
+end struct
+
+function bad over T takes T value returns T is
+    return value
+end function
