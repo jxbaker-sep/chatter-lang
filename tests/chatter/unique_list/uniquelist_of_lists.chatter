@@ -1,0 +1,6 @@
+constant s is empty unique list of list of number
+add (list of 1, 2) to s
+add (list of 1, 2) to s
+add (list of 2, 1) to s
+say s
+say length of s

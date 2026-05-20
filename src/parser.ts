@@ -12,7 +12,7 @@ import {
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
   DictionaryLiteral, DictGetExpression, DictSetStatement,
-  TypeAnnotation, ScalarTypeName, ElementTypeAnnotation,
+  TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
   ListSliceExpression,
@@ -622,46 +622,20 @@ export function parse(tokens: Token[], source?: string): Program {
       advance();
       consume('KEYWORD', 'list');
       consume('KEYWORD', 'of');
-      const inner = parseTypeAnnotation();
-      if (inner.kind === 'list' || inner.kind === 'uniqueList' || inner.kind === 'dict') {
-        throw new ParseError(`nested lists not supported`, tok);
-      }
-      const elem: ElementTypeAnnotation = inner.kind === 'scalar'
-        ? { kind: 'scalar', name: inner.name }
-        : { kind: 'struct', name: inner.name };
-      return { kind: 'uniqueList', element: elem };
+      return { kind: 'uniqueList', element: parseTypeAnnotation() };
     }
     if (tok.type === 'KEYWORD' && tok.value === 'dictionary') {
       advance();
       consume('KEYWORD', 'from');
-      const kInner = parseTypeAnnotation();
-      if (kInner.kind === 'list' || kInner.kind === 'uniqueList' || kInner.kind === 'dict') {
-        throw new ParseError(`nested collections not supported in dictionary key type`, tok);
-      }
+      const k = parseTypeAnnotation();
       consume('KEYWORD', 'to');
-      const vInner = parseTypeAnnotation();
-      if (vInner.kind === 'list' || vInner.kind === 'uniqueList' || vInner.kind === 'dict') {
-        throw new ParseError(`nested collections not supported in dictionary value type`, tok);
-      }
-      const k: ElementTypeAnnotation = kInner.kind === 'scalar'
-        ? { kind: 'scalar', name: kInner.name }
-        : { kind: 'struct', name: kInner.name };
-      const v: ElementTypeAnnotation = vInner.kind === 'scalar'
-        ? { kind: 'scalar', name: vInner.name }
-        : { kind: 'struct', name: vInner.name };
+      const v = parseTypeAnnotation();
       return { kind: 'dict', keyType: k, valueType: v };
     }
     if (tok.type === 'KEYWORD' && tok.value === 'list') {
       advance();
       consume('KEYWORD', 'of');
-      const inner = parseTypeAnnotation();
-      if (inner.kind === 'list' || inner.kind === 'uniqueList' || inner.kind === 'dict') {
-        throw new ParseError(`nested lists not supported`, tok);
-      }
-      const elem: ElementTypeAnnotation = inner.kind === 'scalar'
-        ? { kind: 'scalar', name: inner.name }
-        : { kind: 'struct', name: inner.name };
-      return { kind: 'list', element: elem };
+      return { kind: 'list', element: parseTypeAnnotation() };
     }
     if (tok.type === 'TYPE') {
       advance();
@@ -1590,20 +1564,8 @@ export function parse(tokens: Token[], source?: string): Program {
         advance();
         const entries: Array<{ key: Expression; value: Expression }> = [];
         const parseEntry = () => {
-          if (peek().type === 'KEYWORD' &&
-              (peek().value === 'list' || peek().value === 'unique'
-                || peek().value === 'dictionary'
-                || peek().value === 'empty')) {
-            throw new ParseError(`nested collections not supported in dictionary key`, peek());
-          }
           const key = parsePrimary();
           consume('KEYWORD', 'to');
-          if (peek().type === 'KEYWORD' &&
-              (peek().value === 'list' || peek().value === 'unique'
-                || peek().value === 'dictionary'
-                || peek().value === 'empty')) {
-            throw new ParseError(`nested collections not supported in dictionary value`, peek());
-          }
           const value = parsePrimary();
           entries.push({ key, value });
         };
@@ -1619,18 +1581,10 @@ export function parse(tokens: Token[], source?: string): Program {
         advance();
         consume('KEYWORD', 'list');
         consume('KEYWORD', 'of');
-        if (peek().type === 'KEYWORD' &&
-            (peek().value === 'list' || peek().value === 'unique')) {
-          throw new ParseError(`nested lists not supported`, peek());
-        }
         const elements: Expression[] = [];
         elements.push(parsePrimary());
         while (peek().type === 'COMMA') {
           advance();
-          if (peek().type === 'KEYWORD' &&
-              (peek().value === 'list' || peek().value === 'unique')) {
-            throw new ParseError(`nested lists not supported`, peek());
-          }
           elements.push(parsePrimary());
         }
         return { type: 'UniqueListLiteral', kind: 'nonempty', elementType: null, elements } as UniqueListLiteral;
@@ -1640,16 +1594,10 @@ export function parse(tokens: Token[], source?: string): Program {
         advance();
         consume('KEYWORD', 'of');
         // Reject nested `list of list of ...`
-        if (peek().type === 'KEYWORD' && (peek().value === 'list')) {
-          throw new ParseError(`nested lists not supported`, peek());
-        }
         const elements: Expression[] = [];
         elements.push(parsePrimary());
         while (peek().type === 'COMMA') {
           advance();
-          if (peek().type === 'KEYWORD' && (peek().value === 'list')) {
-            throw new ParseError(`nested lists not supported`, peek());
-          }
           elements.push(parsePrimary());
         }
         return { type: 'ListLiteral', kind: 'nonempty', elementType: null, elements } as ListLiteral;
@@ -1660,31 +1608,9 @@ export function parse(tokens: Token[], source?: string): Program {
         if (peek().type === 'KEYWORD' && peek().value === 'dictionary') {
           advance();
           consume('KEYWORD', 'from');
-          const parseElemAnno = (label: string): ElementTypeAnnotation => {
-            const t = peek();
-            if (t.type === 'TYPE') {
-              advance();
-              return { kind: 'scalar', name: t.value as ScalarTypeName };
-            }
-            if (t.type === 'IDENT') {
-              advance();
-              return { kind: 'struct', name: t.value };
-            }
-            throw new ParseError(`Expected element type for ${label} after 'empty dictionary'`, t);
-          };
-          if (peek().type === 'KEYWORD' &&
-              (peek().value === 'list' || peek().value === 'unique'
-                || peek().value === 'dictionary')) {
-            throw new ParseError(`nested collections not supported in dictionary key type`, peek());
-          }
-          const kAnno = parseElemAnno('key');
+          const kAnno = parseTypeAnnotation();
           consume('KEYWORD', 'to');
-          if (peek().type === 'KEYWORD' &&
-              (peek().value === 'list' || peek().value === 'unique'
-                || peek().value === 'dictionary')) {
-            throw new ParseError(`nested collections not supported in dictionary value type`, peek());
-          }
-          const vAnno = parseElemAnno('value');
+          const vAnno = parseTypeAnnotation();
           return {
             type: 'DictionaryLiteral',
             kind: 'empty',
@@ -1698,20 +1624,7 @@ export function parse(tokens: Token[], source?: string): Program {
           advance();
           consume('KEYWORD', 'list');
           consume('KEYWORD', 'of');
-          let elemAnno: ElementTypeAnnotation;
-          const tTok = peek();
-          if (tTok.type === 'TYPE') {
-            advance();
-            if (tTok.value === 'list' || tTok.value === 'unique') {
-              throw new ParseError(`nested lists not supported`, tTok);
-            }
-            elemAnno = { kind: 'scalar', name: tTok.value as ScalarTypeName };
-          } else if (tTok.type === 'IDENT') {
-            advance();
-            elemAnno = { kind: 'struct', name: tTok.value };
-          } else {
-            throw new ParseError(`Expected element type after 'empty unique list of'`, tTok);
-          }
+          const elemAnno = parseTypeAnnotation();
           return {
             type: 'UniqueListLiteral',
             kind: 'empty',
@@ -1721,20 +1634,7 @@ export function parse(tokens: Token[], source?: string): Program {
         }
         consume('KEYWORD', 'list');
         consume('KEYWORD', 'of');
-        let elemAnno: ElementTypeAnnotation;
-        const tTok = peek();
-        if (tTok.type === 'TYPE') {
-          advance();
-          if (tTok.value === 'list') {
-            throw new ParseError(`nested lists not supported`, tTok);
-          }
-          elemAnno = { kind: 'scalar', name: tTok.value as ScalarTypeName };
-        } else if (tTok.type === 'IDENT') {
-          advance();
-          elemAnno = { kind: 'struct', name: tTok.value };
-        } else {
-          throw new ParseError(`Expected element type after 'empty list of'`, tTok);
-        }
+        const elemAnno = parseTypeAnnotation();
         return {
           type: 'ListLiteral',
           kind: 'empty',

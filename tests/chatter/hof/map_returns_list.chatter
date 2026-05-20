@@ -1,0 +1,3 @@
+constant xs is list of 1, 2, 3
+constant pairs is map xs using list of it, (it * 2)
+say pairs

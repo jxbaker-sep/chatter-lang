@@ -1,6 +1,7 @@
 import { Instruction, BytecodeProgram } from './bytecode';
 import * as fs from 'fs';
 import { ChatterError, SourceLocation } from './errors';
+import { ChatterType, STRING_TYPE, typeCode, typeToString, typesEqual } from './types';
 
 export class RuntimeError extends ChatterError {
   constructor(message: string, location?: SourceLocation) {
@@ -11,13 +12,13 @@ export class RuntimeError extends ChatterError {
 
 export interface ChatterList {
   kind: 'list';
-  element: string;  // 'number'|'string'|'boolean'|'struct:<mangled>'
+  element: ChatterType;
   items: ChatterValue[];
 }
 
 export interface ChatterUniqueList {
   kind: 'uniqueList';
-  element: string;  // same encoding as ChatterList.element
+  element: ChatterType;
   items: Map<string, ChatterValue>;  // key = canonicalKey(value); insertion order preserved
   _iterCache?: ChatterValue[];       // materialized values; invalidated on mutation
 }
@@ -30,8 +31,8 @@ export interface ChatterStruct {
 
 export interface ChatterDict {
   kind: 'dict';
-  keyType: string;              // 'number'|'string'|'boolean'|'struct:<mangled>'
-  valueType: string;            // same encoding
+  keyType: ChatterType;
+  valueType: ChatterType;
   items: Map<string, { key: ChatterValue; value: ChatterValue }>;  // canonicalKey -> entry
 }
 
@@ -57,29 +58,50 @@ function isAnyList(v: ChatterValue): v is ChatterList | ChatterUniqueList {
   return isList(v) || isUniqueList(v);
 }
 
-// Canonical string key for hashing scalar/struct values into a unique-list backing Map.
-// Recursive for structs (matches structural equality used by EQ).
-// Strings are escaped so that `"a|b"` and `"a","b"` cannot collide.
-function canonicalKey(v: ChatterValue): string {
-  if (typeof v === 'number') return 'n:' + v;
+function valueTypeOf(v: ChatterValue): ChatterType {
+  if (typeof v === 'number') return { kind: 'scalar', name: 'number' };
+  if (typeof v === 'string') return STRING_TYPE;
+  if (typeof v === 'boolean') return { kind: 'scalar', name: 'boolean' };
+  if (isStruct(v)) return { kind: 'struct', mangled: v.typeName };
+  if (isList(v)) return { kind: 'list', element: v.element };
+  if (isUniqueList(v)) return { kind: 'uniqueList', element: v.element };
+  return { kind: 'dict', keyType: v.keyType, valueType: v.valueType };
+}
+
+function valueMatchesType(v: ChatterValue, expected: ChatterType): boolean {
+  return typesEqual(valueTypeOf(v), expected);
+}
+
+function scalarCanonicalKey(v: number | string | boolean): string {
+  if (typeof v === 'number') return 'n:' + JSON.stringify(v);
   if (typeof v === 'string') return 's:' + v.length + ':' + v;
-  if (typeof v === 'boolean') return v ? 'b:1' : 'b:0';
+  return v ? 'b:1' : 'b:0';
+}
+
+function canonicalKey(v: ChatterValue): string {
+  if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') return scalarCanonicalKey(v);
   if (isStruct(v)) {
     const parts: string[] = [];
     for (const [fname, fval] of v.fields) parts.push(fname + '=' + canonicalKey(fval));
     return 'S:' + v.typeName + '{' + parts.join(',') + '}';
   }
-  // Lists are forbidden as elements; this branch should never be reached.
-  return 'L?';
+  if (isList(v)) {
+    return 'L' + typeCode(v.element) + '[' + v.items.map(canonicalKey).join(',') + ']';
+  }
+  if (isUniqueList(v)) {
+    return 'U' + typeCode(v.element) + '{' + Array.from(v.items.values()).map(canonicalKey).sort().join('|') + '}';
+  }
+  const entries = Array.from(v.items.values())
+    .map(e => canonicalKey(e.key) + '=' + canonicalKey(e.value))
+    .sort();
+  return 'D' + typeCode(v.keyType) + '=>' + typeCode(v.valueType) + '{' + entries.join(',') + '}';
 }
 
-// Return the values of a unique list as an indexed array, populating a lazy cache.
 function uniqueListValues(u: ChatterUniqueList): ChatterValue[] {
   if (u._iterCache === undefined) u._iterCache = Array.from(u.items.values());
   return u._iterCache;
 }
 
-// Invalidate the iteration cache after any mutation.
 function invalidateUniqueListCache(u: ChatterUniqueList): void {
   u._iterCache = undefined;
 }
@@ -90,25 +112,8 @@ function unmangleStructName(mangled: string): string {
   return idx === -1 ? mangled : mangled.slice(idx + 2);
 }
 
-// Encode the element-type code for a value (used for list/unique-list element checks).
-function valueElementCode(v: ChatterValue): string | null {
-  if (isStruct(v)) return 'struct:' + v.typeName;
-  if (isAnyList(v)) return null;  // lists never appear as elements (nested lists rejected)
-  if (isDict(v)) return null;     // dicts never appear as elements
-  return typeof v as string;
-}
-
-function elementCodeToHuman(code: string): string {
-  if (code.startsWith('struct:')) return 'struct ' + unmangleStructName(code.slice(7));
-  return code;
-}
-
 function describe(v: ChatterValue): string {
-  if (isStruct(v)) return 'struct ' + unmangleStructName(v.typeName);
-  if (isUniqueList(v)) return 'unique list of ' + elementCodeToHuman(v.element);
-  if (isList(v)) return 'list of ' + elementCodeToHuman(v.element);
-  if (isDict(v)) return 'dictionary from ' + elementCodeToHuman(v.keyType) + ' to ' + elementCodeToHuman(v.valueType);
-  return typeof v;
+  return typeToString(valueTypeOf(v));
 }
 
 // Return the single Unicode code point if `s` contains exactly one code point;
@@ -242,7 +247,7 @@ export class VM {
     }
     if (isDict(v)) {
       if (v.items.size === 0) {
-        return 'empty dictionary from ' + elementCodeToHuman(v.keyType) + ' to ' + elementCodeToHuman(v.valueType);
+        return 'empty dictionary from ' + typeToString(v.keyType) + ' to ' + typeToString(v.valueType);
       }
       const fmt = (e: ChatterValue): string => {
         if (isAnyList(e) || isStruct(e) || isDict(e)) return this.formatValue(e);
@@ -303,16 +308,43 @@ export class VM {
     this.callStack.pop();
   }
 
+  private opCounts: Map<string, number> = new Map();
+  private opTimes: Map<string, number> = new Map();
+  private static PROFILE = !!process.env.CHATTER_PROFILE;
+
   private executeFrame(): void {
     const frame = this.callStack[this.callStack.length - 1];
     const instructions = frame.instructions;
+    if (VM.PROFILE) {
+      while (frame.ip < instructions.length) {
+        const instr = instructions[frame.ip++];
+        if (instr.op === 'RETURN') return;
+        const __t0 = process.hrtime.bigint();
+        this.executeInstr(instr, frame);
+        const __t1 = process.hrtime.bigint();
+        const __d = Number(__t1 - __t0);
+        this.opCounts.set(instr.op, (this.opCounts.get(instr.op) || 0) + 1);
+        this.opTimes.set(instr.op, (this.opTimes.get(instr.op) || 0) + __d);
+      }
+      return;
+    }
     while (frame.ip < instructions.length) {
       const instr = instructions[frame.ip++];
-      if (instr.op === 'RETURN') {
-        // Return value is already on the stack from the expression before RETURN.
-        return;
-      }
+      if (instr.op === 'RETURN') return;
       this.executeInstr(instr, frame);
+    }
+  }
+
+  dumpOpProfile(): void {
+    const rows: Array<{op: string; count: number; ns: number}> = [];
+    for (const [op, count] of this.opCounts) {
+      rows.push({ op, count, ns: this.opTimes.get(op) || 0 });
+    }
+    rows.sort((a, b) => b.ns - a.ns);
+    const total = rows.reduce((a, b) => a + b.ns, 0);
+    console.error('op,count,total_ms,pct,ns_per_call');
+    for (const r of rows.slice(0, 25)) {
+      console.error(`${r.op},${r.count},${(r.ns/1e6).toFixed(1)},${(r.ns/total*100).toFixed(1)}%,${(r.ns/r.count).toFixed(0)}`);
     }
   }
 
@@ -337,17 +369,14 @@ export class VM {
         // length is 1 and frame === callStack[0], so the first lookup is on
         // the only frame. From inside a function, frame.locals is the
         // shared EMPTY_MAP and we fall through to frame[0].
-        const v = frame.locals.get(instr.name);
+        // Globals live in callStack[0].locals. From a function frame,
+        // frame.locals is the EMPTY_MAP sentinel — skip it and go direct
+        // to the top frame. Function locals use LOAD_SLOT.
+        const globals = this.callStack[0].locals;
+        const v = globals.get(instr.name);
         if (v !== undefined) {
           this.stack.push(v);
           return;
-        }
-        if (this.callStack.length > 1) {
-          const w = this.callStack[0].locals.get(instr.name);
-          if (w !== undefined) {
-            this.stack.push(w);
-            return;
-          }
         }
         throw new RuntimeError(`Undefined variable: '${instr.name}'`, instr.loc);
       }
@@ -373,12 +402,7 @@ export class VM {
 
       case 'STORE_VAR': {
         const val = this.pop();
-        let valType: string;
-        if (isStruct(val)) valType = 'struct:' + val.typeName;
-        else if (isUniqueList(val)) valType = `uniqueList:${val.element}`;
-        else if (isList(val)) valType = `list:${val.element}`;
-        else if (isDict(val)) valType = `dict:${val.keyType}:${val.valueType}`;
-        else valType = typeof val as string;
+        const valType = typeCode(valueTypeOf(val));
         let vts = frame.varTypes;
         if (vts === null) {
           vts = new Map();
@@ -400,12 +424,7 @@ export class VM {
 
       case 'STORE_VAR_SLOT': {
         const val = this.pop();
-        let valType: string;
-        if (isStruct(val)) valType = 'struct:' + val.typeName;
-        else if (isUniqueList(val)) valType = `uniqueList:${val.element}`;
-        else if (isList(val)) valType = `list:${val.element}`;
-        else if (isDict(val)) valType = `dict:${val.keyType}:${val.valueType}`;
-        else valType = typeof val as string;
+        const valType = typeCode(valueTypeOf(val));
         let vta = frame.varTypesArr;
         if (vta === null) {
           vta = new Array(frame.localsArr!.length);
@@ -717,25 +736,17 @@ export class VM {
         if (instr.count === 0) {
           throw new RuntimeError('MAKE_LIST with zero elements (use MAKE_EMPTY_LIST)', instr.loc);
         }
-        let elementType: string;
+        let elementType: ChatterType;
         if (instr.elementType !== null) {
           elementType = instr.elementType;
         } else {
-          const first = elems[0];
-          if (isAnyList(first)) {
-            throw new RuntimeError('nested lists not supported', instr.loc);
-          }
-          const code = valueElementCode(first);
-          if (code === null) {
-            throw new RuntimeError('nested lists not supported', instr.loc);
-          }
-          elementType = code;
+          elementType = valueTypeOf(elems[0]);
         }
         for (let i = 0; i < elems.length; i++) {
           const e = elems[i];
-          if (isAnyList(e) || valueElementCode(e) !== elementType) {
+          if (!valueMatchesType(e, elementType)) {
             throw new RuntimeError(
-              `Type mismatch: list element ${i + 1} has type ${describe(e)}, expected ${elementCodeToHuman(elementType)}`,
+              `Type mismatch: list element ${i + 1} has type ${describe(e)}, expected ${typeToString(elementType)}`,
             instr.loc);
           }
         }
@@ -768,25 +779,17 @@ export class VM {
         if (instr.count === 0) {
           throw new RuntimeError('MAKE_UNIQUE_LIST with zero elements (use MAKE_EMPTY_UNIQUE_LIST)', instr.loc);
         }
-        let elementType: string;
+        let elementType: ChatterType;
         if (instr.elementType !== null) {
           elementType = instr.elementType;
         } else {
-          const first = elems[0];
-          if (isAnyList(first)) {
-            throw new RuntimeError('nested lists not supported', instr.loc);
-          }
-          const code = valueElementCode(first);
-          if (code === null) {
-            throw new RuntimeError('nested lists not supported', instr.loc);
-          }
-          elementType = code;
+          elementType = valueTypeOf(elems[0]);
         }
         for (let i = 0; i < elems.length; i++) {
           const e = elems[i];
-          if (isAnyList(e) || valueElementCode(e) !== elementType) {
+          if (!valueMatchesType(e, elementType)) {
             throw new RuntimeError(
-              `Type mismatch: unique list element ${i + 1} has type ${describe(e)}, expected ${elementCodeToHuman(elementType)}`,
+              `Type mismatch: unique list element ${i + 1} has type ${describe(e)}, expected ${typeToString(elementType)}`,
             instr.loc);
           }
         }
@@ -813,9 +816,9 @@ export class VM {
         if (!isUniqueList(list)) {
           throw new RuntimeError(`Type mismatch: 'add' target must be a unique list, got ${describe(list)}`, instr.loc);
         }
-        if (isAnyList(value) || valueElementCode(value) !== list.element) {
+        if (!valueMatchesType(value, list.element)) {
           throw new RuntimeError(
-            `Type mismatch: cannot add ${describe(value)} to unique list of ${elementCodeToHuman(list.element)}`,
+            `Type mismatch: cannot add ${describe(value)} to unique list of ${typeToString(list.element)}`,
           instr.loc);
         }
         const k = canonicalKey(value);
@@ -832,9 +835,9 @@ export class VM {
         if (!isUniqueList(list)) {
           throw new RuntimeError(`Type mismatch: 'remove' target must be a unique list, got ${describe(list)}`, instr.loc);
         }
-        if (isAnyList(value) || valueElementCode(value) !== list.element) {
+        if (!valueMatchesType(value, list.element)) {
           throw new RuntimeError(
-            `Type mismatch: cannot remove ${describe(value)} from unique list of ${elementCodeToHuman(list.element)}`,
+            `Type mismatch: cannot remove ${describe(value)} from unique list of ${typeToString(list.element)}`,
           instr.loc);
         }
         if (list.items.delete(canonicalKey(value))) {
@@ -874,9 +877,9 @@ export class VM {
         if (idx < 1 || idx > list.items.length) {
           throw new RuntimeError(`List index out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
-        if (isAnyList(value) || valueElementCode(value) !== list.element) {
+        if (!valueMatchesType(value, list.element)) {
           throw new RuntimeError(
-            `Type mismatch: cannot assign ${describe(value)} to list of ${elementCodeToHuman(list.element)}`,
+            `Type mismatch: cannot assign ${describe(value)} to list of ${typeToString(list.element)}`,
           instr.loc);
         }
         list.items[idx - 1] = value;
@@ -917,9 +920,9 @@ export class VM {
           break;
         }
         if (isDict(left)) {
-          if (isAnyList(value) || isDict(value) || valueElementCode(value) !== left.keyType) {
+          if (!valueMatchesType(value, left.keyType)) {
             throw new RuntimeError(
-              `Type mismatch: 'contains' key type ${describe(value)} does not match dictionary key type ${elementCodeToHuman(left.keyType)}`,
+              `Type mismatch: 'contains' key type ${describe(value)} does not match dictionary key type ${typeToString(left.keyType)}`,
             instr.loc);
           }
           this.stack.push(left.items.has(canonicalKey(value)));
@@ -928,9 +931,9 @@ export class VM {
         if (!isAnyList(left)) {
           throw new RuntimeError(`Type mismatch: 'contains' requires a list, dictionary, or string on the left, got ${describe(left)}`, instr.loc);
         }
-        if (isAnyList(value) || valueElementCode(value) !== left.element) {
+        if (!valueMatchesType(value, left.element)) {
           throw new RuntimeError(
-            `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${elementCodeToHuman(left.element)}`,
+            `Type mismatch: 'contains' value type ${describe(value)} does not match list element type ${typeToString(left.element)}`,
           instr.loc);
         }
         if (isUniqueList(left)) {
@@ -1022,9 +1025,9 @@ export class VM {
         if (!isList(list)) {
           throw new RuntimeError(`Type mismatch: 'append' target must be a list, got ${describe(list)}`, instr.loc);
         }
-        if (isAnyList(value) || valueElementCode(value) !== list.element) {
+        if (!valueMatchesType(value, list.element)) {
           throw new RuntimeError(
-            `Type mismatch: cannot append ${describe(value)} to list of ${elementCodeToHuman(list.element)}`,
+            `Type mismatch: cannot append ${describe(value)} to list of ${typeToString(list.element)}`,
           instr.loc);
         }
         list.items.push(value);
@@ -1037,9 +1040,9 @@ export class VM {
         if (!isList(list)) {
           throw new RuntimeError(`Type mismatch: 'prepend' target must be a list, got ${describe(list)}`, instr.loc);
         }
-        if (isAnyList(value) || valueElementCode(value) !== list.element) {
+        if (!valueMatchesType(value, list.element)) {
           throw new RuntimeError(
-            `Type mismatch: cannot prepend ${describe(value)} to list of ${elementCodeToHuman(list.element)}`,
+            `Type mismatch: cannot prepend ${describe(value)} to list of ${typeToString(list.element)}`,
           instr.loc);
         }
         list.items.unshift(value);
@@ -1059,9 +1062,9 @@ export class VM {
         if (idx < 1 || idx > list.items.length + 1) {
           throw new RuntimeError(`List insert position out of range: ${idx} (list has ${list.items.length} items)`, instr.loc);
         }
-        if (isAnyList(value) || valueElementCode(value) !== list.element) {
+        if (!valueMatchesType(value, list.element)) {
           throw new RuntimeError(
-            `Type mismatch: cannot insert ${describe(value)} into list of ${elementCodeToHuman(list.element)}`,
+            `Type mismatch: cannot insert ${describe(value)} into list of ${typeToString(list.element)}`,
           instr.loc);
         }
         list.items.splice(idx - 1, 0, value);
@@ -1098,8 +1101,8 @@ export class VM {
           if (keys.items.length !== list.items.length) {
             throw new RuntimeError(`internal sort error: keys length mismatch`, instr.loc);
           }
-          if (keys.element !== 'number' && keys.element !== 'string' && keys.element !== 'boolean') {
-            throw new RuntimeError(`'sort by KEY' keys must be number, string, or boolean, got ${keys.element}`, instr.loc);
+          if (!(keys.element.kind === 'scalar' && (keys.element.name === 'number' || keys.element.name === 'string' || keys.element.name === 'boolean'))) {
+            throw new RuntimeError(`'sort by KEY' keys must be number, string, or boolean, got ${typeToString(keys.element)}`, instr.loc);
           }
           // Build paired indices and stable-sort.
           const n = list.items.length;
@@ -1124,8 +1127,8 @@ export class VM {
           if (!isList(list)) {
             throw new RuntimeError(`Type mismatch: 'sort' target must be a list, got ${describe(list)}`, instr.loc);
           }
-          if (list.element !== 'number' && list.element !== 'string' && list.element !== 'boolean') {
-            throw new RuntimeError(`'sort' without 'by KEY' requires a list of number, string, or boolean, got list of ${list.element}`, instr.loc);
+          if (!(list.element.kind === 'scalar' && (list.element.name === 'number' || list.element.name === 'string' || list.element.name === 'boolean'))) {
+            throw new RuntimeError(`'sort' without 'by KEY' requires a list of number, string, or boolean, got list of ${typeToString(list.element)}`, instr.loc);
           }
           const items = list.items;
           // Decorate with original index for stability.
@@ -1166,7 +1169,7 @@ export class VM {
         if (content.endsWith('\r\n')) content = content.slice(0, -2);
         else if (content.endsWith('\n')) content = content.slice(0, -1);
         const items = content.length === 0 ? [] : content.split(/\r\n|\n/);
-        const list: ChatterList = { kind: 'list', element: 'string', items };
+        const list: ChatterList = { kind: 'list', element: STRING_TYPE, items };
         this.stack.push(list);
         break;
       }
@@ -1175,7 +1178,7 @@ export class VM {
         // Fresh mutable list of string each call — mutating the returned
         // list never affects subsequent `args` calls.
         const items: ChatterValue[] = (this.program.args ?? []).slice();
-        const list: ChatterList = { kind: 'list', element: 'string', items };
+        const list: ChatterList = { kind: 'list', element: STRING_TYPE, items };
         this.stack.push(list);
         break;
       }
@@ -1279,14 +1282,14 @@ export class VM {
         }
         const items = new Map<string, { key: ChatterValue; value: ChatterValue }>();
         for (const e of entries) {
-          if (isAnyList(e.key) || isDict(e.key) || valueElementCode(e.key) !== instr.keyType) {
+          if (!valueMatchesType(e.key, instr.keyType)) {
             throw new RuntimeError(
-              `Type mismatch: dictionary key has type ${describe(e.key)}, expected ${elementCodeToHuman(instr.keyType)}`,
+              `Type mismatch: dictionary key has type ${describe(e.key)}, expected ${typeToString(instr.keyType)}`,
             instr.loc);
           }
-          if (isAnyList(e.value) || isDict(e.value) || valueElementCode(e.value) !== instr.valueType) {
+          if (!valueMatchesType(e.value, instr.valueType)) {
             throw new RuntimeError(
-              `Type mismatch: dictionary value has type ${describe(e.value)}, expected ${elementCodeToHuman(instr.valueType)}`,
+              `Type mismatch: dictionary value has type ${describe(e.value)}, expected ${typeToString(instr.valueType)}`,
             instr.loc);
           }
           items.set(canonicalKey(e.key), e);
@@ -1308,9 +1311,9 @@ export class VM {
         if (!isDict(dict)) {
           throw new RuntimeError(`Type mismatch: 'value of K in X' requires a dictionary, got ${describe(dict)}`, instr.loc);
         }
-        if (isAnyList(key) || isDict(key) || valueElementCode(key) !== dict.keyType) {
+        if (!valueMatchesType(key, dict.keyType)) {
           throw new RuntimeError(
-            `Type mismatch: dictionary key has type ${describe(key)}, expected ${elementCodeToHuman(dict.keyType)}`,
+            `Type mismatch: dictionary key has type ${describe(key)}, expected ${typeToString(dict.keyType)}`,
           instr.loc);
         }
         const entry = dict.items.get(canonicalKey(key));
@@ -1328,14 +1331,14 @@ export class VM {
         if (!isDict(dict)) {
           throw new RuntimeError(`Type mismatch: 'change value of K in X' requires a dictionary, got ${describe(dict)}`, instr.loc);
         }
-        if (isAnyList(key) || isDict(key) || valueElementCode(key) !== dict.keyType) {
+        if (!valueMatchesType(key, dict.keyType)) {
           throw new RuntimeError(
-            `Type mismatch: dictionary key has type ${describe(key)}, expected ${elementCodeToHuman(dict.keyType)}`,
+            `Type mismatch: dictionary key has type ${describe(key)}, expected ${typeToString(dict.keyType)}`,
           instr.loc);
         }
-        if (isAnyList(value) || isDict(value) || valueElementCode(value) !== dict.valueType) {
+        if (!valueMatchesType(value, dict.valueType)) {
           throw new RuntimeError(
-            `Type mismatch: dictionary value has type ${describe(value)}, expected ${elementCodeToHuman(dict.valueType)}`,
+            `Type mismatch: dictionary value has type ${describe(value)}, expected ${typeToString(dict.valueType)}`,
           instr.loc);
         }
         dict.items.set(canonicalKey(key), { key, value });
@@ -1348,9 +1351,9 @@ export class VM {
         if (!isDict(dict)) {
           throw new RuntimeError(`Type mismatch: 'remove K from X' requires a dictionary, got ${describe(dict)}`, instr.loc);
         }
-        if (isAnyList(key) || isDict(key) || valueElementCode(key) !== dict.keyType) {
+        if (!valueMatchesType(key, dict.keyType)) {
           throw new RuntimeError(
-            `Type mismatch: dictionary key has type ${describe(key)}, expected ${elementCodeToHuman(dict.keyType)}`,
+            `Type mismatch: dictionary key has type ${describe(key)}, expected ${typeToString(dict.keyType)}`,
           instr.loc);
         }
         dict.items.delete(canonicalKey(key));
@@ -1473,15 +1476,26 @@ export class VM {
         loc,
       );
     }
+
+    if (isList(a) && isList(b)) {
+      if (!typesEqual(a.element, b.element)) return false;
+      if (a.items.length !== b.items.length) return false;
+      for (let i = 0; i < a.items.length; i++) {
+        if (!this.aggregateEquals(a.items[i], b.items[i], loc)) return false;
+      }
+      return true;
+    }
+
     // unique-list <-> unique-list: order-independent set equality via canonical keys.
     if (isUniqueList(a) && isUniqueList(b)) {
-      if (a.element !== b.element) return false;
+      if (!typesEqual(a.element, b.element)) return false;
       if (a.items.size !== b.items.size) return false;
       for (const k of a.items.keys()) {
         if (!b.items.has(k)) return false;
       }
       return true;
     }
+
     // unique-list <-> list (either direction): same element type, same length, same order
     // (insertion order, as preserved by the unique list's backing Map).
     if ((isUniqueList(a) && isList(b)) || (isList(a) && isUniqueList(b))) {
@@ -1489,17 +1503,32 @@ export class VM {
       const ub = isUniqueList(b) ? uniqueListValues(b) : (b as ChatterList).items;
       const aElem = (a as ChatterList | ChatterUniqueList).element;
       const bElem = (b as ChatterList | ChatterUniqueList).element;
-      if (aElem !== bElem) return false;
+      if (!typesEqual(aElem, bElem)) return false;
       if (ua.length !== ub.length) return false;
       for (let i = 0; i < ua.length; i++) {
         if (!this.aggregateEquals(ua[i], ub[i], loc)) return false;
       }
       return true;
     }
-    // list <-> list: existing reference equality.
-    if (isList(a) && isList(b)) {
-      return a === b;
+
+    if (isDict(a) && isDict(b)) {
+      if (!typesEqual(a.keyType, b.keyType) || !typesEqual(a.valueType, b.valueType)) return false;
+      if (a.items.size !== b.items.size) return false;
+      for (const [k, entryA] of a.items) {
+        const entryB = b.items.get(k);
+        if (entryB === undefined) return false;
+        if (!this.aggregateEquals(entryA.value, entryB.value, loc)) return false;
+      }
+      return true;
     }
+
+    if (isAnyList(a) || isAnyList(b) || isDict(a) || isDict(b)) {
+      throw new RuntimeError(
+        `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
+        loc,
+      );
+    }
+
     if (typeof a !== typeof b) {
       throw new RuntimeError(
         `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
@@ -1508,4 +1537,5 @@ export class VM {
     }
     return a === b;
   }
+
 }

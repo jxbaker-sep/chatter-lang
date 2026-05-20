@@ -8,7 +8,7 @@ import {
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
   DictionaryLiteral, DictGetExpression, DictSetStatement,
-  TypeAnnotation, ScalarTypeName, ElementTypeAnnotation,
+  TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
   ListSliceExpression,
@@ -24,6 +24,8 @@ import {
 } from './ast';
 import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
 import { ChatterError, SourceLocation } from './errors';
+import { ChatterType, typesEqual, typeToString, unmangleTypeName } from './types';
+export type { ChatterType } from './types';
 
 export class CompileError extends ChatterError {
   constructor(message: string, location?: SourceLocation) {
@@ -55,56 +57,10 @@ function containsEndSentinel(expr: Expression | null | undefined): boolean {
   }
 }
 
-export type ChatterType =
-  | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: string }       // element string-encoded
-  | { kind: 'uniqueList'; element: string }
-  | { kind: 'dict'; keyType: string; valueType: string }
-  | { kind: 'struct'; mangled: string };
+const elementHuman = typeToString;
 
-function unmangle(s: string): string {
-  const idx = s.indexOf('::');
-  return idx === -1 ? s : s.slice(idx + 2);
-}
-
-function elementHuman(code: string): string {
-  if (code.startsWith('struct:')) return 'struct ' + unmangle(code.slice(7));
-  return code;
-}
-
-function typesEqual(a: ChatterType, b: ChatterType): boolean {
-  if (a.kind !== b.kind) return false;
-  if (a.kind === 'scalar' && b.kind === 'scalar') return a.name === b.name;
-  if (a.kind === 'list' && b.kind === 'list') {
-    return a.element === b.element;
-  }
-  if (a.kind === 'uniqueList' && b.kind === 'uniqueList') {
-    return a.element === b.element;
-  }
-  if (a.kind === 'dict' && b.kind === 'dict') {
-    return a.keyType === b.keyType && a.valueType === b.valueType;
-  }
-  if (a.kind === 'struct' && b.kind === 'struct') {
-    return a.mangled === b.mangled;
-  }
-  return false;
-}
-
-function typeToString(t: ChatterType): string {
-  if (t.kind === 'scalar') return t.name;
-  if (t.kind === 'struct') return 'struct ' + unmangle(t.mangled);
-  if (t.kind === 'uniqueList') return 'unique list of ' + elementHuman(t.element);
-  if (t.kind === 'dict') {
-    return 'dictionary from ' + elementHuman(t.keyType) + ' to ' + elementHuman(t.valueType);
-  }
-  return 'list of ' + elementHuman(t.element);
-}
-
-function elementCode(t: ChatterType | null): string | null {
-  if (t === null) return null;
-  if (t.kind === 'scalar') return t.name;
-  if (t.kind === 'struct') return 'struct:' + t.mangled;
-  return null;
+function elementCode(t: ChatterType | null): ChatterType | null {
+  return t;
 }
 
 interface StructInfo {
@@ -385,8 +341,6 @@ export class Compiler {
       const ali = this.aliases.get(a.name);
       if (ali) {
         if (ali.resolved) return ali.resolved;
-        // Should be pre-resolved; fall back to on-demand resolution (e.g.,
-        // when fromAnnotation is reached during alias resolution itself).
         return this.resolveLocalAlias(a.name, [], loc);
       }
       const info = this.structs.get(a.name);
@@ -396,39 +350,20 @@ export class Compiler {
       return { kind: 'struct', mangled: info.mangled };
     }
     if (a.kind === 'dict') {
-      const kCode = this.elementAnnotationToCode(a.keyType, loc);
-      const vCode = this.elementAnnotationToCode(a.valueType, loc);
-      return { kind: 'dict', keyType: kCode, valueType: vCode };
+      return {
+        kind: 'dict',
+        keyType: this.fromAnnotation(a.keyType, loc),
+        valueType: this.fromAnnotation(a.valueType, loc),
+      };
     }
-    // list/uniqueList
-    const elem = a.element;
-    const elemCode = this.elementAnnotationToCode(elem, loc);
     if (a.kind === 'uniqueList') {
-      return { kind: 'uniqueList', element: elemCode };
+      return { kind: 'uniqueList', element: this.fromAnnotation(a.element, loc) };
     }
-    return { kind: 'list', element: elemCode };
+    return { kind: 'list', element: this.fromAnnotation(a.element, loc) };
   }
 
-  private elementAnnotationToCode(e: ElementTypeAnnotation, loc?: SourceLocation): string {
-    if (e.kind === 'scalar') return e.name;
-    // Bare IDENT in element position: try alias first, then struct.
-    const ali = this.aliases.get(e.name);
-    if (ali) {
-      const t = ali.resolved ?? this.resolveLocalAlias(e.name, [], loc);
-      if (t.kind === 'list' || t.kind === 'uniqueList' || t.kind === 'dict') {
-        throw new CompileError(
-          `nested collections not supported (alias '${e.name}' expands to ${typeToString(t)})`,
-          loc ?? this.currentLoc,
-        );
-      }
-      if (t.kind === 'scalar') return t.name;
-      return 'struct:' + t.mangled;
-    }
-    const info = this.structs.get(e.name);
-    if (!info) {
-      throw new CompileError(`unknown type '${e.name}'`, loc ?? this.currentLoc);
-    }
-    return 'struct:' + info.mangled;
+  private elementAnnotationToCode(e: TypeAnnotation, loc?: SourceLocation): ChatterType {
+    return this.fromAnnotation(e, loc);
   }
 
   // Resolve a local alias to a ChatterType, walking through alias-of-alias
@@ -464,7 +399,6 @@ export class Compiler {
     if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
     if (a.kind === 'struct') {
       const name = a.name;
-      // Reject imported names (function, struct, or alias).
       if (
         this.imports.has(name) ||
         (this.structs.get(name)?.imported === true) ||
@@ -483,44 +417,16 @@ export class Compiler {
       return { kind: 'struct', mangled: info.mangled };
     }
     if (a.kind === 'dict') {
-      const kCode = this.expandAliasElement(a.keyType, chain, loc);
-      const vCode = this.expandAliasElement(a.valueType, chain, loc);
-      return { kind: 'dict', keyType: kCode, valueType: vCode };
+      return {
+        kind: 'dict',
+        keyType: this.expandAliasBody(a.keyType, chain, loc),
+        valueType: this.expandAliasBody(a.valueType, chain, loc),
+      };
     }
-    const elemCode = this.expandAliasElement(a.element, chain, loc);
-    if (a.kind === 'uniqueList') return { kind: 'uniqueList', element: elemCode };
-    return { kind: 'list', element: elemCode };
-  }
-
-  private expandAliasElement(e: ElementTypeAnnotation, chain: string[], loc?: SourceLocation): string {
-    if (e.kind === 'scalar') return e.name;
-    const name = e.name;
-    if (
-      this.imports.has(name) ||
-      (this.structs.get(name)?.imported === true) ||
-      (this.aliases.get(name)?.imported === true)
-    ) {
-      throw new CompileError(
-        `aliasing imported names is not supported in v1`,
-        loc ?? this.currentLoc,
-      );
+    if (a.kind === 'uniqueList') {
+      return { kind: 'uniqueList', element: this.expandAliasBody(a.element, chain, loc) };
     }
-    if (this.aliases.has(name)) {
-      const t = this.resolveLocalAlias(name, chain, loc);
-      if (t.kind === 'list' || t.kind === 'uniqueList' || t.kind === 'dict') {
-        throw new CompileError(
-          `nested collections not supported (alias '${name}' expands to ${typeToString(t)})`,
-          loc ?? this.currentLoc,
-        );
-      }
-      if (t.kind === 'scalar') return t.name;
-      return 'struct:' + t.mangled;
-    }
-    const info = this.structs.get(name);
-    if (!info) {
-      throw new CompileError(`unknown type '${name}'`, loc ?? this.currentLoc);
-    }
-    return 'struct:' + info.mangled;
+    return { kind: 'list', element: this.expandAliasBody(a.element, chain, loc) };
   }
 
   compile(program: Program): BytecodeProgram {
@@ -643,10 +549,10 @@ export class Compiler {
         if (c === BLACK) return;
         if (c === GRAY) {
           // cycle
-          const startIdx = friendlyChain.lastIndexOf(unmangle(mangled));
+          const startIdx = friendlyChain.lastIndexOf(unmangleTypeName(mangled));
           const cycle = startIdx >= 0
-            ? friendlyChain.slice(startIdx).concat(unmangle(mangled))
-            : friendlyChain.concat(unmangle(mangled));
+            ? friendlyChain.slice(startIdx).concat(unmangleTypeName(mangled))
+            : friendlyChain.concat(unmangleTypeName(mangled));
           throw new CompileError(
             `circular struct: ${cycle.join(' → ')}`,
           );
@@ -658,15 +564,19 @@ export class Compiler {
         }
         if (!local) { color.set(mangled, BLACK); return; }
         color.set(mangled, GRAY);
-        stack.push(unmangle(mangled));
-        for (const f of local.fields) {
-          let next: string | null = null;
-          if (f.type.kind === 'struct') next = f.type.mangled;
-          else if ((f.type.kind === 'list' || f.type.kind === 'uniqueList')
-                   && f.type.element.startsWith('struct:')) {
-            next = f.type.element.slice(7);
+        stack.push(unmangleTypeName(mangled));
+        const collectStructRefs = (t: ChatterType, out: string[]): void => {
+          if (t.kind === 'struct') out.push(t.mangled);
+          else if (t.kind === 'list' || t.kind === 'uniqueList') collectStructRefs(t.element, out);
+          else if (t.kind === 'dict') {
+            collectStructRefs(t.keyType, out);
+            collectStructRefs(t.valueType, out);
           }
-          if (next !== null) dfs(next, stack.slice());
+        };
+        for (const f of local.fields) {
+          const refs: string[] = [];
+          collectStructRefs(f.type, refs);
+          for (const next of refs) dfs(next, stack.slice());
         }
         stack.pop();
         color.set(mangled, BLACK);
@@ -1284,7 +1194,7 @@ export class Compiler {
     } else {
       const rhs = this.staticType(stmt.value, bindings);
       const rc = elementCode(rhs);
-      if (rc !== null && rc !== info.type.element) {
+      if (rc !== null && !typesEqual(rc, info.type.element)) {
         throw new CompileError(
           `Type mismatch: cannot assign ${elementHuman(rc)} to list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
@@ -1344,14 +1254,9 @@ export class Compiler {
     if (listType && listType.kind === 'list') {
       const rhs = this.staticType(value, bindings);
       const rc = elementCode(rhs);
-      if (rc !== null && rc !== listType.element) {
+      if (rc !== null && !typesEqual(rc, listType.element)) {
         throw new CompileError(
           `Type mismatch: cannot ${op} ${elementHuman(rc)} to list of ${elementHuman(listType.element)}`,
-        this.currentLoc);
-      }
-      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList')) {
-        throw new CompileError(
-          `Type mismatch: cannot ${op} a list value to list of ${elementHuman(listType.element)}`,
         this.currentLoc);
       }
     }
@@ -1426,7 +1331,7 @@ export class Compiler {
       if (info.type.kind === 'dict') {
         const rhs = this.staticType(stmt.value, bindings);
         const rc = elementCode(rhs);
-        if (rc !== null && rc !== info.type.keyType) {
+        if (rc !== null && !typesEqual(rc, info.type.keyType)) {
           throw new CompileError(
             `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(rc)}`,
           this.currentLoc);
@@ -1444,14 +1349,9 @@ export class Compiler {
       // Element-type check.
       const rhs = this.staticType(stmt.value, bindings);
       const rc = elementCode(rhs);
-      if (rc !== null && rc !== info.type.element) {
+      if (rc !== null && !typesEqual(rc, info.type.element)) {
         throw new CompileError(
           `Type mismatch: cannot remove ${elementHuman(rc)} from unique list of ${elementHuman(info.type.element)}`,
-        this.currentLoc);
-      }
-      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList' || rhs.kind === 'dict')) {
-        throw new CompileError(
-          `Type mismatch: cannot remove ${typeToString(rhs)} from unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
     }
@@ -1488,14 +1388,9 @@ export class Compiler {
     if (stmt.op === 'add' && info.type && info.type.kind === 'uniqueList') {
       const rhs = this.staticType(stmt.value, bindings);
       const rc = elementCode(rhs);
-      if (rc !== null && rc !== info.type.element) {
+      if (rc !== null && !typesEqual(rc, info.type.element)) {
         throw new CompileError(
           `Type mismatch: cannot add ${elementHuman(rc)} to unique list of ${elementHuman(info.type.element)}`,
-        this.currentLoc);
-      }
-      if (rhs && (rhs.kind === 'list' || rhs.kind === 'uniqueList')) {
-        throw new CompileError(
-          `Type mismatch: cannot add ${typeToString(rhs)} to unique list of ${elementHuman(info.type.element)}`,
         this.currentLoc);
       }
       this.emit(out, { op: 'LOAD', name: info.mangled });
@@ -1565,7 +1460,7 @@ export class Compiler {
         `Cannot ${stmt.op} item of '${target.listName}': not a list (type ${typeToString(info.type)})`,
       this.currentLoc);
     }
-    if (info.type && info.type.kind === 'list' && info.type.element !== 'number') {
+    if (info.type && info.type.kind === 'list' && !(info.type.element.kind === 'scalar' && info.type.element.name === 'number')) {
       throw new CompileError(
         `Cannot ${stmt.op} item of '${target.listName}': its element type is ${elementHuman(info.type.element)}, not number`,
       this.currentLoc);
@@ -1621,14 +1516,14 @@ export class Compiler {
           `Cannot ${stmt.op} value in '${target.dictName}': not a dictionary (type ${typeToString(info.type)})`,
         this.currentLoc);
       }
-      if (info.type.valueType !== 'number') {
+      if (!(info.type.valueType.kind === 'scalar' && info.type.valueType.name === 'number')) {
         throw new CompileError(
           `Cannot ${stmt.op} value in '${target.dictName}': its value type is ${elementHuman(info.type.valueType)}, not number`,
         this.currentLoc);
       }
       const kt = this.staticType(target.key, bindings);
       const kc = elementCode(kt);
-      if (kc !== null && kc !== info.type.keyType) {
+      if (kc !== null && !typesEqual(kc, info.type.keyType)) {
         throw new CompileError(
           `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(kc)}`,
         this.currentLoc);
@@ -1770,38 +1665,10 @@ export class Compiler {
         const paramType = sig[i].type;
         const argType = this.staticType(argExpr, bindings);
         if (argType !== null) {
-          // Aggregate kind matching: kinds must match exactly between list / unique list / scalar.
-          if (paramType.kind !== argType.kind) {
+          if (!typesEqual(paramType, argType)) {
             throw new CompileError(
               `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
             this.currentLoc);
-          }
-          if (paramType.kind === 'list' && argType.kind === 'list') {
-            if (argType.element !== paramType.element) {
-              throw new CompileError(
-                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
-              this.currentLoc);
-            }
-          } else if (paramType.kind === 'uniqueList' && argType.kind === 'uniqueList') {
-            if (argType.element !== paramType.element) {
-              throw new CompileError(
-                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
-              this.currentLoc);
-            }
-          } else if (paramType.kind === 'dict' && argType.kind === 'dict') {
-            if (argType.keyType !== paramType.keyType || argType.valueType !== paramType.valueType) {
-              throw new CompileError(
-                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
-              this.currentLoc);
-            }
-          } else if (paramType.kind === 'struct' && argType.kind === 'struct') {
-            if (paramType.mangled !== argType.mangled) {
-              throw new CompileError(
-                `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
-              this.currentLoc);
-            }
-          } else if (paramType.kind === 'scalar' && argType.kind === 'scalar') {
-            // Scalar kinds match — element-name check delegated to existing runtime / future static.
           }
         }
         this.compileExpr(argExpr, out, bindings);
@@ -2069,9 +1936,7 @@ export class Compiler {
             `'repeat with x in ...' requires a list or unique list, got ${typeToString(lt)}`,
           this.currentLoc);
         }
-        elemType = lt.element.startsWith('struct:')
-          ? { kind: 'struct', mangled: lt.element.slice(7) }
-          : { kind: 'scalar', name: lt.element as ScalarTypeName };
+        elemType = lt.element;
       }
 
       const listTmp = this.freshName('list');
@@ -2209,36 +2074,10 @@ export class Compiler {
     }
     const st = this.staticType(stmt.value, bindings);
     if (st !== null) {
-      if (st.kind !== rt.kind) {
+      if (!typesEqual(rt, st)) {
         throw new CompileError(
           `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
         this.currentLoc);
-      }
-      if (rt.kind === 'scalar' && st.kind === 'scalar' && rt.name !== st.name) {
-        throw new CompileError(
-          `Type mismatch: function '${this.currentFuncName}' declared to return ${rt.name}, but return expression has type ${st.name}`,
-        this.currentLoc);
-      }
-      if (rt.kind === 'list' && st.kind === 'list') {
-        if (rt.element !== st.element) {
-          throw new CompileError(
-            `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
-          this.currentLoc);
-        }
-      }
-      if (rt.kind === 'uniqueList' && st.kind === 'uniqueList') {
-        if (rt.element !== st.element) {
-          throw new CompileError(
-            `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
-          this.currentLoc);
-        }
-      }
-      if (rt.kind === 'dict' && st.kind === 'dict') {
-        if (rt.keyType !== st.keyType || rt.valueType !== st.valueType) {
-          throw new CompileError(
-            `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
-          this.currentLoc);
-        }
       }
     }
     this.compileExpr(stmt.value, out, bindings);
@@ -2694,7 +2533,7 @@ export class Compiler {
           for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }
           if (info && !info.fields.find(d => d.name === expr.fieldName)) {
             throw new CompileError(
-              `struct '${unmangle(tt.mangled)}' has no field '${expr.fieldName}'`,
+              `struct '${unmangleTypeName(tt.mangled)}' has no field '${expr.fieldName}'`,
             this.currentLoc);
           }
         }
@@ -2725,7 +2564,7 @@ export class Compiler {
             const decl = info.fields.find(d => d.name === u.name);
             if (!decl) {
               throw new CompileError(
-                `struct '${unmangle(info.mangled)}' has no field '${u.name}'`,
+                `struct '${unmangleTypeName(info.mangled)}' has no field '${u.name}'`,
               this.currentLoc);
             }
             const vt = this.staticType(u.value, bindings);
@@ -2760,8 +2599,7 @@ export class Compiler {
   // Helper: extract the element type of a list/uniqueList ChatterType as a ChatterType.
   private listElementType(lt: ChatterType | null): ChatterType | undefined {
     if (!lt || (lt.kind !== 'list' && lt.kind !== 'uniqueList')) return undefined;
-    if (lt.element.startsWith('struct:')) return { kind: 'struct', mangled: lt.element.slice(7) };
-    return { kind: 'scalar', name: lt.element as ScalarTypeName };
+    return lt.element;
   }
 
   // Push HOF body context (set inHofBody=true so nested HOFs are detected).
@@ -2855,7 +2693,7 @@ export class Compiler {
     // Plain `sort xs [ascending|descending]` (single key, no `by`).
     if (stmt.keys.length === 1 && stmt.keys[0].key === undefined) {
       if (lt && lt.kind === 'list') {
-        if (lt.element !== 'number' && lt.element !== 'string' && lt.element !== 'boolean') {
+        if (!(lt.element.kind === 'scalar' && (lt.element.name === 'number' || lt.element.name === 'string' || lt.element.name === 'boolean'))) {
           throw new CompileError(
             `'sort' without 'by KEY' requires a list of number, string, or boolean, got ${typeToString(lt)}`,
           this.currentLoc);
@@ -2903,7 +2741,7 @@ export class Compiler {
       try {
         keyType = this.withHofBody(() => this.staticType(onlyKey.key!, bindings))!;
       } finally { this.hofItStack.pop(); }
-      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: (keyType as { kind: 'scalar'; name: string }).name });
+      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: keyType });
       this.emit(out, { op: 'STORE', name: keysTmp });
       const tmps = this.compileHofLoop(stmt.list, elemType, out, bindings, () => {
         this.emit(out, { op: 'LOAD', name: keysTmp });
@@ -2937,7 +2775,7 @@ export class Compiler {
       } finally { this.hofItStack.pop(); }
 
       const keysTmp = this.freshName('hof_keys');
-      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: (keyType as { kind: 'scalar'; name: string }).name });
+      this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: keyType });
       this.emit(out, { op: 'STORE', name: keysTmp });
 
       // Iterate the (possibly reordered) sharedListTmp without re-compiling
@@ -3022,12 +2860,7 @@ export class Compiler {
         `cannot determine static type of 'map' body; consider using a typed function call or annotating the source list`,
       this.currentLoc);
     }
-    if (resultElemType.kind !== 'scalar' && resultElemType.kind !== 'struct') {
-      throw new CompileError(
-        `'map' body must produce a number, string, boolean, or struct, got ${typeToString(resultElemType)}`,
-      this.currentLoc);
-    }
-    const resCode = elementCode(resultElemType)!;
+    const resCode = resultElemType;
     const resTmp = this.freshName('hof_res');
 
     this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: resCode });
@@ -3078,7 +2911,7 @@ export class Compiler {
 
     // Result element type is source list element type; if unknown statically,
     // defer to runtime via MAKE_EMPTY_LIST_LIKE on the source list.
-    let resCode: string | null = null;
+    let resCode: ChatterType | null = null;
     if (lt && (lt.kind === 'list' || lt.kind === 'uniqueList')) {
       resCode = lt.element;
     }
@@ -3183,17 +3016,14 @@ export class Compiler {
       return;
     }
     // Infer key + value types from entries.
-    let kInferred: string | null = null;
-    let vInferred: string | null = null;
+    let kInferred: ChatterType | null = null;
+    let vInferred: ChatterType | null = null;
     for (const e of expr.entries) {
       const kt = this.staticType(e.key, bindings);
       if (kt) {
-        const c = elementCode(kt);
-        if (c === null) {
-          throw new CompileError(`nested collections not supported in dictionary key`, this.currentLoc);
-        }
+        const c = kt;
         if (kInferred === null) kInferred = c;
-        else if (kInferred !== c) {
+        else if (!typesEqual(kInferred, c)) {
           throw new CompileError(
             `Type mismatch in dictionary literal: mixed key types (${elementHuman(kInferred)} and ${elementHuman(c)})`,
           this.currentLoc);
@@ -3201,12 +3031,9 @@ export class Compiler {
       }
       const vt = this.staticType(e.value, bindings);
       if (vt) {
-        const c = elementCode(vt);
-        if (c === null) {
-          throw new CompileError(`nested collections not supported in dictionary value`, this.currentLoc);
-        }
+        const c = vt;
         if (vInferred === null) vInferred = c;
-        else if (vInferred !== c) {
+        else if (!typesEqual(vInferred, c)) {
           throw new CompileError(
             `Type mismatch in dictionary literal: mixed value types (${elementHuman(vInferred)} and ${elementHuman(c)})`,
           this.currentLoc);
@@ -3244,7 +3071,7 @@ export class Compiler {
     if (dt && dt.kind === 'dict') {
       const kt = this.staticType(expr.key, bindings);
       const kc = elementCode(kt);
-      if (kc !== null && kc !== dt.keyType) {
+      if (kc !== null && !typesEqual(kc, dt.keyType)) {
         throw new CompileError(
           `Type mismatch: dictionary key has type ${elementHuman(dt.keyType)}, got ${elementHuman(kc)}`,
         this.currentLoc);
@@ -3275,14 +3102,14 @@ export class Compiler {
       }
       const kt = this.staticType(stmt.key, bindings);
       const kc = elementCode(kt);
-      if (kc !== null && kc !== info.type.keyType) {
+      if (kc !== null && !typesEqual(kc, info.type.keyType)) {
         throw new CompileError(
           `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(kc)}`,
         this.currentLoc);
       }
       const vt = this.staticType(stmt.value, bindings);
       const vc = elementCode(vt);
-      if (vc !== null && vc !== info.type.valueType) {
+      if (vc !== null && !typesEqual(vc, info.type.valueType)) {
         throw new CompileError(
           `Type mismatch: dictionary value has type ${elementHuman(info.type.valueType)}, got ${elementHuman(vc)}`,
         this.currentLoc);
@@ -3303,17 +3130,14 @@ export class Compiler {
       this.emit(out, { op: 'MAKE_EMPTY_UNIQUE_LIST', elementType: this.elementAnnotationToCode(expr.elementType!) });
       return;
     }
-    let inferred: string | null = null;
+    let inferred: ChatterType | null = null;
     let allKnown = true;
     for (const e of expr.elements) {
       const t = this.staticType(e, bindings);
       if (t === null) { allKnown = false; continue; }
-      const c = elementCode(t);
-      if (c === null) {
-        throw new CompileError(`nested lists not supported`, this.currentLoc);
-      }
+      const c = t;
       if (inferred === null) inferred = c;
-      else if (inferred !== c) {
+      else if (!typesEqual(inferred, c)) {
         throw new CompileError(
           `Type mismatch in unique list literal: mixed element types (${elementHuman(inferred)} and ${elementHuman(c)})`,
         this.currentLoc);
@@ -3338,17 +3162,14 @@ export class Compiler {
       this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: this.elementAnnotationToCode(expr.elementType!) });
       return;
     }
-    let inferred: string | null = null;
+    let inferred: ChatterType | null = null;
     let allKnown = true;
     for (const e of expr.elements) {
       const t = this.staticType(e, bindings);
       if (t === null) { allKnown = false; continue; }
-      const c = elementCode(t);
-      if (c === null) {
-        throw new CompileError(`nested lists not supported`, this.currentLoc);
-      }
+      const c = t;
       if (inferred === null) inferred = c;
-      else if (inferred !== c) {
+      else if (!typesEqual(inferred, c)) {
         throw new CompileError(
           `Type mismatch in list literal: mixed element types (${elementHuman(inferred)} and ${elementHuman(c)})`,
         this.currentLoc);
@@ -3385,27 +3206,17 @@ export class Compiler {
       } else if (lt !== null && (lt.kind === 'list' || lt.kind === 'uniqueList')) {
         const rt = this.staticType(expr.right, bindings);
         const rc = elementCode(rt);
-        if (rc !== null && rc !== lt.element) {
+        if (rc !== null && !typesEqual(rc, lt.element)) {
           throw new CompileError(
             `Type mismatch: 'contains' value type ${elementHuman(rc)} does not match list element type ${elementHuman(lt.element)}`,
-          this.currentLoc);
-        }
-        if (rt && (rt.kind === 'list' || rt.kind === 'uniqueList' || rt.kind === 'dict')) {
-          throw new CompileError(
-            `Type mismatch: 'contains' value cannot be a list or dictionary`,
           this.currentLoc);
         }
       } else if (lt !== null && lt.kind === 'dict') {
         const rt = this.staticType(expr.right, bindings);
         const rc = elementCode(rt);
-        if (rc !== null && rc !== lt.keyType) {
+        if (rc !== null && !typesEqual(rc, lt.keyType)) {
           throw new CompileError(
             `Type mismatch: 'contains' key type ${elementHuman(rc)} does not match dictionary key type ${elementHuman(lt.keyType)}`,
-          this.currentLoc);
-        }
-        if (rt && (rt.kind === 'list' || rt.kind === 'uniqueList' || rt.kind === 'dict')) {
-          throw new CompileError(
-            `Type mismatch: 'contains' value cannot be a list or dictionary`,
           this.currentLoc);
         }
       }
@@ -3453,12 +3264,8 @@ export class Compiler {
     } else if (isEq) {
       if (lt && rt) {
         const compatible =
-          (lt.kind === 'scalar' && rt.kind === 'scalar' && lt.name === rt.name) ||
-          (lt.kind === 'list' && rt.kind === 'list' && lt.element === rt.element) ||
-          (lt.kind === 'uniqueList' && rt.kind === 'uniqueList' && lt.element === rt.element) ||
-          (lt.kind === 'list' && rt.kind === 'uniqueList' && lt.element === rt.element) ||
-          (lt.kind === 'uniqueList' && rt.kind === 'list' && lt.element === rt.element) ||
-          (lt.kind === 'struct' && rt.kind === 'struct' && lt.mangled === rt.mangled);
+          typesEqual(lt, rt) ||
+          ((lt.kind === 'list' && rt.kind === 'uniqueList') || (lt.kind === 'uniqueList' && rt.kind === 'list')) && typesEqual(lt.element, rt.element);
         if (!compatible) {
           throw new CompileError(
             `Type mismatch: cannot compare ${typeToString(lt)} and ${typeToString(rt)}`,
@@ -3561,10 +3368,10 @@ export class Compiler {
           const code = this.elementAnnotationToCode(expr.elementType!);
           return { kind: 'list', element: code };
         }
-        let inferred: string | null = null;
+        let inferred: ChatterType | null = null;
         for (const e of expr.elements) {
           const t = this.staticType(e, bindings);
-          const c = elementCode(t);
+          const c = t;
           if (c !== null) { inferred = c; break; }
         }
         return inferred !== null ? { kind: 'list', element: inferred } : null;
@@ -3574,10 +3381,10 @@ export class Compiler {
           const code = this.elementAnnotationToCode(expr.elementType!);
           return { kind: 'uniqueList', element: code };
         }
-        let inferred: string | null = null;
+        let inferred: ChatterType | null = null;
         for (const e of expr.elements) {
           const t = this.staticType(e, bindings);
-          const c = elementCode(t);
+          const c = t;
           if (c !== null) { inferred = c; break; }
         }
         return inferred !== null ? { kind: 'uniqueList', element: inferred } : null;
@@ -3588,8 +3395,8 @@ export class Compiler {
           const v = this.elementAnnotationToCode(expr.valueType!);
           return { kind: 'dict', keyType: k, valueType: v };
         }
-        let kInf: string | null = null;
-        let vInf: string | null = null;
+        let kInf: ChatterType | null = null;
+        let vInf: ChatterType | null = null;
         for (const e of expr.entries) {
           if (kInf === null) {
             const c = elementCode(this.staticType(e.key, bindings));
@@ -3609,10 +3416,7 @@ export class Compiler {
       case 'DictGetExpression': {
         const dt = this.staticType(expr.dict, bindings);
         if (dt && dt.kind === 'dict') {
-          if (dt.valueType.startsWith('struct:')) {
-            return { kind: 'struct', mangled: dt.valueType.slice(7) };
-          }
-          return { kind: 'scalar', name: dt.valueType as ScalarTypeName };
+          return dt.valueType;
         }
         return null;
       }
@@ -3620,10 +3424,7 @@ export class Compiler {
       case 'LastItemExpression': {
         const tt = this.staticType((expr as any).target, bindings);
         if (tt && (tt.kind === 'list' || tt.kind === 'uniqueList')) {
-          if (tt.element.startsWith('struct:')) {
-            return { kind: 'struct', mangled: tt.element.slice(7) };
-          }
-          return { kind: 'scalar', name: tt.element as ScalarTypeName };
+          return tt.element;
         }
         return null;
       }
@@ -3643,7 +3444,7 @@ export class Compiler {
         return null;
       }
       case 'ReadFileLinesExpression':
-        return { kind: 'list', element: 'string' };
+        return { kind: 'list', element: { kind: 'scalar', name: 'string' } };
       case 'CodeOfExpression':
         return { kind: 'scalar', name: 'number' };
       case 'CharacterFromCodeExpression':
@@ -3686,9 +3487,7 @@ export class Compiler {
         try {
           const bt = this.staticType(expr.body, bindings);
           if (!bt) return null;
-          const code = elementCode(bt);
-          if (code === null) return null;
-          return { kind: 'list', element: code };
+          return { kind: 'list', element: bt };
         } finally { this.hofItStack.pop(); }
       }
       case 'FilterExpression': {

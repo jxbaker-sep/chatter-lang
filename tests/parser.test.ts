@@ -548,12 +548,23 @@ describe('Parser', () => {
       });
     });
 
-    test('rejects nested list type in literal', () => {
-      expect(() => parseSource('constant l is list of list of 1, 2')).toThrow(/nested lists not supported/);
+    test('parses nested list literal', () => {
+      const ast = parseSource('constant l is list of (list of 1, 2)');
+      expect(ast.body[0]).toMatchObject({
+        type: 'ConstantDeclaration',
+        value: {
+          type: 'ListLiteral',
+          elements: [{ type: 'ListLiteral', elements: [{ type: 'NumberLiteral', value: 1 }, { type: 'NumberLiteral', value: 2 }] }],
+        },
+      });
     });
 
-    test('rejects nested list in type annotation', () => {
-      expect(() => parseSource('function f takes list of list of number xs is\n    say 1\nend function')).toThrow(/nested lists not supported/);
+    test('parses nested list in type annotation', () => {
+      const ast = parseSource('function f takes list of list of number xs is\n    say 1\nend function');
+      expect(ast.body[0]).toMatchObject({
+        type: 'FunctionDeclaration',
+        params: [{ paramType: { kind: 'list', element: { kind: 'list', element: { kind: 'scalar', name: 'number' } } } }],
+      });
     });
 
     test('parses item N of L', () => {

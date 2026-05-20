@@ -533,12 +533,12 @@ describe('Compiler', () => {
   describe('lists', () => {
     test('emits MAKE_LIST for nonempty literal', () => {
       const bc = compileSource('constant l is list of 1, 2, 3');
-      expect(bc.main).toContainEqual({ op: 'MAKE_LIST', count: 3, elementType: 'number' });
+      expect(bc.main).toContainEqual({ op: 'MAKE_LIST', count: 3, elementType: { kind: 'scalar', name: 'number' } });
     });
 
     test('emits MAKE_EMPTY_LIST with element type', () => {
       const bc = compileSource('constant l is empty list of boolean');
-      expect(bc.main).toContainEqual({ op: 'MAKE_EMPTY_LIST', elementType: 'boolean' });
+      expect(bc.main).toContainEqual({ op: 'MAKE_EMPTY_LIST', elementType: { kind: 'scalar', name: 'boolean' } });
     });
 
     test('mixed static types in literal → compile error', () => {

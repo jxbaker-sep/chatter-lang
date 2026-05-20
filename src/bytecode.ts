@@ -1,4 +1,5 @@
 import { SourceLocation } from './errors';
+import type { ChatterType } from './types';
 
 export type InstructionKind =
 
@@ -36,11 +37,11 @@ export type InstructionKind =
   | { op: 'SAY_MULTI'; count: number }
   | { op: 'DROP' }  // pops and discards stack top; used at void call sites to ignore the implicit 0 left by the callee
   | { op: 'CHECK_TYPE'; expected: 'number' | 'string' | 'boolean'; context: string }  // peeks stack top; throws if type mismatches; used to enforce typed-function return types when the static type is unknown
-  | { op: 'MAKE_LIST'; count: number; elementType: string | null }  // 'number'|'string'|'boolean'|'struct:<mangled>'|null (infer)
-  | { op: 'MAKE_EMPTY_LIST'; elementType: string }
+  | { op: 'MAKE_LIST'; count: number; elementType: ChatterType | null }  // 'number'|'string'|'boolean'|'struct:<mangled>'|null (infer)
+  | { op: 'MAKE_EMPTY_LIST'; elementType: ChatterType }
   | { op: 'MAKE_EMPTY_LIST_LIKE' }  // pop a list/unique-list, push empty plain list with same element type
-  | { op: 'MAKE_UNIQUE_LIST'; count: number; elementType: string | null }
-  | { op: 'MAKE_EMPTY_UNIQUE_LIST'; elementType: string }
+  | { op: 'MAKE_UNIQUE_LIST'; count: number; elementType: ChatterType | null }
+  | { op: 'MAKE_EMPTY_UNIQUE_LIST'; elementType: ChatterType }
   | { op: 'UNIQUE_LIST_ADD' }    // pop value, pop unique-list, append if not already present
   | { op: 'UNIQUE_LIST_REMOVE' } // pop value, pop unique-list, remove if present (no-op otherwise)
   | { op: 'LIST_GET' }        // pop index, pop list, push element
@@ -67,8 +68,8 @@ export type InstructionKind =
   | { op: 'EXPECT_BOOL_CHECK' }       // peeks top; throws "expect requires a boolean, got X" if not boolean
   | { op: 'EXPECT_FAIL_WITH_MSG' }    // pops string message; throws "expect failed: <msg>"
   | { op: 'FAIL' }  // pops string message; throws "fail: <msg>"
-  | { op: 'MAKE_DICT'; count: number; keyType: string; valueType: string }
-  | { op: 'MAKE_EMPTY_DICT'; keyType: string; valueType: string }
+  | { op: 'MAKE_DICT'; count: number; keyType: ChatterType; valueType: ChatterType }
+  | { op: 'MAKE_EMPTY_DICT'; keyType: ChatterType; valueType: ChatterType }
   | { op: 'DICT_GET' }
   | { op: 'DICT_SET' }
   | { op: 'DICT_REMOVE' }
@@ -102,3 +103,5 @@ export interface BytecodeProgram {
   // invokes the named function instead of the default `Type(field: v, …)`.
   structFormatters?: Map<string, string>;
 }
+
+export type { ChatterType } from './types';

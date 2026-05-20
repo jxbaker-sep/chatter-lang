@@ -1,0 +1,4 @@
+constant matrix is list of (list of 1, 2), (list of 3, 4)
+repeat with row in matrix
+    say row
+end repeat

@@ -1,0 +1,3 @@
+constant d is empty dictionary from list of number to string
+change value of (list of 1, 2) in d to "hello"
+say value of (list of 1, 2) in d

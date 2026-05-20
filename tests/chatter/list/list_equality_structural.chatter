@@ -1,0 +1,3 @@
+say (list of 1, 2) is (list of 1, 2)
+say (list of 1, 2) is (list of 2, 1)
+say (empty list of number) is (empty list of number)

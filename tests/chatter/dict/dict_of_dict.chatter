@@ -1,0 +1,3 @@
+constant d is empty dictionary from string to dictionary from string to number
+change value of "outer" in d to dictionary "inner" to 42
+say value of "inner" in value of "outer" in d

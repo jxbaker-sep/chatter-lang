@@ -1,14 +1,10 @@
 export type ScalarTypeName = 'number' | 'string' | 'boolean';
 
-export type ElementTypeAnnotation =
-  | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'struct'; name: string };  // unmangled struct name
-
 export type TypeAnnotation =
   | { kind: 'scalar'; name: ScalarTypeName }
-  | { kind: 'list'; element: ElementTypeAnnotation }
-  | { kind: 'uniqueList'; element: ElementTypeAnnotation }
-  | { kind: 'dict'; keyType: ElementTypeAnnotation; valueType: ElementTypeAnnotation }
+  | { kind: 'list'; element: TypeAnnotation }
+  | { kind: 'uniqueList'; element: TypeAnnotation }
+  | { kind: 'dict'; keyType: TypeAnnotation; valueType: TypeAnnotation }
   | { kind: 'struct'; name: string };  // unmangled struct name
 
 export interface Located {
@@ -276,7 +272,7 @@ export type RepeatStatement =
 export interface ListLiteral {
   type: 'ListLiteral';
   kind: 'nonempty' | 'empty';
-  elementType: ElementTypeAnnotation | null;  // required for empty; null for nonempty (inferred)
+  elementType: TypeAnnotation | null;  // required for empty; null for nonempty (inferred)
   elements: Expression[];
 }
 
@@ -400,7 +396,7 @@ export interface RemoveValueStatement {
 export interface UniqueListLiteral {
   type: 'UniqueListLiteral';
   kind: 'nonempty' | 'empty';
-  elementType: ElementTypeAnnotation | null;  // required for empty; null for nonempty (inferred)
+  elementType: TypeAnnotation | null;  // required for empty; null for nonempty (inferred)
   elements: Expression[];
 }
 
@@ -409,8 +405,8 @@ export interface DictionaryLiteral {
   kind: 'nonempty' | 'empty';
   // For empty literals, both keyType and valueType are required.
   // For nonempty literals, both are null and inferred from contents.
-  keyType: ElementTypeAnnotation | null;
-  valueType: ElementTypeAnnotation | null;
+  keyType: TypeAnnotation | null;
+  valueType: TypeAnnotation | null;
   entries: Array<{ key: Expression; value: Expression }>;
 }
 

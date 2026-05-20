@@ -1,0 +1,5 @@
+constant l is list of (list of 1, 2), (list of 3, 4)
+say l
+say length of l
+say item 1 of l
+say item 2 of item 1 of l

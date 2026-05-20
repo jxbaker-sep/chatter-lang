@@ -1,1 +1,1 @@
-ERROR: Expected element type after 'empty list of'
+ERROR: Expected type annotation, got KEYWORD 'struct'

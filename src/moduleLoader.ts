@@ -112,7 +112,7 @@ function buildStdCliModule(moduleId: string, registryKey: string, absPath: strin
   const argsImport: ImportedFunction = {
     mangled: mangledArgs,
     signature: [],
-    returnType: { kind: 'list', element: 'string' },
+    returnType: { kind: 'list', element: { kind: 'scalar', name: 'string' } },
     paramNames: [],
   };
   const exportsMap = new Map<string, ImportedFunction>();

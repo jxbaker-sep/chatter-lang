@@ -1,0 +1,4 @@
+type Inner is list of number
+constant l is empty list of Inner
+append list of 1, 2 to l
+say l

@@ -1,0 +1,5 @@
+constant a is dictionary "x" to 1, "y" to 2
+constant b is dictionary "y" to 2, "x" to 1
+constant c is dictionary "x" to 1, "y" to 3
+say a is b
+say a is c
