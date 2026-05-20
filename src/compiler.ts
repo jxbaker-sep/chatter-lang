@@ -414,6 +414,21 @@ export class Compiler {
     return this.fromAnnotation(e, loc);
   }
 
+  // Resolve `empty NAME` where NAME must be a type alias (or struct ref, which
+  // will produce a friendlier error) that expands to a list / unique list /
+  // dictionary type. Used by the compile and staticType dispatch for
+  // EmptyAliasLiteral.
+  private resolveEmptyAlias(name: string, loc?: SourceLocation): ChatterType {
+    const t = this.fromAnnotation({ kind: 'struct', name } as TypeAnnotation, loc);
+    if (t.kind !== 'list' && t.kind !== 'uniqueList' && t.kind !== 'dict') {
+      throw new CompileError(
+        `'empty ${name}' requires a list, unique list, or dictionary type, but '${name}' is ${typeToString(t)}`,
+        loc ?? this.currentLoc,
+      );
+    }
+    return t;
+  }
+
   // Resolve a local alias to a ChatterType, walking through alias-of-alias
   // chains and detecting cycles. Also enforces the v1 rule that an alias
   // body cannot reference an imported name.
@@ -2679,6 +2694,17 @@ export class Compiler {
       case 'DictionaryLiteral':
         this.compileDictionaryLiteral(expr, out, bindings);
         break;
+      case 'EmptyAliasLiteral': {
+        const t = this.resolveEmptyAlias((expr as any).name, this.currentLoc);
+        if (t.kind === 'list') {
+          this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: t.element });
+        } else if (t.kind === 'uniqueList') {
+          this.emit(out, { op: 'MAKE_EMPTY_UNIQUE_LIST', elementType: t.element });
+        } else {
+          this.emit(out, { op: 'MAKE_EMPTY_DICT', keyType: (t as any).keyType, valueType: (t as any).valueType });
+        }
+        break;
+      }
       case 'DictGetExpression':
         this.compileDictGet(expr, out, bindings);
         break;
@@ -3880,6 +3906,9 @@ export class Compiler {
         }
         const rt = this.functionReturnTypes.get(expr.name);
         return rt ?? null;
+      }
+      case 'EmptyAliasLiteral': {
+        return this.resolveEmptyAlias((expr as any).name, (expr as any).loc);
       }
       case 'ListLiteral': {
         if (expr.kind === 'empty') {

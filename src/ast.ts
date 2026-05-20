@@ -27,6 +27,7 @@ export type Expression = (
   | ListLiteral
   | UniqueListLiteral
   | DictionaryLiteral
+  | EmptyAliasLiteral
   | DictGetExpression
   | ItemAccessExpression
   | LastItemExpression
@@ -275,6 +276,15 @@ export interface ListLiteral {
   kind: 'nonempty' | 'empty';
   elementType: TypeAnnotation | null;  // required for empty; null for nonempty (inferred)
   elements: Expression[];
+}
+
+// `empty NAME` — NAME is a type-alias identifier that must resolve at
+// compile time to a list, unique-list, or dictionary type. Lowered by
+// the compiler to the matching ListLiteral / UniqueListLiteral /
+// DictionaryLiteral empty form.
+export interface EmptyAliasLiteral {
+  type: 'EmptyAliasLiteral';
+  name: string;
 }
 
 export interface ItemAccessExpression {

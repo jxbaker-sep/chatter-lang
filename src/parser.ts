@@ -1650,6 +1650,17 @@ export function parse(tokens: Token[], source?: string): Program {
             elements: [],
           } as UniqueListLiteral;
         }
+        // `empty NAME` — type-alias reference; resolved at compile time
+        // to one of the three concrete empty-aggregate shapes.
+        if (peek().type === 'IDENT') {
+          const idTok = peek();
+          advance();
+          return {
+            type: 'EmptyAliasLiteral',
+            name: idTok.value,
+            loc: locOfToken(idTok),
+          } as any;
+        }
         consume('KEYWORD', 'list');
         consume('KEYWORD', 'of');
         const elemAnno = parseTypeAnnotation();

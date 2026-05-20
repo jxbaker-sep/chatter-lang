@@ -1,0 +1,24 @@
+type Node is dictionary from string to number
+constant d is empty Node
+change value of "a" in d to 1
+change value of "b" in d to 2
+say d
+
+type Names is list of string
+constant ns is empty Names
+append "hi" to ns
+append "there" to ns
+say ns
+
+type Tags is unique list of string
+constant ts is empty Tags
+add "x" to ts
+add "x" to ts
+add "y" to ts
+say ts
+
+type Inner is list of number
+type Outer is dictionary from string to Inner
+constant o is empty Outer
+change value of "k" in o to empty Inner
+say o

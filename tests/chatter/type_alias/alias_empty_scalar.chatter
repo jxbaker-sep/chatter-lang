@@ -1,0 +1,2 @@
+type N is number
+constant x is empty N
