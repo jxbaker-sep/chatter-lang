@@ -1,0 +1,4 @@
+use value_or from "std:dictionary"
+constant ages is dictionary "alice" to 30, "bob" to 25
+value_or "alice" in ages with 0
+say it

@@ -1,0 +1,26 @@
+# Chatter standard library: dictionary
+#
+# Dictionary utility functions written in Chatter itself.
+
+# value_or: returns the value bound to `key` in `input`, or `default` if `key`
+# is absent.
+#
+#   value_or "alice" in ages with 0
+#
+# Use `input contains key` directly if you need to distinguish "absent" from
+# "present with a value equal to the default".
+#
+# Note: when the key is present, this performs two O(1) hash lookups
+# (one for `contains`, one for `value of`). A single-lookup variant would
+# require language-level support (e.g. an optional return type).
+export function value_or over K and V takes
+    K key
+    in dictionary from K to V input
+    with V default
+    returns V
+is
+    if input contains key
+        return value of key in input
+    end if
+    return default
+end function

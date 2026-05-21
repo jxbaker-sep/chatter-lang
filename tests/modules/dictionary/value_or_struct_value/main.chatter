@@ -1,0 +1,13 @@
+use value_or from "std:dictionary"
+
+struct Point
+    number x
+    number y
+end struct
+
+constant origin is make Point with x 0, y 0
+constant points is dictionary "home" to make Point with x 3, y 4
+value_or "home" in points with origin
+say it
+value_or "work" in points with origin
+say it

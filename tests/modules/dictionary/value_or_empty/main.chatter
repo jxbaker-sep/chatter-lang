@@ -1,0 +1,4 @@
+use value_or from "std:dictionary"
+constant empty_dict is empty dictionary from string to number
+value_or "anything" in empty_dict with 42
+say it

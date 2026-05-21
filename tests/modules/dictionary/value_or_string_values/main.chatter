@@ -1,0 +1,6 @@
+use value_or from "std:dictionary"
+constant greetings is dictionary "en" to "hello", "fr" to "bonjour"
+value_or "en" in greetings with "???"
+say it
+value_or "de" in greetings with "???"
+say it
