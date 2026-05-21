@@ -1,0 +1,62 @@
+# Chatter standard library: set
+#
+# Set-theoretic operations on `unique list` values (Chatter's set type).
+# Every function returns a fresh unique list — inputs are never mutated.
+
+# union: every element of `left` (in left's insertion order), followed by
+# every element of `right` not already present (in right's insertion order).
+#
+#   union (unique list of 1, 2, 3) with (unique list of 3, 4, 5)
+#     -> [1, 2, 3, 4, 5]
+export function union over T takes
+    unique list of T left
+    with unique list of T right
+    returns unique list of T
+is
+    constant result is empty unique list of T
+    repeat with x in left
+        add x to result
+    end repeat
+    repeat with x in right
+        add x to result
+    end repeat
+    return result
+end function
+
+# intersection: every element of `left` that is also in `right`,
+# in left's insertion order.
+#
+#   intersection (unique list of 1, 2, 3) with (unique list of 2, 3, 4)
+#     -> [2, 3]
+export function intersection over T takes
+    unique list of T left
+    with unique list of T right
+    returns unique list of T
+is
+    constant result is empty unique list of T
+    repeat with x in left
+        if right contains x
+            add x to result
+        end if
+    end repeat
+    return result
+end function
+
+# difference: every element of `left` that is not in `right`,
+# in left's insertion order. (Asymmetric: A − B.)
+#
+#   difference (unique list of 1, 2, 3) with (unique list of 2, 4)
+#     -> [1, 3]
+export function difference over T takes
+    unique list of T left
+    with unique list of T right
+    returns unique list of T
+is
+    constant result is empty unique list of T
+    repeat with x in left
+        if not right contains x
+            add x to result
+        end if
+    end repeat
+    return result
+end function

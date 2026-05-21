@@ -1,0 +1,3 @@
+use intersection from "std:set"
+intersection (empty unique list of number) with (unique list of 1, 2)
+say it

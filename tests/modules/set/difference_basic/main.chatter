@@ -1,0 +1,3 @@
+use difference from "std:set"
+difference (unique list of 1, 2, 3) with (unique list of 2, 4)
+say it

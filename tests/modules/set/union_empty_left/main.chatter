@@ -1,0 +1,3 @@
+use union from "std:set"
+union (empty unique list of number) with (unique list of 1, 2)
+say it
