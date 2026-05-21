@@ -13,11 +13,23 @@ export class ChatterError extends Error {
   }
 }
 
+// Aggregates multiple compile-time diagnostics into a single throwable. The
+// CLI / formatError unpacks it and renders each inner error individually.
+export class AggregateChatterError extends Error {
+  constructor(public errors: ChatterError[]) {
+    super(errors.map((e) => e.message).join('\n'));
+    this.name = 'AggregateChatterError';
+  }
+}
+
 function hasLocation(e: Error): e is Error & { location?: SourceLocation } {
   return 'location' in (e as object);
 }
 
 export function formatError(error: Error, source: string, filename: string): string {
+  if (error instanceof AggregateChatterError) {
+    return error.errors.map((e) => formatError(e, source, filename)).join('\n\n');
+  }
   const fname = filename || '<source>';
   const loc = hasLocation(error) ? error.location : undefined;
   const header = `error: ${error.message}`;

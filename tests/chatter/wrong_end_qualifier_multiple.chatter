@@ -1,0 +1,11 @@
+function foo is
+  if true
+    say "a"
+  end function
+end function
+
+function bar is
+  repeat 2 times
+    say "b"
+  end if
+end function

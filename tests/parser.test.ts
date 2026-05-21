@@ -292,7 +292,7 @@ describe('Parser', () => {
     });
 
     test('wrong qualifier (`end function` on if) is a parse error', () => {
-      expect(() => parseSource('if a\n    say 1\nend function')).toThrow(/Expected 'if'/);
+      expect(() => parseSource('if a\n    say 1\nend function')).toThrow(/expected 'end if', got 'end function'/);
     });
 
     test('`==` is no longer tokenised as an operator (tokenisation error)', () => {

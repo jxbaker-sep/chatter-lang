@@ -1,5 +1,5 @@
 import { Token, TokenType } from './lexer';
-import { ChatterError, SourceLocation } from './errors';
+import { ChatterError, SourceLocation, AggregateChatterError } from './errors';
 import {
   Program, Statement, Expression,
   SayStatement, ConstantDeclaration, FunctionDeclaration, FunctionParam,
@@ -91,6 +91,36 @@ export function parse(tokens: Token[], source?: string): Program {
   let pos = 0;
   let indexSlotDepth = 0;
   const sourceLines: string[] | null = source !== undefined ? source.split('\n') : null;
+
+  // Phase-1 error recovery: a small set of recoverable parse errors are
+  // collected here rather than thrown immediately, then surfaced together at
+  // the end. Currently only "wrong `end` qualifier" recovers; everything else
+  // still throws.
+  const diagnostics: ParseError[] = [];
+  const END_QUALIFIERS = new Set(['function', 'if', 'repeat', 'struct']);
+
+  // After consuming `end`, expect a specific qualifier keyword. If the qualifier
+  // is wrong but is still a valid `end X` form (e.g. `end function` where we
+  // wanted `end if`), record a diagnostic, advance, and let parsing continue
+  // as if the right keyword had been written. Other mismatches still throw.
+  function expectEndQualifier(expected: 'function' | 'if' | 'repeat' | 'struct'): void {
+    const tok = peek();
+    if (tok.type === 'KEYWORD' && tok.value === expected) {
+      advance();
+      return;
+    }
+    if (tok.type === 'KEYWORD' && END_QUALIFIERS.has(tok.value)) {
+      diagnostics.push(new ParseError(
+        `expected 'end ${expected}', got 'end ${tok.value}'`,
+        tok,
+      ));
+      advance();
+      return;
+    }
+    // Not a recognized end-qualifier — fall back to the usual strict consume,
+    // which throws.
+    consume('KEYWORD', expected);
+  }
 
   function tokenEndCol(t: Token): number {
     if (t.type === 'STRING') return t.col + t.value.length + 2;
@@ -783,7 +813,7 @@ export function parse(tokens: Token[], source?: string): Program {
 
     consume('DEDENT');
     consume('KEYWORD', 'end');
-    consume('KEYWORD', 'function');
+    expectEndQualifier('function');
     consumeNewline();
 
     return { type: 'FunctionDeclaration', name: nameTok.value, typeVars, params, returnType, body, exported };
@@ -884,7 +914,7 @@ export function parse(tokens: Token[], source?: string): Program {
       consume('DEDENT');
     }
     consume('KEYWORD', 'end');
-    consume('KEYWORD', 'struct');
+    expectEndQualifier('struct');
     consumeNewline();
     const node: StructDeclaration = {
       type: 'StructDeclaration',
@@ -1097,7 +1127,7 @@ export function parse(tokens: Token[], source?: string): Program {
     }
 
     consume('KEYWORD', 'end');
-    consume('KEYWORD', 'if');
+    expectEndQualifier('if');
     consumeNewline();
 
     return { type: 'IfStatement', branches, elseBody };
@@ -1174,7 +1204,7 @@ export function parse(tokens: Token[], source?: string): Program {
     const body = parseBlock();
     consume('DEDENT');
     consume('KEYWORD', 'end');
-    consume('KEYWORD', 'repeat');
+    expectEndQualifier('repeat');
     consumeNewline();
 
     result.body = body;
@@ -1910,5 +1940,12 @@ export function parse(tokens: Token[], source?: string): Program {
     );
   }
 
-  return parseProgram();
+  const program = parseProgram();
+  if (diagnostics.length === 1) {
+    throw diagnostics[0];
+  }
+  if (diagnostics.length > 1) {
+    throw new AggregateChatterError(diagnostics);
+  }
+  return program;
 }
