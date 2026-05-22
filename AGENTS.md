@@ -160,8 +160,8 @@ Note: `by` is reserved (it has special meaning in `multiply X by Y`, `divide X b
 ### Keywords reserved for type aliases
 `type`. See "Type aliases (v1)" below.
 
-### Keywords reserved for optional types
-`optional`, `none`. See "Optionals (v1)" below.
+### Keywords reserved for optional and mutable struct types
+`optional`, `none`, `mutable`. See "Optionals (v1)" and "Mutable structs (v1)" below.
 
 ### Modules (v1)
 One file = one module. The file path (normalized absolute) identifies the module; the entry file passed to the `chatter` CLI is module #1 and may `use` and/or `export` just like any other module.
@@ -348,6 +348,17 @@ Generic struct instantiations are distinct types: `Pair of number` and `Pair of 
 
 **Out of scope (Phase 2+)**: explicit constructor/type-annotation type-arg syntax at `make` sites, recursive generic structs (blocked on optional/nullable types), and variance/subtyping.
 
+### Mutable structs (v1)
+Mutable structs are reference-identity aggregates declared with `mutable struct Name ... end struct` or `export mutable struct Name ...`; generic declarations use `mutable struct Node over T (and U)*`. A module cannot declare both mutable and immutable structs with the same name (`duplicate struct name 'Foo'`). Type annotations spell mutable structs as `mutable Name` or `mutable Name of T`; this is a distinct type kind (`mutableStruct`, code prefix `mstruct:`) and is not assignable to the immutable `struct` kind.
+
+Construction uses the same `make NAME with ...` syntax and formatting displays the same `Type(field: value, ...)` shape (without the word `mutable`). Assignment, arguments, returns, collection elements, dict values, optional payloads, aliases, and struct fields all preserve reference semantics. `with` on a mutable struct returns a fresh mutable struct instance with new identity; the original is unchanged.
+
+Field mutation is statement-only: `change FIELD of NAME to VALUE` works through constants, variables, and params when `NAME` is a mutable struct reference. Immutable targets compile-error with `cannot mutate immutable struct Point — use 'with' for copy-on-update`; unknown fields and wrong field types are compile errors when statically known, otherwise runtime checks validate the mutable target/field. Arithmetic sugar also targets numeric fields: `add X to FIELD of NAME`, `subtract X from FIELD of NAME`, `multiply FIELD of NAME by X`, `divide FIELD of NAME by X`; target references are evaluated once. These statements do not update `it`.
+
+Equality for the same mutable struct type/instantiation is reference identity. Different mutable types, different generic instantiations, or mutable-vs-immutable comparisons are type mismatches. Compile-time-known mutable struct operands are rejected by arithmetic/comparison/logical/control predicates and `length`/`contains`/`is empty`, parallel to immutable structs. Optional cycle relaxation allows `optional mutable Node of T next`, but non-optional mutable self-cycles are rejected. Mutable structs may be list/unique-list elements and dictionary values, but dictionary keys cannot be mutable structs (`dictionary keys cannot be mutable struct`). Runtime formatting detects repeated mutable instances during one recursive pass and renders `<cycle>`.
+
+Bytecode/runtime: `MAKE_MUTABLE_STRUCT`, `MUTABLE_STRUCT_GET`, `MUTABLE_STRUCT_WITH`, and `MUTABLE_STRUCT_SET` operate on `ChatterMutableStruct { kind:'mutableStruct'; typeName; fields }`; `formatValue` and `aggregateEquals` handle mutable reference identity and cycles.
+
 ### Type aliases (v1)
 Naming sugar for any type annotation. Pure compile-time — no runtime representation, no bytecode changes.
 
@@ -382,6 +393,7 @@ An **optional** wraps any type T as `optional T` — a value that is either pres
 - `if x is none ... else BODY` — x narrowed to T in else body.
 - `if x is none; return; end if; ...` — after the if (none-branch terminates), x narrowed for rest of block.
 - `if x is not none and PREDICATE` — x narrowed inside PREDICATE RHS.
+- `repeat while x is not none ... end repeat` — x narrowed to T in the loop body.
 - `expect x is not none` — x narrowed for rest of block.
 - `it` can also be narrowed via the same patterns using the `__it__` key.
 - Narrowing is invalidated by `change x to ...` on the same variable.
@@ -408,8 +420,8 @@ An **optional** wraps any type T as `optional T` — a value that is either pres
 A **dictionary** is a hash-backed key→value map spelled `dictionary from K to V`. Like lists and unique lists, dictionaries are mutable references; assignment, parameter passing, and returning all alias the same underlying storage. Iteration yields entries in insertion order (first-set-wins; overwriting a key keeps its original position).
 
 - **Type spelling**: `dictionary from K to V`.
-  - K: scalar (`number` / `string` / `boolean`) or struct type — anything `canonicalKey` handles.
-  - V: scalar or struct. **No nested collections** in v1 — `dictionary from string to list of T`, `dictionary from string to dictionary from …`, `list of dictionary …`, etc. all → parse error (mirrors the no-nested-lists rule).
+  - K: scalar (`number` / `string` / `boolean`) or immutable struct type — mutable structs are rejected as keys.
+  - V: scalar, immutable struct, or mutable struct. **No nested collections** in v1 — `dictionary from string to list of T`, `dictionary from string to dictionary from …`, `list of dictionary …`, etc. all → parse error (mirrors the no-nested-lists rule).
 - **Literals**:
   - `empty dictionary from K to V` — empty literal; both types required.
   - `dictionary K1 to V1, K2 to V2, ...` — nonempty literal. All keys share one type, all values share one type. Duplicate keys at literal-creation time **silently keep the last** (not the first — matches the natural left-to-right `change value of … to …` semantics).
@@ -557,12 +569,13 @@ Statement form goes through the same compile path as the expression form, so all
 - `DICT_KEYS` — pop dict, push fresh `unique list of K` in insertion order.
 - `DICT_VALUES` — pop dict, push fresh `list of V` in insertion order.
 - `SORT_LIST { byKey: boolean; descending: boolean }` — in-place stable sort. With `byKey=false`, pops a single list (element type must be number, string, or boolean) and sorts it. With `byKey=true`, pops a parallel keys list and an items list; sorts items by the corresponding key (key list element type must be number, string, or boolean). Booleans order as `false < true`. Stability via decorate-sort-undecorate over an indices array; pure values, no side effects, no return value pushed. Errors: non-list operand, unsupported element type.
+- `MAKE_MUTABLE_STRUCT { typeName, fieldNames }`, `MUTABLE_STRUCT_GET`, `MUTABLE_STRUCT_WITH`, `MUTABLE_STRUCT_SET` — mutable-struct construction, field read, copy-with-update, and in-place field mutation.
 - `PUSH_NONE { element: ChatterType }` — push an absent optional of the given inner type onto the stack.
 - `WRAP_OPTIONAL` — pop a value, push `ChatterOptional { present:true, value, element: valueTypeOf(value) }`. Emitted by the compiler at auto-wrap sites (function args, returns, struct fields, list/dict elements).
 - `UNWRAP_OPTIONAL` — pop a `ChatterOptional`, push its inner value. Runtime error if absent: `tried to use the value of an absent optional — should have been narrowed`. Emitted when loading a flow-narrowed optional variable.
 - `IS_NONE` — pop a `ChatterOptional`, push `true` if absent, `false` if present. Used for `x is none` / `x is not none` comparisons.
 
-`ChatterValue = number | string | boolean | ChatterList | ChatterOptional`, where `ChatterList = { kind:'list'; element; items: ChatterValue[] }` and `ChatterOptional = { kind:'optional'; present: boolean; value?: ChatterValue; element: ChatterType }`.
+`ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct | ChatterMutableStruct | ChatterDict | ChatterOptional`, including `ChatterMutableStruct = { kind:'mutableStruct'; typeName; fields }` and `ChatterOptional = { kind:'optional'; present: boolean; value?: ChatterValue; element: ChatterType }`.
 
 ### Iteration compilation strategy
 `repeat with x in L` is desugared by the compiler into an index-based `while`-style loop:
@@ -642,6 +655,7 @@ Existing golden cases:
 - **Higher-order list ops via `it`-block sugar**: **delivered (v1)** — see "Higher-order list operations (v1)" above. `sort` / `map` / `filter` / `reduce` are built-in syntax with `it` rebound per iteration (and `accumulator` for reduce); statement form updates `it`; `[the] result of CALL` is accepted in the body slots of statement-form HOFs (and `sort by`). Open follow-ups: multi-statement transformer blocks (probably `using` + indented block + final expression), runtime element-type inference for `map` (so the body's result type doesn't need to be statically known), nested-HOF support (currently rejected at compile time), and lifting the "no expression-position function calls" restriction inside HOF bodies (so `constant x is map xs using f it` becomes natural).
 - **Type aliases — `type NAME is TYPEEXPR`**: **delivered (v1)** — see "Type aliases (v1)" above.
 - **Optional types / nullable values**: **delivered (v1)** — see "Optionals (v1)" above. Full flow-typing narrowing, auto-wrapping, struct cycle relaxation, `list of optional T`, `dictionary … to optional V`, cross-module optional return/arg types.
+- **Mutable structs (Phase 3)**: **delivered (v1)** — see "Mutable structs (v1)" above. Phase 4 follow-up: build `std:linked_list` on top of generic mutable structs + optionals.
 - **Multiline function headers — implemented (lexer-level).** A function header may span any number of lines: the lexer enters "soft layout" mode when it emits the `function` keyword and exits when it emits the matching `is`. While in soft mode it suppresses NEWLINE tokens at end-of-line and skips indent stack updates at line starts (parallel to how Python suppresses NEWLINE/INDENT inside parentheses). Continuation lines may sit at any column. Comment lines and blank lines mid-header work for free (already skipped before indent processing). The `function` keyword inside `end function` does not re-enter header mode (checked: previous token must not be `end`). The body's indent is measured from the `function` line as before. `is` keywords inside the body (`constant x is 5`) are not affected because the flag is already false. **Multiline call sites / `make` / collection literals are still single-line — separate roadmap entry.**
 - **Tail call optimization (TCO).** Currently each `CALL` in `src/vm.ts` pushes a fresh `Frame` and recursively invokes `executeFrame`, so deep tail-recursive Chatter functions blow the **host JS stack** (V8 default ~10k frames) long before any Chatter-level limit. Tail-recursive accumulator-style code (`go n acc` patterns) is unusable; users must rewrite as `repeat while` / `repeat with`. Fix sketch: (1) at compile time, mark `CALL` instructions that are immediately followed by `RETURN` as tail calls (new `TAIL_CALL` op or a flag on `CALL`); be careful that `STORE_IT` *does* get emitted at the call site for typed tail calls — the calling frame is being replaced, so the new frame's eventual `RETURN` value becomes this frame's return value directly. Void tail calls in void functions are also legal (`DROP` becomes a no-op since the frame is replaced). (2) At runtime, instead of pushing a new frame, **reuse the current frame**: replace `instructions`, reset `ip = 0`, swap in fresh `locals` populated from args, clear `varTypes`, reset `it`. (3) Loop on `executeFrame` rather than recursing — turn the per-frame interpreter into a `while (true)` that re-enters the top of the dispatch loop after a tail call. (4) Edge case: tail call to self vs to another function — both fine, both just swap `instructions` + `locals`. (5) Edge case: tail call from inside an `if` / `repeat` — already covered because the analyzer just looks at the next instruction in the linear bytecode, not source structure. (6) Edge case: `the result of CALL` host statements (`return the result of f x`) already lower to `CALL` then `STORE_IT` then `LOAD_IT` then `RETURN` — the `CALL` is *not* immediately followed by `RETURN`, so it wouldn't be marked tail. Either add a peephole that recognises this pattern (CALL → STORE_IT → LOAD_IT → RETURN with no intervening jump targets) and rewrites it to a tail call, or accept that `return the result of f x` doesn't TCO (then `return f x` directly would, except Chatter syntax doesn't allow that because bare-name calls aren't expressions — so the peephole is the only practical answer). (7) Stack debugging: tail-replaced frames lose their call-site location, so a runtime error inside the tail-replaced function wouldn't show the caller in any future stack trace feature. Fine for now (no stack traces yet). Tests would include a known-blowing accumulator factorial / Fibonacci pair (currently throws JS RangeError) and verify they complete; plus a control test that non-tail recursion still works normally.
 

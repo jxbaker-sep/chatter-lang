@@ -1,0 +1,1 @@
+ERROR: expected struct Point, got mutable MPoint

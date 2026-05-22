@@ -1,0 +1,5 @@
+mutable struct Person
+    string name
+end struct
+constant p is make Person with name "Remy"
+add 1 to name of p

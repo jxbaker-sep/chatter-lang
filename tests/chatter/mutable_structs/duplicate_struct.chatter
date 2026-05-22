@@ -1,0 +1,6 @@
+struct Foo
+    number x
+end struct
+mutable struct Foo
+    number y
+end struct

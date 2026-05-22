@@ -29,6 +29,12 @@ export interface ChatterStruct {
   fields: Map<string, ChatterValue>;  // insertion order = declaration order
 }
 
+export interface ChatterMutableStruct {
+  kind: 'mutableStruct';
+  typeName: string;
+  fields: Map<string, ChatterValue>;
+}
+
 export interface ChatterDict {
   kind: 'dict';
   keyType: ChatterType;
@@ -43,7 +49,7 @@ export interface ChatterOptional {
   element: ChatterType;  // inner element type
 }
 
-export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct | ChatterDict | ChatterOptional;
+export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct | ChatterMutableStruct | ChatterDict | ChatterOptional;
 
 function isList(v: ChatterValue): v is ChatterList {
   return typeof v === 'object' && v !== null && (v as any).kind === 'list';
@@ -55,6 +61,14 @@ function isUniqueList(v: ChatterValue): v is ChatterUniqueList {
 
 function isStruct(v: ChatterValue): v is ChatterStruct {
   return typeof v === 'object' && v !== null && (v as any).kind === 'struct';
+}
+
+function isMutableStruct(v: ChatterValue): v is ChatterMutableStruct {
+  return typeof v === 'object' && v !== null && (v as any).kind === 'mutableStruct';
+}
+
+function isAnyStruct(v: ChatterValue): v is ChatterStruct | ChatterMutableStruct {
+  return isStruct(v) || isMutableStruct(v);
 }
 
 function isDict(v: ChatterValue): v is ChatterDict {
@@ -74,6 +88,7 @@ function valueTypeOf(v: ChatterValue): ChatterType {
   if (typeof v === 'string') return STRING_TYPE;
   if (typeof v === 'boolean') return { kind: 'scalar', name: 'boolean' };
   if (isStruct(v)) return { kind: 'struct', mangled: v.typeName };
+  if (isMutableStruct(v)) return { kind: 'mutableStruct', mangled: v.typeName };
   if (isList(v)) return { kind: 'list', element: v.element };
   if (isUniqueList(v)) return { kind: 'uniqueList', element: v.element };
   if (isOptional(v)) return { kind: 'optional', element: v.element };
@@ -82,6 +97,17 @@ function valueTypeOf(v: ChatterValue): ChatterType {
 
 function valueMatchesType(v: ChatterValue, expected: ChatterType): boolean {
   return typesEqual(valueTypeOf(v), expected);
+}
+
+const mutableStructIds = new WeakMap<ChatterMutableStruct, number>();
+let nextMutableStructId = 1;
+function mutableStructCanonicalKey(v: ChatterMutableStruct): string {
+  let id = mutableStructIds.get(v);
+  if (id === undefined) {
+    id = nextMutableStructId++;
+    mutableStructIds.set(v, id);
+  }
+  return 'MS:' + v.typeName + ':' + id;
 }
 
 function scalarCanonicalKey(v: number | string | boolean): string {
@@ -100,6 +126,9 @@ function canonicalKey(v: ChatterValue): string {
     const parts: string[] = [];
     for (const [fname, fval] of v.fields) parts.push(fname + '=' + canonicalKey(fval));
     return 'S:' + v.typeName + '{' + parts.join(',') + '}';
+  }
+  if (isMutableStruct(v)) {
+    return mutableStructCanonicalKey(v);
   }
   if (isList(v)) {
     return 'L' + typeCode(v.element) + '[' + v.items.map(canonicalKey).join(',') + ']';
@@ -177,7 +206,8 @@ export class VM {
   // formatter that re-renders its own value). Sequential renders of the
   // same value (e.g. `list of p, p`) are fine because each add/remove pair
   // is balanced.
-  private currentlyFormatting: Set<ChatterStruct> = new Set();
+  private currentlyFormatting: Set<ChatterStruct | ChatterMutableStruct> = new Set();
+  private formattingMutableStructs: Set<ChatterMutableStruct> = new Set();
 
   // Frame pool: hot reuse of Frame objects across CALL/return to avoid
   // allocating a fresh { locals, varTypes, ... } pair per call.
@@ -226,35 +256,44 @@ export class VM {
       if (!v.present) return 'none';
       return this.formatValue(v.value!);
     }
-    if (isStruct(v)) {
-      const formatterName = this.program.structFormatters?.get(v.typeName);
-      if (formatterName) {
-        if (this.currentlyFormatting.has(v)) {
-          throw new RuntimeError(
-            `recursive formatter for struct '${unmangleStructName(v.typeName)}'`,
-          );
-        }
-        this.currentlyFormatting.add(v);
-        try {
-          return this.runFormatter(formatterName, v);
-        } finally {
-          this.currentlyFormatting.delete(v);
-        }
+    if (isAnyStruct(v)) {
+      if (isMutableStruct(v)) {
+        if (this.formattingMutableStructs.has(v)) return '<cycle>';
+        this.formattingMutableStructs.add(v);
       }
-      const tname = unmangleStructName(v.typeName);
-      const parts: string[] = [];
-      for (const [fname, fval] of v.fields) {
-        const formatted = typeof fval === 'string'
-          ? `"${fval}"`
-          : this.formatValue(fval);
-        parts.push(`${fname}: ${formatted}`);
+      try {
+        const formatterName = this.program.structFormatters?.get(v.typeName);
+        if (formatterName) {
+          if (this.currentlyFormatting.has(v)) {
+            if (isMutableStruct(v)) return '<cycle>';
+            throw new RuntimeError(
+              `recursive formatter for struct '${unmangleStructName(v.typeName)}'`,
+            );
+          }
+          this.currentlyFormatting.add(v);
+          try {
+            return this.runFormatter(formatterName, v);
+          } finally {
+            this.currentlyFormatting.delete(v);
+          }
+        }
+        const tname = unmangleStructName(v.typeName);
+        const parts: string[] = [];
+        for (const [fname, fval] of v.fields) {
+          const formatted = typeof fval === 'string'
+            ? `"${fval}"`
+            : this.formatValue(fval);
+          parts.push(`${fname}: ${formatted}`);
+        }
+        return `${tname}(${parts.join(', ')})`;
+      } finally {
+        if (isMutableStruct(v)) this.formattingMutableStructs.delete(v);
       }
-      return `${tname}(${parts.join(', ')})`;
     }
     if (isUniqueList(v)) {
       return '[' + uniqueListValues(v).map(e => {
         if (isAnyList(e) || isDict(e) || isOptional(e)) return this.formatValue(e);
-        if (isStruct(e)) return this.formatValue(e);
+        if (isAnyStruct(e)) return this.formatValue(e);
         if (typeof e === 'string') return `"${e}"`;
         return formatScalar(e as number | string | boolean);
       }).join(', ') + ']';
@@ -262,7 +301,7 @@ export class VM {
     if (isList(v)) {
       return '[' + v.items.map(e => {
         if (isAnyList(e) || isDict(e) || isOptional(e)) return this.formatValue(e);
-        if (isStruct(e)) return this.formatValue(e);
+        if (isAnyStruct(e)) return this.formatValue(e);
         if (typeof e === 'string') return `"${e}"`;
         return formatScalar(e as number | string | boolean);
       }).join(', ') + ']';
@@ -272,7 +311,7 @@ export class VM {
         return 'empty dictionary from ' + typeToString(v.keyType) + ' to ' + typeToString(v.valueType);
       }
       const fmt = (e: ChatterValue): string => {
-        if (isAnyList(e) || isStruct(e) || isDict(e) || isOptional(e)) return this.formatValue(e);
+        if (isAnyList(e) || isAnyStruct(e) || isDict(e) || isOptional(e)) return this.formatValue(e);
         if (typeof e === 'string') return `"${e}"`;
         return formatScalar(e as number | string | boolean);
       };
@@ -292,7 +331,7 @@ export class VM {
   // Synchronously invoke a struct's format function and return its (string)
   // result. The formatter is a synthetic FunctionDef with a single `it`
   // param; we push a fresh frame and run it to completion.
-  private runFormatter(formatterName: string, value: ChatterStruct): string {
+  private runFormatter(formatterName: string, value: ChatterStruct | ChatterMutableStruct): string {
     const fdef = this.program.functions.get(formatterName);
     if (!fdef) {
       throw new RuntimeError(`Missing formatter function '${formatterName}'`);
@@ -1424,46 +1463,89 @@ export class VM {
         break;
       }
 
-      case 'STRUCT_GET': {
+      case 'STRUCT_GET':
+      case 'MUTABLE_STRUCT_GET': {
         const target = this.pop();
-        if (!isStruct(target)) {
+        const wantsMutable = instr.op === 'MUTABLE_STRUCT_GET';
+        if (wantsMutable ? !isMutableStruct(target) : !isAnyStruct(target)) {
           throw new RuntimeError(
             `Type mismatch: '${instr.fieldName} of X' requires a struct, got ${describe(target)}`,
             instr.loc);
         }
-        if (!target.fields.has(instr.fieldName)) {
+        const structTarget = target as ChatterStruct | ChatterMutableStruct;
+        if (!structTarget.fields.has(instr.fieldName)) {
           throw new RuntimeError(
-            `struct ${unmangleStructName(target.typeName)} has no field '${instr.fieldName}'`,
+            `struct ${unmangleStructName(structTarget.typeName)} has no field '${instr.fieldName}'`,
             instr.loc);
         }
-        this.stack.push(target.fields.get(instr.fieldName)!);
+        this.stack.push(structTarget.fields.get(instr.fieldName)!);
         break;
       }
 
-      case 'STRUCT_WITH': {
+      case 'STRUCT_WITH':
+      case 'MUTABLE_STRUCT_WITH': {
         const overrides: ChatterValue[] = new Array(instr.fieldNames.length);
         for (let i = instr.fieldNames.length - 1; i >= 0; i--) {
           overrides[i] = this.pop();
         }
         const base = this.pop();
-        if (!isStruct(base)) {
+        const wantsMutable = instr.op === 'MUTABLE_STRUCT_WITH';
+        if (wantsMutable ? !isMutableStruct(base) : !isAnyStruct(base)) {
           throw new RuntimeError(
             `Type mismatch: 'X with FIELD V' requires a struct, got ${describe(base)}`,
             instr.loc);
         }
+        const structBase = base as ChatterStruct | ChatterMutableStruct;
         for (const fn of instr.fieldNames) {
-          if (!base.fields.has(fn)) {
+          if (!structBase.fields.has(fn)) {
             throw new RuntimeError(
-              `struct ${unmangleStructName(base.typeName)} has no field '${fn}'`,
+              `struct ${unmangleStructName(structBase.typeName)} has no field '${fn}'`,
               instr.loc);
           }
         }
-        const newFields = new Map<string, ChatterValue>(base.fields);
+        const newFields = new Map<string, ChatterValue>(structBase.fields);
         for (let i = 0; i < instr.fieldNames.length; i++) {
           newFields.set(instr.fieldNames[i], overrides[i]);
         }
-        const s: ChatterStruct = { kind: 'struct', typeName: base.typeName, fields: newFields };
+        const s: ChatterStruct | ChatterMutableStruct = {
+          kind: isMutableStruct(structBase) ? 'mutableStruct' : 'struct',
+          typeName: structBase.typeName,
+          fields: newFields,
+        };
         this.stack.push(s);
+        break;
+      }
+
+      case 'MAKE_MUTABLE_STRUCT': {
+        const fields = new Map<string, ChatterValue>();
+        const vals: ChatterValue[] = new Array(instr.fieldNames.length);
+        for (let i = instr.fieldNames.length - 1; i >= 0; i--) {
+          vals[i] = this.pop();
+        }
+        for (let i = 0; i < instr.fieldNames.length; i++) {
+          fields.set(instr.fieldNames[i], vals[i]);
+        }
+        const s: ChatterMutableStruct = { kind: 'mutableStruct', typeName: instr.typeName, fields };
+        this.stack.push(s);
+        break;
+      }
+
+      case 'MUTABLE_STRUCT_SET': {
+        const value = this.pop();
+        const target = this.pop();
+        if (!isMutableStruct(target)) {
+          throw new RuntimeError(
+            `Type mismatch: cannot mutate field '${instr.fieldName}' of non-mutable struct value ${describe(target)}`,
+            instr.loc,
+          );
+        }
+        if (!target.fields.has(instr.fieldName)) {
+          throw new RuntimeError(
+            `struct ${unmangleStructName(target.typeName)} has no field '${instr.fieldName}'`,
+            instr.loc,
+          );
+        }
+        target.fields.set(instr.fieldName, value);
         break;
       }
 
@@ -1535,6 +1617,16 @@ export class VM {
       if (!b.present) return false;
       return this.aggregateEquals(a, b.value!, loc);
     }
+    // mutable struct equality is reference identity for the same mutable type.
+    if (isMutableStruct(a) && isMutableStruct(b)) {
+      if (a.typeName !== b.typeName) {
+        throw new RuntimeError(
+          `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
+          loc,
+        );
+      }
+      return a === b;
+    }
     // struct <-> struct: same type, every field equal (recursive).
     if (isStruct(a) && isStruct(b)) {
       if (a.typeName !== b.typeName) {
@@ -1550,7 +1642,7 @@ export class VM {
       }
       return true;
     }
-    if (isStruct(a) || isStruct(b)) {
+    if (isAnyStruct(a) || isAnyStruct(b)) {
       throw new RuntimeError(
         `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
         loc,

@@ -1,0 +1,5 @@
+struct Point
+    number x
+end struct
+constant p is make Point with x 1
+change x of p to 2

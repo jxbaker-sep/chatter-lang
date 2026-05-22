@@ -1,0 +1,3 @@
+mutable struct Bad
+    mutable Bad next
+end struct

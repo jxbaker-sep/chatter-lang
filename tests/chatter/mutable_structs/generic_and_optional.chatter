@@ -1,0 +1,35 @@
+mutable struct Box over T
+    T value
+end struct
+
+mutable struct Node over T
+    T value
+    optional mutable Node of T next
+end struct
+
+function same_box over T takes mutable Box of T bx returns mutable Box of T is
+    return bx
+end function
+
+function some_node takes mutable Node of string n returns optional mutable Node of string is
+    return n
+end function
+
+constant nb is make Box with value 10
+constant nb2 is the result of same_box nb
+say nb is nb2
+change value of nb2 to 12
+say nb
+constant boxes is list of nb
+say item 1 of boxes
+constant a is make Node with value "a", next none
+constant b is make Node with value "b", next none
+change next of a to b
+change next of b to a
+say a
+change next of b to none
+variable cursor is the result of some_node a
+repeat while cursor is not none
+    say value of cursor
+    change cursor to next of cursor
+end repeat

@@ -1,0 +1,5 @@
+use Point from "a"
+use MPoint from "b"
+constant p is make Point with x 1
+constant m is make MPoint with x 1
+say p is m

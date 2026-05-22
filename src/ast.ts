@@ -6,6 +6,7 @@ export type TypeAnnotation =
   | { kind: 'uniqueList'; element: TypeAnnotation }
   | { kind: 'dict'; keyType: TypeAnnotation; valueType: TypeAnnotation }
   | { kind: 'struct'; name: string; typeArgs?: TypeAnnotation[] }  // unmangled struct name, optional generic args
+  | { kind: 'mutableStruct'; name: string; typeArgs?: TypeAnnotation[] }
   | { kind: 'optional'; element: TypeAnnotation };
 
 export interface Located {
@@ -63,6 +64,7 @@ export type Statement = (
   | VarDeclaration
   | ChangeStatement
   | ChangeItemStatement
+  | ChangeFieldStatement
   | DictSetStatement
   | CompoundAssignStatement
   | FunctionDeclaration
@@ -98,6 +100,7 @@ export interface StructDeclaration {
   typeVars?: string[];
   fields: StructField[];
   exported: boolean;
+  mutable?: boolean;
   formatExpr?: Expression | null;  // optional custom `format is EXPR` body
 }
 
@@ -155,10 +158,18 @@ export interface ChangeItemStatement {
   value: Expression;
 }
 
+export interface ChangeFieldStatement {
+  type: 'ChangeFieldStatement';
+  targetName: string;
+  fieldName: string;
+  value: Expression;
+}
+
 export type CompoundAssignTarget =
   | { kind: 'name'; name: string }
   | { kind: 'listItem'; listName: string; index: Expression }
-  | { kind: 'dictValue'; dictName: string; key: Expression };
+  | { kind: 'dictValue'; dictName: string; key: Expression }
+  | { kind: 'field'; targetName: string; fieldName: string };
 
 export interface CompoundAssignStatement {
   type: 'CompoundAssignStatement';

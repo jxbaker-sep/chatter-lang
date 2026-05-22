@@ -3,7 +3,7 @@ import {
   SayStatement, ConstantDeclaration, FunctionDeclaration, FunctionParam,
   CallStatement, ReturnStatement, BinaryExpression, UnaryExpression,
   IfStatement, RepeatStatement,
-  VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
+  VarDeclaration, ChangeStatement, ChangeItemStatement, ChangeFieldStatement, CompoundAssignStatement,
   ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
@@ -68,6 +68,7 @@ interface StructInfo {
   fields: Array<{ name: string; type: ChatterType }>;
   exported: boolean;
   imported: boolean;
+  mutable: boolean;
   typeVars?: string[];
   typeArgs?: ChatterType[];
   // If non-null, the mangled name of the formatter function for this struct.
@@ -200,6 +201,7 @@ export interface ImportedStruct {
   mangled: string;
   fields: Array<{ name: string; type: ChatterType }>;
   typeVars?: string[];
+  mutable?: boolean;
   // If the home module attached a `format is` clause, this is the mangled
   // formatter function name (already present in the program's `functions`
   // map). Importers don't need to recompile it.
@@ -416,25 +418,31 @@ export class Compiler {
       return { kind: 'optional', element: inner };
     }
     if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
-    if (a.kind === 'struct') {
-      const boundTypeVar = this.currentTypeVarBindings.get(a.name);
-      if (boundTypeVar) return boundTypeVar;
-      if (this.currentTypeVarSet.has(a.name)) {
-        return { kind: 'typeVar', name: a.name };
-      }
-      // Bare IDENT: alias takes precedence over struct lookup, since names
-      // are unique across both registries (collision is checked in pass 1).
-      const ali = this.aliases.get(a.name);
-      if (ali) {
-        if (ali.resolved) return ali.resolved;
-        return this.resolveLocalAlias(a.name, [], loc);
+    if (a.kind === 'struct' || a.kind === 'mutableStruct') {
+      if (a.kind === 'struct') {
+        const boundTypeVar = this.currentTypeVarBindings.get(a.name);
+        if (boundTypeVar) return boundTypeVar;
+        if (this.currentTypeVarSet.has(a.name)) {
+          return { kind: 'typeVar', name: a.name };
+        }
+        const ali = this.aliases.get(a.name);
+        if (ali) {
+          if (ali.resolved) return ali.resolved;
+          return this.resolveLocalAlias(a.name, [], loc);
+        }
       }
       const info = this.structs.get(a.name);
       if (!info) {
-        if (/^[A-Z][A-Za-z0-9_]*$/.test(a.name)) {
+        if (a.kind === 'struct' && /^[A-Z][A-Za-z0-9_]*$/.test(a.name)) {
           throw new CompileError(`unknown type variable '${a.name}'`, loc ?? this.currentLoc);
         }
         throw new CompileError(`unknown type '${a.name}'`, loc ?? this.currentLoc);
+      }
+      if (a.kind === 'mutableStruct' && !info.mutable) {
+        throw new CompileError(`'${a.name}' is not a mutable struct`, loc ?? this.currentLoc);
+      }
+      if (a.kind === 'struct' && info.mutable) {
+        throw new CompileError(`'${a.name}' is a mutable struct; use 'mutable ${a.name}'`, loc ?? this.currentLoc);
       }
       const declaredTypeVars = info.typeVars ?? [];
       const typeArgs = a.typeArgs ?? [];
@@ -442,7 +450,7 @@ export class Compiler {
         if (declaredTypeVars.length > 0) {
           throw new CompileError(`generic struct '${a.name}' requires type arguments`, loc ?? this.currentLoc);
         }
-        return { kind: 'struct', mangled: info.mangled };
+        return { kind: info.mutable ? 'mutableStruct' : 'struct', mangled: info.mangled };
       }
       if (declaredTypeVars.length === 0) {
         throw new CompileError(`struct '${a.name}' is not generic`, loc ?? this.currentLoc);
@@ -460,6 +468,9 @@ export class Compiler {
       const keyType = this.fromAnnotation(a.keyType, loc);
       if (keyType.kind === 'optional') {
         throw new CompileError('dictionary keys cannot be optional', loc ?? this.currentLoc);
+      }
+      if (keyType.kind === 'mutableStruct') {
+        throw new CompileError('dictionary keys cannot be mutable struct', loc ?? this.currentLoc);
       }
       return {
         kind: 'dict',
@@ -485,7 +496,8 @@ export class Compiler {
       case 'list': return this.typeContainsTypeVar(t.element);
       case 'uniqueList': return this.typeContainsTypeVar(t.element);
       case 'dict': return this.typeContainsTypeVar(t.keyType) || this.typeContainsTypeVar(t.valueType);
-      case 'struct': return (t.typeArgs ?? []).some(arg => this.typeContainsTypeVar(arg));
+      case 'struct':
+      case 'mutableStruct': return (t.typeArgs ?? []).some(arg => this.typeContainsTypeVar(arg));
       case 'optional': return this.typeContainsTypeVar(t.element);
       case 'scalar': return false;
     }
@@ -499,6 +511,7 @@ export class Compiler {
       case 'dict':
         return true;
       case 'struct':
+      case 'mutableStruct':
         return (t.typeArgs ?? []).some(arg => this.typeContainsCollection(arg));
       case 'optional':
         return false; // optional breaks collection nesting
@@ -513,10 +526,13 @@ export class Compiler {
     if ((t.kind === 'list' || t.kind === 'uniqueList') && this.typeContainsCollection(t.element)) {
       throw new CompileError(`nested collections not supported`, loc ?? this.currentLoc);
     }
+    if (t.kind === 'dict' && t.keyType.kind === 'mutableStruct') {
+      throw new CompileError('dictionary keys cannot be mutable struct', loc ?? this.currentLoc);
+    }
     if (t.kind === 'dict' && (this.typeContainsCollection(t.keyType) || this.typeContainsCollection(t.valueType))) {
       throw new CompileError(`nested collections not supported`, loc ?? this.currentLoc);
     }
-    if (t.kind === 'struct') {
+    if (t.kind === 'struct' || t.kind === 'mutableStruct') {
       for (const arg of t.typeArgs ?? []) this.rejectNestedCollections(arg, loc);
     }
   }
@@ -524,7 +540,7 @@ export class Compiler {
   /** Build a struct ChatterType for a generic instantiation and cache concrete field metadata. */
   private genericStructType(info: StructInfo, typeArgs: ChatterType[]): ChatterType {
     const mangled = monomorphizedStructName(info.mangled, typeArgs);
-    const result: ChatterType = { kind: 'struct', mangled, genericBase: info.mangled, typeArgs };
+    const result: ChatterType = { kind: info.mutable ? 'mutableStruct' : 'struct', mangled, genericBase: info.mangled, typeArgs };
     if (!this.typeContainsTypeVar(result) && !this.structInstances.has(mangled)) {
       const bindings = new Map<string, ChatterType>();
       (info.typeVars ?? []).forEach((tv, i) => bindings.set(tv, typeArgs[i]));
@@ -550,7 +566,7 @@ export class Compiler {
   }
 
   /** Resolve field metadata for a struct type, including generic templates with type-variable args. */
-  private structInfoForType(t: Extract<ChatterType, { kind: 'struct' }>): StructInfo | undefined {
+  private structInfoForType(t: Extract<ChatterType, { kind: 'struct' | 'mutableStruct' }>): StructInfo | undefined {
     const direct = this.structInfoForMangled(t.mangled);
     if (direct) return direct;
     if (!t.genericBase || !t.typeArgs) return undefined;
@@ -615,7 +631,7 @@ export class Compiler {
   // alias-of-alias). Cycle detection lives in resolveLocalAlias.
   private expandAliasBody(a: TypeAnnotation, chain: string[], loc?: SourceLocation): ChatterType {
     if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
-    if (a.kind === 'struct') {
+    if (a.kind === 'struct' || a.kind === 'mutableStruct') {
       const name = a.name;
       if (
         this.imports.has(name) ||
@@ -627,17 +643,19 @@ export class Compiler {
           loc ?? this.currentLoc,
         );
       }
-      if (this.aliases.has(name)) return this.resolveLocalAlias(name, chain, loc);
+      if (a.kind === 'struct' && this.aliases.has(name)) return this.resolveLocalAlias(name, chain, loc);
       const info = this.structs.get(name);
       if (!info) {
         throw new CompileError(`unknown type '${name}'`, loc ?? this.currentLoc);
       }
+      if (a.kind === 'mutableStruct' && !info.mutable) throw new CompileError(`'${name}' is not a mutable struct`, loc ?? this.currentLoc);
+      if (a.kind === 'struct' && info.mutable) throw new CompileError(`'${name}' is a mutable struct; use 'mutable ${name}'`, loc ?? this.currentLoc);
       const typeArgs = a.typeArgs ?? [];
       if (typeArgs.length === 0) {
         if ((info.typeVars ?? []).length > 0) {
           throw new CompileError(`generic struct '${name}' requires type arguments`, loc ?? this.currentLoc);
         }
-        return { kind: 'struct', mangled: info.mangled };
+        return { kind: info.mutable ? 'mutableStruct' : 'struct', mangled: info.mangled };
       }
       if ((info.typeVars ?? []).length !== typeArgs.length) {
         throw new CompileError(`generic struct '${name}' expects ${(info.typeVars ?? []).length} type arguments, got ${typeArgs.length}`, loc ?? this.currentLoc);
@@ -653,6 +671,9 @@ export class Compiler {
     }
     if (a.kind === 'uniqueList') {
       return { kind: 'uniqueList', element: this.expandAliasBody(a.element, chain, loc) };
+    }
+    if (a.kind === 'optional') {
+      return { kind: 'optional', element: this.expandAliasBody(a.element, chain, loc) };
     }
     return { kind: 'list', element: this.expandAliasBody(a.element, chain, loc) };
   }
@@ -676,6 +697,7 @@ export class Compiler {
         fields: info.fields,
         exported: false,
         imported: true,
+        mutable: info.mutable ?? false,
         typeVars: info.typeVars ?? [],
         formatterName: info.formatterName ?? null,
       });
@@ -705,6 +727,9 @@ export class Compiler {
     // Local struct declarations: collect names with mangled, fields filled later.
     for (const stmt of program.body) {
       if (stmt.type !== 'StructDeclaration') continue;
+      if (this.structs.has(stmt.name) && this.structs.get(stmt.name)!.imported === false) {
+        throw new CompileError(`duplicate struct name '${stmt.name}'`, locOf(stmt));
+      }
       checkCollision(stmt.name, locOf(stmt));
       const mangled = this.moduleId ? `${this.moduleId}::${stmt.name}` : stmt.name;
       // Validate empty / duplicate fields here (don't need full type resolution).
@@ -734,6 +759,7 @@ export class Compiler {
         fields: [],  // resolved next
         exported: stmt.exported,
         imported: false,
+        mutable: stmt.mutable ?? false,
         typeVars: stmt.typeVars ?? [],
       });
       this.localStructDecls.set(stmt.name, stmt);
@@ -807,7 +833,7 @@ export class Compiler {
         color.set(mangled, GRAY);
         stack.push(unmangleTypeName(mangled));
         const collectStructRefs = (t: ChatterType, out: string[]): void => {
-          if (t.kind === 'struct') {
+          if (t.kind === 'struct' || t.kind === 'mutableStruct') {
             out.push(t.genericBase ?? t.mangled);
             for (const arg of t.typeArgs ?? []) collectStructRefs(arg, out);
           } else if (t.kind === 'list' || t.kind === 'uniqueList') collectStructRefs(t.element, out);
@@ -1022,6 +1048,7 @@ export class Compiler {
         mangled: info.mangled,
         fields: info.fields,
         typeVars: info.typeVars ?? [],
+        mutable: info.mutable,
         formatterName: info.formatterName ?? null,
       });
     }
@@ -1060,7 +1087,7 @@ export class Compiler {
     formatExpr: Expression,
     declLoc: SourceLocation | undefined,
   ): void {
-    const structType: ChatterType = { kind: 'struct', mangled: info.mangled };
+    const structType: ChatterType = { kind: info.mutable ? 'mutableStruct' : 'struct', mangled: info.mangled };
     const thunkName = `${info.mangled}::__format__`;
     info.formatterName = thunkName;
 
@@ -1145,6 +1172,9 @@ export class Compiler {
         break;
       case 'ChangeItemStatement':
         this.compileChangeItem(stmt, out, bindings);
+        break;
+      case 'ChangeFieldStatement':
+        this.compileChangeField(stmt, out, bindings);
         break;
       case 'DictSetStatement':
         this.compileDictSet(stmt, out, bindings);
@@ -1658,6 +1688,47 @@ export class Compiler {
     }
   }
 
+  private compileChangeField(
+    stmt: ChangeFieldStatement,
+    out: Instruction[],
+    bindings: Scope,
+  ): void {
+    const resolved = this.lookupBindingWithOuter(stmt.targetName, bindings);
+    if (!resolved) {
+      throw new CompileError(`Cannot change field of '${stmt.targetName}': no such binding`, this.currentLoc);
+    }
+    const info = resolved.info;
+    let fieldType: ChatterType | null = null;
+    if (info.type) {
+      if (info.type.kind === 'struct') {
+        throw new CompileError(
+          `cannot mutate immutable struct ${unmangleTypeName(info.type.mangled)} — use 'with' for copy-on-update`,
+          this.currentLoc,
+        );
+      }
+      if (info.type.kind !== 'mutableStruct') {
+        throw new CompileError(`Cannot change field of '${stmt.targetName}': not a mutable struct (type ${typeToString(info.type)})`, this.currentLoc);
+      }
+      const sinfo = this.structInfoForType(info.type);
+      const decl = sinfo?.fields.find(d => d.name === stmt.fieldName);
+      if (!decl) {
+        throw new CompileError(`struct '${unmangleTypeName(info.type.mangled)}' has no field '${stmt.fieldName}'`, this.currentLoc);
+      }
+      fieldType = decl.type;
+      const vt = this.staticType(stmt.value, bindings);
+      if (!this.canAssignToExpected(fieldType, vt, stmt.value)) {
+        throw new CompileError(
+          `Type mismatch: cannot change field '${stmt.fieldName}' from ${typeToString(fieldType)} to ${vt ? typeToString(vt) : 'unknown'}`,
+          this.currentLoc,
+        );
+      }
+    }
+    this.emit(out, { op: 'LOAD', name: info.mangled });
+    if (fieldType) this.compileExprWithExpected(stmt.value, fieldType, out, bindings);
+    else this.compileExpr(stmt.value, out, bindings);
+    this.emit(out, { op: 'MUTABLE_STRUCT_SET', fieldName: stmt.fieldName });
+  }
+
   private compileListMutationTarget(listName: string, bindings: Scope, op: string): { type: ChatterType | null; mangled: string } {
     const resolved = this.lookupBindingWithOuter(listName, bindings);
     if (!resolved) {
@@ -1804,6 +1875,10 @@ export class Compiler {
     }
     if (target.kind === 'dictValue') {
       this.compileCompoundAssignDictValue(stmt, target, out, bindings);
+      return;
+    }
+    if (target.kind === 'field') {
+      this.compileCompoundAssignField(stmt, target, out, bindings);
       return;
     }
     const name = target.name;
@@ -1979,6 +2054,48 @@ export class Compiler {
     this.emit(out, { op: 'DICT_SET' });
     this.emit(out, { op: 'DELETE', name: dictTmp });
     this.emit(out, { op: 'DELETE', name: keyTmp });
+  }
+
+  private compileCompoundAssignField(
+    stmt: CompoundAssignStatement,
+    target: { kind: 'field'; targetName: string; fieldName: string },
+    out: Instruction[],
+    bindings: Scope,
+  ): void {
+    const resolved = this.lookupBindingWithOuter(target.targetName, bindings);
+    if (!resolved) {
+      throw new CompileError(`Cannot ${stmt.op} field of '${target.targetName}': no such binding`, this.currentLoc);
+    }
+    const info = resolved.info;
+    if (info.type) {
+      if (info.type.kind === 'struct') {
+        throw new CompileError(
+          `cannot mutate immutable struct ${unmangleTypeName(info.type.mangled)} — use 'with' for copy-on-update`,
+          this.currentLoc,
+        );
+      }
+      if (info.type.kind !== 'mutableStruct') {
+        throw new CompileError(`Cannot ${stmt.op} field of '${target.targetName}': not a mutable struct (type ${typeToString(info.type)})`, this.currentLoc);
+      }
+      const sinfo = this.structInfoForType(info.type);
+      const decl = sinfo?.fields.find(d => d.name === target.fieldName);
+      if (!decl) {
+        throw new CompileError(`struct '${unmangleTypeName(info.type.mangled)}' has no field '${target.fieldName}'`, this.currentLoc);
+      }
+      if (!(decl.type.kind === 'scalar' && decl.type.name === 'number')) {
+        throw new CompileError(`Cannot ${stmt.op} field '${target.fieldName}' of '${target.targetName}': its type is ${typeToString(decl.type)}, not number`, this.currentLoc);
+      }
+    }
+    const targetTmp = this.freshName('cassign_struct');
+    this.emit(out, { op: 'LOAD', name: info.mangled });
+    this.emit(out, { op: 'STORE', name: targetTmp });
+    this.emit(out, { op: 'LOAD', name: targetTmp });
+    this.emit(out, { op: 'LOAD', name: targetTmp });
+    this.emit(out, { op: 'MUTABLE_STRUCT_GET', fieldName: target.fieldName });
+    this.compileExpr(stmt.value, out, bindings);
+    this.emitArithOp(stmt.op, out);
+    this.emit(out, { op: 'MUTABLE_STRUCT_SET', fieldName: target.fieldName });
+    this.emit(out, { op: 'DELETE', name: targetTmp });
   }
 
   private compileFuncDecl(stmt: FunctionDeclaration): void {
@@ -2203,7 +2320,8 @@ export class Compiler {
           }
           return;
         case 'struct':
-          if (concrete.kind !== 'struct') {
+        case 'mutableStruct':
+          if (concrete.kind !== annotated.kind) {
             throw new CompileError(`Type mismatch in call to '${call.name}' arg '${paramName}': expected ${typeToString(annotated)}, got ${typeToString(concrete)}`, this.currentLoc);
           }
           if (annotated.genericBase && concrete.genericBase && annotated.genericBase === concrete.genericBase && annotated.typeArgs && concrete.typeArgs && annotated.typeArgs.length === concrete.typeArgs.length) {
@@ -2810,8 +2928,16 @@ export class Compiler {
     const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
     this.loopStack.push(frame);
     const bodyScope = new Scope(bindings);
-    for (const s of stmt.body) {
-      this.compileStatement(s, out, bodyScope);
+    const detected = this.detectOptionalNoneCheck(stmt.condition, bindings);
+    if (detected && !detected.isNoneCheck) {
+      this.pushNarrowingScope(new Map([[detected.name, detected.innerType]]));
+    }
+    try {
+      for (const s of stmt.body) {
+        this.compileStatement(s, out, bodyScope);
+      }
+    } finally {
+      if (detected && !detected.isNoneCheck) this.popNarrowingScope();
     }
     this.loopStack.pop();
     const continueIdx = out.length;
@@ -2907,7 +3033,8 @@ export class Compiler {
       case 'scalar':
         return concrete.kind === 'scalar' && template.name === concrete.name;
       case 'struct':
-        if (concrete.kind !== 'struct') return false;
+      case 'mutableStruct':
+        if (concrete.kind !== template.kind) return false;
         if (!template.typeArgs || !concrete.typeArgs) {
           return template.mangled === concrete.mangled;
         }
@@ -2987,7 +3114,7 @@ export class Compiler {
       }
     }
     const args = typeVars.map(tv => inferred.get(tv)!);
-    const st = this.genericStructType(info, args) as Extract<ChatterType, { kind: 'struct' }>;
+    const st = this.genericStructType(info, args) as Extract<ChatterType, { kind: 'struct' | 'mutableStruct' }>;
     const concrete = this.structInfoForMangled(st.mangled);
     if (!concrete) throw new CompileError(`internal error: missing generic struct instance '${expr.structName}'`, this.currentLoc);
     return concrete;
@@ -3400,7 +3527,7 @@ export class Compiler {
           this.compileExprWithExpected(provided.get(decl.name)!, decl.type, out, bindings);
           fieldNames.push(decl.name);
         }
-        this.emit(out, { op: 'MAKE_STRUCT', typeName: concreteInfo.mangled, fieldNames });
+        this.emit(out, { op: concreteInfo.mutable ? 'MAKE_MUTABLE_STRUCT' : 'MAKE_STRUCT', typeName: concreteInfo.mangled, fieldNames } as InstructionKind);
         break;
       }
       case 'FieldAccessExpression': {
@@ -3421,12 +3548,12 @@ export class Compiler {
             `dictionary has no field '${expr.fieldName}' (use 'keys of', 'values of', or 'value of K in')`,
           this.currentLoc);
         }
-        if (tt !== null && tt.kind !== 'struct') {
+        if (tt !== null && tt.kind !== 'struct' && tt.kind !== 'mutableStruct') {
           throw new CompileError(
             `field access requires a struct, got ${typeToString(tt)}`,
           this.currentLoc);
         }
-        if (tt && tt.kind === 'struct') {
+        if (tt && (tt.kind === 'struct' || tt.kind === 'mutableStruct')) {
           // Look up info by mangled to validate field exists.
           const info = this.structInfoForType(tt)
           if (info && !info.fields.find(d => d.name === expr.fieldName)) {
@@ -3436,18 +3563,18 @@ export class Compiler {
           }
         }
         this.compileExpr(expr.target, out, bindings);
-        this.emit(out, { op: 'STRUCT_GET', fieldName: expr.fieldName });
+        this.emit(out, { op: tt?.kind === 'mutableStruct' ? 'MUTABLE_STRUCT_GET' : 'STRUCT_GET', fieldName: expr.fieldName } as InstructionKind);
         break;
       }
       case 'StructWithExpression': {
         const tt = this.staticType(expr.target, bindings);
-        if (tt !== null && tt.kind !== 'struct') {
+        if (tt !== null && tt.kind !== 'struct' && tt.kind !== 'mutableStruct') {
           throw new CompileError(
             `'with' requires a struct, got ${typeToString(tt)}`,
           this.currentLoc);
         }
         let info: StructInfo | undefined;
-        if (tt && tt.kind === 'struct') {
+        if (tt && (tt.kind === 'struct' || tt.kind === 'mutableStruct')) {
           info = this.structInfoForType(tt);
         }
         const seenU = new Set<string>();
@@ -3481,7 +3608,7 @@ export class Compiler {
           else this.compileExpr(u.value, out, bindings);
           fieldNames.push(u.name);
         }
-        this.emit(out, { op: 'STRUCT_WITH', fieldNames });
+        this.emit(out, { op: tt?.kind === 'mutableStruct' ? 'MUTABLE_STRUCT_WITH' : 'STRUCT_WITH', fieldNames } as InstructionKind);
         break;
       }
       case 'MapExpression':
@@ -3925,6 +4052,7 @@ export class Compiler {
       if (kt) {
         const c = kt;
         if (c.kind === 'optional') throw new CompileError('dictionary keys cannot be optional', this.currentLoc);
+        if (c.kind === 'mutableStruct') throw new CompileError('dictionary keys cannot be mutable struct', this.currentLoc);
         if (kInferred === null) kInferred = c;
         else if (!typesEqual(kInferred, c)) {
           throw new CompileError(
@@ -4400,7 +4528,10 @@ export class Compiler {
         for (const e of expr.entries) {
           if (kInf === null) {
             const c = elementCode(this.staticType(e.key, bindings));
-            if (c !== null) kInf = c;
+            if (c !== null) {
+              if (c.kind === 'mutableStruct') return null;
+              kInf = c;
+            }
           }
           if (vInf === null) {
             const c = elementCode(this.staticType(e.value, bindings));
@@ -4459,9 +4590,9 @@ export class Compiler {
         try {
           const concreteInfo = this.resolveMakeStruct(expr, info, bindings);
           if ((info.typeVars ?? []).length > 0) {
-            return { kind: 'struct', mangled: concreteInfo.mangled, genericBase: info.mangled, typeArgs: concreteInfo.typeArgs ?? [] };
+            return { kind: info.mutable ? 'mutableStruct' : 'struct', mangled: concreteInfo.mangled, genericBase: info.mangled, typeArgs: concreteInfo.typeArgs ?? [] };
           }
-          return { kind: 'struct', mangled: concreteInfo.mangled };
+          return { kind: info.mutable ? 'mutableStruct' : 'struct', mangled: concreteInfo.mangled };
         } catch {
           return null;
         }
@@ -4477,7 +4608,7 @@ export class Compiler {
           }
           return null;
         }
-        if (tt && tt.kind === 'struct') {
+        if (tt && (tt.kind === 'struct' || tt.kind === 'mutableStruct')) {
           const info = this.structInfoForType(tt)
           const f = info?.fields.find(d => d.name === expr.fieldName);
           return f?.type ?? null;

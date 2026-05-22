@@ -1,0 +1,6 @@
+true
+Box(value: 12)
+Box(value: 12)
+Node(value: "a", next: Node(value: "b", next: <cycle>))
+a
+b

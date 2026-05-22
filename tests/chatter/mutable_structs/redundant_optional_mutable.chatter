@@ -1,0 +1,6 @@
+mutable struct Point
+    number x
+end struct
+constant x is none
+function f takes optional optional mutable Point p is
+end function

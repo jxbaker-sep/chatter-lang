@@ -40,7 +40,7 @@ const KEYWORDS = new Set([
   'type',
   'sort', 'map', 'filter', 'reduce',
   'using', 'where', 'starting', 'ascending', 'descending', 'accumulator',
-  'optional', 'none',
+  'optional', 'none', 'mutable',
 ]);
 const TYPES = new Set(['number', 'boolean', 'string']);
 

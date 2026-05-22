@@ -1,0 +1,10 @@
+Point(x: 1, y: 2)
+Point(x: 4, y: 0)
+Point(x: 5, y: 0)
+false
+Point(x: 5, y: 99)
+Point(x: 5, y: 42)
+true
+2
+Point(x: 7, y: 99)
+Point(x: 11, y: 42)

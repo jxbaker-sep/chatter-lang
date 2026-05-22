@@ -1,0 +1,11 @@
+struct Point
+    number x
+end struct
+mutable struct MPoint
+    number x
+end struct
+function f takes Point pt is
+    say pt
+end function
+constant p is make MPoint with x 1
+f p

@@ -7,7 +7,7 @@ import {
   BinaryExpression, UnaryExpression, IdentifierExpression,
   NumberLiteral, StringLiteral, BooleanLiteral, ItExpression,
   IfStatement, IfBranch, RepeatStatement,
-  VarDeclaration, ChangeStatement, ChangeItemStatement, CompoundAssignStatement,
+  VarDeclaration, ChangeStatement, ChangeItemStatement, ChangeFieldStatement, CompoundAssignStatement,
   ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
@@ -57,7 +57,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'type',
   'sort', 'map', 'filter', 'reduce',
   'using', 'where', 'starting', 'ascending', 'descending', 'accumulator',
-  'optional', 'none',
+  'optional', 'none', 'mutable',
 ]);;
 
 // Keywords that legally begin an expression (see parsePrimary / parseLogicalNot).
@@ -209,7 +209,10 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'divide':   return parseDivideStatement();
         case 'function': return parseFunctionDeclaration(false);
         case 'export':   return parseExportStatement();
-        case 'struct':   return parseStructDeclaration(false);
+        case 'mutable':
+          if (tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'struct') return parseStructDeclaration(false, true);
+          throw new ParseError(`Unexpected keyword '${tok.value}'`, tok);
+        case 'struct':   return parseStructDeclaration(false, false);
         case 'type':     return parseTypeAliasDeclaration(false);
         case 'use':      return parseUseStatement();
         case 'return':   return parseReturnStatement();
@@ -547,7 +550,7 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'VarDeclaration', name: nameTok.value, value };
   }
 
-  function parseChangeStatement(): ChangeStatement | ChangeItemStatement | DictSetStatement {
+  function parseChangeStatement(): ChangeStatement | ChangeItemStatement | ChangeFieldStatement | DictSetStatement {
     consume('KEYWORD', 'change');
     // `change item EXPR of IDENT to EXPR` — list element assignment
     if (peek().type === 'KEYWORD' && peek().value === 'item') {
@@ -561,6 +564,20 @@ export function parse(tokens: Token[], source?: string): Program {
       const value = parseExpression();
       consumeNewline();
       return { type: 'ChangeItemStatement', listName: nameTok.value, index, value };
+    }
+    // `change FIELD of IDENT to EXPR` — mutable struct field assignment.
+    if ((peek().type === 'IDENT' || peek().type === 'KEYWORD')
+        && peek().value !== 'item'
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of'
+        && tokens[pos + 2]?.type === 'IDENT'
+        && tokens[pos + 3]?.type === 'KEYWORD' && tokens[pos + 3]?.value === 'to') {
+      const fieldTok = advance();
+      advance(); // of
+      const targetTok = consume('IDENT');
+      consume('KEYWORD', 'to');
+      const value = parseExpression();
+      consumeNewline();
+      return { type: 'ChangeFieldStatement', targetName: targetTok.value, fieldName: fieldTok.value, value };
     }
     // `change value of EXPR in IDENT to EXPR` — dictionary insert/overwrite.
     if (peek().type === 'IDENT' && peek().value === 'value'
@@ -600,13 +617,23 @@ export function parse(tokens: Token[], source?: string): Program {
       return { kind: 'listItem', listName: nameTok.value, index };
     }
     if (peek().type === 'IDENT' && peek().value === 'value'
-        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of'
+        && !(tokens[pos + 2]?.type === 'IDENT' && !(tokens[pos + 3]?.type === 'KEYWORD' && tokens[pos + 3]?.value === 'in'))) {
       advance(); // value
       advance(); // of
       const key = parsePrimary();
       consume('KEYWORD', 'in');
       const nameTok = consume('IDENT');
       return { kind: 'dictValue', dictName: nameTok.value, key };
+    }
+    if ((peek().type === 'IDENT' || peek().type === 'KEYWORD')
+        && peek().value !== 'item'
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of'
+        && tokens[pos + 2]?.type === 'IDENT') {
+      const fieldTok = advance();
+      advance();
+      const targetTok = consume('IDENT');
+      return { kind: 'field', targetName: targetTok.value, fieldName: fieldTok.value };
     }
     const nameTok = consume('IDENT');
     return { kind: 'name', name: nameTok.value };
@@ -663,6 +690,20 @@ export function parse(tokens: Token[], source?: string): Program {
       consume('KEYWORD', 'list');
       consume('KEYWORD', 'of');
       return { kind: 'uniqueList', element: parseTypeAnnotation() };
+    }
+    if (tok.type === 'KEYWORD' && tok.value === 'mutable') {
+      advance();
+      const nameTok = consume('IDENT');
+      let typeArgs: TypeAnnotation[] | undefined;
+      if (peek().type === 'KEYWORD' && peek().value === 'of') {
+        advance();
+        typeArgs = [parseTypeAnnotation()];
+        while (peek().type === 'KEYWORD' && peek().value === 'and') {
+          advance();
+          typeArgs.push(parseTypeAnnotation());
+        }
+      }
+      return { kind: 'mutableStruct', name: nameTok.value, typeArgs };
     }
     if (tok.type === 'KEYWORD' && tok.value === 'dictionary') {
       advance();
@@ -840,8 +881,17 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseExportStatement(): FunctionDeclaration | StructDeclaration | TypeAliasDeclaration {
     const exportTok = consume('KEYWORD', 'export');
+    if (peek().type === 'KEYWORD' && peek().value === 'mutable'
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'struct') {
+      const sd = parseStructDeclaration(true, true);
+      (sd as any).line = exportTok.line;
+      (sd as any).col = exportTok.col;
+      (sd as any).length = Math.max(1, exportTok.value.length);
+      (sd as any).file = exportTok.file;
+      return sd;
+    }
     if (peek().type === 'KEYWORD' && peek().value === 'struct') {
-      const sd = parseStructDeclaration(true);
+      const sd = parseStructDeclaration(true, false);
       (sd as any).line = exportTok.line;
       (sd as any).col = exportTok.col;
       (sd as any).length = Math.max(1, exportTok.value.length);
@@ -858,7 +908,7 @@ export function parse(tokens: Token[], source?: string): Program {
     }
     if (peek().type !== 'KEYWORD' || peek().value !== 'function') {
       throw new ParseError(
-        `'export' must be followed by 'function', 'struct', or 'type'`,
+        `'export' must be followed by 'function', 'struct', 'mutable struct', or 'type'`,
         peek(),
       );
     }
@@ -870,7 +920,8 @@ export function parse(tokens: Token[], source?: string): Program {
     return fn;
   }
 
-  function parseStructDeclaration(exported: boolean): StructDeclaration {
+  function parseStructDeclaration(exported: boolean, mutable = false): StructDeclaration {
+    const mutableTok = mutable ? consume('KEYWORD', 'mutable') : null;
     const structTok = consume('KEYWORD', 'struct');
     const nameTok = consume('IDENT');
     const typeVars: string[] = [];
@@ -943,7 +994,11 @@ export function parse(tokens: Token[], source?: string): Program {
           continue;
         }
         const fieldType = parseTypeAnnotation();
-        const fieldNameTok = consume('IDENT');
+        const fieldNameTok = peek();
+        if (fieldNameTok.type !== 'IDENT' && fieldNameTok.type !== 'KEYWORD') {
+          throw new ParseError(`Expected field name, got ${fieldNameTok.type} '${fieldNameTok.value}'`, fieldNameTok);
+        }
+        advance();
         fields.push({ name: fieldNameTok.value, fieldType });
         consumeNewline();
       }
@@ -958,12 +1013,13 @@ export function parse(tokens: Token[], source?: string): Program {
       typeVars,
       fields,
       exported,
+      mutable,
       formatExpr,
     };
-    (node as any).line = structTok.line;
-    (node as any).col = structTok.col;
-    (node as any).length = Math.max(1, structTok.value.length);
-    (node as any).file = structTok.file;
+    (node as any).line = (mutableTok ?? structTok).line;
+    (node as any).col = (mutableTok ?? structTok).col;
+    (node as any).length = Math.max(1, (mutableTok ?? structTok).value.length);
+    (node as any).file = (mutableTok ?? structTok).file;
     return node;
   }
 
@@ -1408,7 +1464,7 @@ export function parse(tokens: Token[], source?: string): Program {
       const updates: Array<{ name: string; value: Expression }> = [];
       const parsePair = () => {
         const fnTok = peek();
-        if (fnTok.type !== 'IDENT') {
+        if (fnTok.type !== 'IDENT' && fnTok.type !== 'KEYWORD') {
           throw new ParseError(
             `Expected field name after 'with', got ${fnTok.type} '${fnTok.value}'`,
             fnTok,
@@ -1419,7 +1475,7 @@ export function parse(tokens: Token[], source?: string): Program {
         updates.push({ name: fnTok.value, value });
       };
       parsePair();
-      while (peek().type === 'COMMA' && tokens[pos + 1]?.type === 'IDENT') {
+      while (peek().type === 'COMMA' && (tokens[pos + 1]?.type === 'IDENT' || (tokens[pos + 1]?.type === 'KEYWORD' && !EXPRESSION_START_KEYWORDS.has(tokens[pos + 1].value)))) {
         advance();
         parsePair();
       }
@@ -1830,7 +1886,7 @@ export function parse(tokens: Token[], source?: string): Program {
         // Parse first FIELD EXPR pair.
         const parsePair = () => {
           const fnTok = peek();
-          if (fnTok.type !== 'IDENT') {
+          if (fnTok.type !== 'IDENT' && fnTok.type !== 'KEYWORD') {
             throw new ParseError(
               `Expected field name after 'with' in 'make ${nameTok.value}', got ${fnTok.type} '${fnTok.value}'`,
               fnTok,
@@ -1848,7 +1904,7 @@ export function parse(tokens: Token[], source?: string): Program {
           });
         };
         parsePair();
-        while (peek().type === 'COMMA' && tokens[pos + 1]?.type === 'IDENT') {
+        while (peek().type === 'COMMA' && (tokens[pos + 1]?.type === 'IDENT' || (tokens[pos + 1]?.type === 'KEYWORD' && !EXPRESSION_START_KEYWORDS.has(tokens[pos + 1].value)))) {
           advance();
           parsePair();
         }
@@ -1869,6 +1925,15 @@ export function parse(tokens: Token[], source?: string): Program {
       if (tok.value === 'accumulator') {
         advance();
         return { type: 'IdentifierExpression', name: 'accumulator' } as IdentifierExpression;
+      }
+      if (indexSlotDepth === 0
+          && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
+        advance();
+        advance();
+        const target = parsePrimary();
+        const node: FieldAccessExpression = { type: 'FieldAccessExpression', fieldName: tok.value, target };
+        withLoc(node, tok);
+        return node;
       }
     }
 

@@ -1,0 +1,1 @@
+ERROR: Type mismatch: cannot compare struct Point and mutable MPoint

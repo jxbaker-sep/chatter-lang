@@ -6,6 +6,7 @@ export type ChatterType =
   | { kind: 'uniqueList'; element: ChatterType }
   | { kind: 'dict'; keyType: ChatterType; valueType: ChatterType }
   | { kind: 'struct'; mangled: string; genericBase?: string; typeArgs?: ChatterType[] }
+  | { kind: 'mutableStruct'; mangled: string; genericBase?: string; typeArgs?: ChatterType[] }
   | { kind: 'typeVar'; name: string }
   | { kind: 'optional'; element: ChatterType };
 
@@ -21,6 +22,7 @@ export function typeCode(t: ChatterType): string {
   switch (t.kind) {
     case 'scalar': return t.name;
     case 'struct': return 'struct:' + t.mangled;
+    case 'mutableStruct': return 'mstruct:' + t.mangled;
     case 'typeVar': return 'typevar:' + t.name;
     case 'list': return 'list:' + typeCode(t.element);
     case 'uniqueList': return 'uniqueList:' + typeCode(t.element);
@@ -39,6 +41,7 @@ export function typesEqual(a: ChatterType, b: ChatterType): boolean {
   switch (a.kind) {
     case 'scalar': return b.kind === 'scalar' && a.name === b.name;
     case 'struct': return b.kind === 'struct' && a.mangled === b.mangled;
+    case 'mutableStruct': return b.kind === 'mutableStruct' && a.mangled === b.mangled;
     case 'typeVar': return b.kind === 'typeVar' && a.name === b.name;
     case 'list': return b.kind === 'list' && typesEqual(a.element, b.element);
     case 'uniqueList': return b.kind === 'uniqueList' && typesEqual(a.element, b.element);
@@ -56,6 +59,12 @@ export function typeToString(t: ChatterType): string {
       }
       return 'struct ' + unmangleTypeName(t.mangled);
     }
+    case 'mutableStruct': {
+      if (t.genericBase && t.typeArgs && t.typeArgs.length > 0) {
+        return `mutable ${unmangleTypeName(t.genericBase)} of ${t.typeArgs.map(typeToString).join(' and ')}`;
+      }
+      return 'mutable ' + unmangleTypeName(t.mangled);
+    }
     case 'typeVar': return t.name;
     case 'list': return 'list of ' + typeToString(t.element);
     case 'uniqueList': return 'unique list of ' + typeToString(t.element);
@@ -68,12 +77,13 @@ export function substituteTypeVars(t: ChatterType, map: Map<string, ChatterType>
   switch (t.kind) {
     case 'typeVar': return map.get(t.name) ?? t;
     case 'scalar': return t;
-    case 'struct': {
+    case 'struct':
+    case 'mutableStruct': {
       if (!t.typeArgs) return t;
       const typeArgs = t.typeArgs.map(arg => substituteTypeVars(arg, map));
       const genericBase = t.genericBase;
       return {
-        kind: 'struct',
+        kind: t.kind,
         genericBase,
         typeArgs,
         mangled: genericBase ? monomorphizedStructName(genericBase, typeArgs) : t.mangled,
@@ -106,8 +116,9 @@ export function bindTypeVars(
   if (annotated.kind !== concrete.kind) return false;
   switch (annotated.kind) {
     case 'scalar': return concrete.kind === 'scalar' && annotated.name === concrete.name;
-    case 'struct': {
-      if (concrete.kind !== 'struct') return false;
+    case 'struct':
+    case 'mutableStruct': {
+      if (concrete.kind !== annotated.kind) return false;
       if (annotated.genericBase && concrete.genericBase && annotated.genericBase === concrete.genericBase && annotated.typeArgs && concrete.typeArgs && annotated.typeArgs.length === concrete.typeArgs.length) {
         for (let i = 0; i < annotated.typeArgs.length; i++) {
           if (!bindTypeVars(annotated.typeArgs[i], concrete.typeArgs[i], bindings)) return false;

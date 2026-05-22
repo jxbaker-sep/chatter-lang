@@ -78,6 +78,10 @@ export type InstructionKind =
   | { op: 'MAKE_STRUCT'; typeName: string; fieldNames: string[] }   // typeName is mangled
   | { op: 'STRUCT_GET'; fieldName: string }
   | { op: 'STRUCT_WITH'; fieldNames: string[] }
+  | { op: 'MAKE_MUTABLE_STRUCT'; typeName: string; fieldNames: string[] }
+  | { op: 'MUTABLE_STRUCT_GET'; fieldName: string }
+  | { op: 'MUTABLE_STRUCT_WITH'; fieldNames: string[] }
+  | { op: 'MUTABLE_STRUCT_SET'; fieldName: string }
   | { op: 'SORT_LIST'; byKey: boolean; descending: boolean }
   | { op: 'LOAD_SLOT'; slot: number; name: string }   // function-frame local read; name for error
   | { op: 'STORE_SLOT'; slot: number }                // function-frame local write

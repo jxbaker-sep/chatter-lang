@@ -1,0 +1,4 @@
+use Counter, make_counter, inc from "lib"
+constant c is the result of make_counter 4
+inc c
+say c
