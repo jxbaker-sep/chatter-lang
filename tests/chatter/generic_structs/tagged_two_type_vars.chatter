@@ -1,0 +1,9 @@
+struct Tagged over T and U
+    T value
+    U tag
+end struct
+
+constant t is make Tagged with value 99, tag "score"
+say t
+say value of t
+say tag of t

@@ -106,10 +106,12 @@ function invalidateUniqueListCache(u: ChatterUniqueList): void {
   u._iterCache = undefined;
 }
 
-// Strip module prefix `mN::Name` → `Name` for user-facing display.
+// Strip module prefix and generic instantiation suffix for user-facing display.
 function unmangleStructName(mangled: string): string {
   const idx = mangled.indexOf('::');
-  return idx === -1 ? mangled : mangled.slice(idx + 2);
+  const unprefixed = idx === -1 ? mangled : mangled.slice(idx + 2);
+  const genIdx = unprefixed.indexOf('$');
+  return genIdx === -1 ? unprefixed : unprefixed.slice(0, genIdx);
 }
 
 function describe(v: ChatterValue): string {

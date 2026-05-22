@@ -1,0 +1,4 @@
+use Box from "boxes"
+constant b is make Box with value "imported"
+say b
+say value of b

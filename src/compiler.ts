@@ -24,7 +24,7 @@ import {
 } from './ast';
 import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
 import { ChatterError, SourceLocation } from './errors';
-import { ChatterType, typesEqual, typeToString, typeCode, unmangleTypeName, substituteTypeVars, bindTypeVars } from './types';
+import { ChatterType, typesEqual, typeToString, typeCode, unmangleTypeName, substituteTypeVars, bindTypeVars, monomorphizedStructName } from './types';
 export type { ChatterType } from './types';
 
 export class CompileError extends ChatterError {
@@ -68,6 +68,8 @@ interface StructInfo {
   fields: Array<{ name: string; type: ChatterType }>;
   exported: boolean;
   imported: boolean;
+  typeVars?: string[];
+  typeArgs?: ChatterType[];
   // If non-null, the mangled name of the formatter function for this struct.
   // Populated during pass 1d (local structs) or pass 1a (imported structs).
   formatterName?: string | null;
@@ -197,6 +199,7 @@ export interface ImportedFunction {
 export interface ImportedStruct {
   mangled: string;
   fields: Array<{ name: string; type: ChatterType }>;
+  typeVars?: string[];
   // If the home module attached a `format is` clause, this is the mangled
   // formatter function name (already present in the program's `functions`
   // map). Importers don't need to recompile it.
@@ -269,6 +272,7 @@ export class Compiler {
   // local declarations (resolved fully) and imported structs.
   private structs = new Map<string, StructInfo>();
   private localStructDecls = new Map<string, StructDeclaration & Located>();
+  private structInstances = new Map<string, StructInfo>();
 
   // Type-alias registry: local name -> info. Includes both local declarations
   // (raw `body` field, resolved lazily during pass 1b with cycle detection)
@@ -395,7 +399,25 @@ export class Compiler {
         }
         throw new CompileError(`unknown type '${a.name}'`, loc ?? this.currentLoc);
       }
-      return { kind: 'struct', mangled: info.mangled };
+      const declaredTypeVars = info.typeVars ?? [];
+      const typeArgs = a.typeArgs ?? [];
+      if (typeArgs.length === 0) {
+        if (declaredTypeVars.length > 0) {
+          throw new CompileError(`generic struct '${a.name}' requires type arguments`, loc ?? this.currentLoc);
+        }
+        return { kind: 'struct', mangled: info.mangled };
+      }
+      if (declaredTypeVars.length === 0) {
+        throw new CompileError(`struct '${a.name}' is not generic`, loc ?? this.currentLoc);
+      }
+      if (typeArgs.length !== declaredTypeVars.length) {
+        throw new CompileError(
+          `generic struct '${a.name}' expects ${declaredTypeVars.length} type argument${declaredTypeVars.length === 1 ? '' : 's'}, got ${typeArgs.length}`,
+          loc ?? this.currentLoc,
+        );
+      }
+      const resolvedArgs = typeArgs.map(arg => this.fromAnnotation(arg, loc));
+      return this.genericStructType(info, resolvedArgs);
     }
     if (a.kind === 'dict') {
       return {
@@ -412,6 +434,95 @@ export class Compiler {
 
   private elementAnnotationToCode(e: TypeAnnotation, loc?: SourceLocation): ChatterType {
     return this.fromAnnotation(e, loc);
+  }
+
+
+  /** Return true when a type contains an unbound generic type variable. */
+  private typeContainsTypeVar(t: ChatterType): boolean {
+    switch (t.kind) {
+      case 'typeVar': return true;
+      case 'list': return this.typeContainsTypeVar(t.element);
+      case 'uniqueList': return this.typeContainsTypeVar(t.element);
+      case 'dict': return this.typeContainsTypeVar(t.keyType) || this.typeContainsTypeVar(t.valueType);
+      case 'struct': return (t.typeArgs ?? []).some(arg => this.typeContainsTypeVar(arg));
+      case 'scalar': return false;
+    }
+  }
+
+  /** Return true when a type is or directly contains a collection type. */
+  private typeContainsCollection(t: ChatterType): boolean {
+    switch (t.kind) {
+      case 'list':
+      case 'uniqueList':
+      case 'dict':
+        return true;
+      case 'struct':
+        return (t.typeArgs ?? []).some(arg => this.typeContainsCollection(arg));
+      case 'scalar':
+      case 'typeVar':
+        return false;
+    }
+  }
+
+  /** Enforce v1's no-nested-collections rule after generic substitution. */
+  private rejectNestedCollections(t: ChatterType, loc?: SourceLocation): void {
+    if ((t.kind === 'list' || t.kind === 'uniqueList') && this.typeContainsCollection(t.element)) {
+      throw new CompileError(`nested collections not supported`, loc ?? this.currentLoc);
+    }
+    if (t.kind === 'dict' && (this.typeContainsCollection(t.keyType) || this.typeContainsCollection(t.valueType))) {
+      throw new CompileError(`nested collections not supported`, loc ?? this.currentLoc);
+    }
+    if (t.kind === 'struct') {
+      for (const arg of t.typeArgs ?? []) this.rejectNestedCollections(arg, loc);
+    }
+  }
+
+  /** Build a struct ChatterType for a generic instantiation and cache concrete field metadata. */
+  private genericStructType(info: StructInfo, typeArgs: ChatterType[]): ChatterType {
+    const mangled = monomorphizedStructName(info.mangled, typeArgs);
+    const result: ChatterType = { kind: 'struct', mangled, genericBase: info.mangled, typeArgs };
+    if (!this.typeContainsTypeVar(result) && !this.structInstances.has(mangled)) {
+      const bindings = new Map<string, ChatterType>();
+      (info.typeVars ?? []).forEach((tv, i) => bindings.set(tv, typeArgs[i]));
+      const fields = info.fields.map(f => ({ name: f.name, type: substituteTypeVars(f.type, bindings) }));
+      for (const f of fields) this.rejectNestedCollections(f.type);
+      this.structInstances.set(mangled, {
+        ...info,
+        mangled,
+        fields,
+        typeVars: [],
+        typeArgs,
+      });
+    }
+    return result;
+  }
+
+  /** Find either a nominal struct declaration or a cached generic instantiation by mangled name. */
+  private structInfoForMangled(mangled: string): StructInfo | undefined {
+    const inst = this.structInstances.get(mangled);
+    if (inst) return inst;
+    for (const v of this.structs.values()) if (v.mangled === mangled) return v;
+    return undefined;
+  }
+
+  /** Resolve field metadata for a struct type, including generic templates with type-variable args. */
+  private structInfoForType(t: Extract<ChatterType, { kind: 'struct' }>): StructInfo | undefined {
+    const direct = this.structInfoForMangled(t.mangled);
+    if (direct) return direct;
+    if (!t.genericBase || !t.typeArgs) return undefined;
+    let base: StructInfo | undefined;
+    for (const v of this.structs.values()) {
+      if (v.mangled === t.genericBase) { base = v; break; }
+    }
+    if (!base) return undefined;
+    const bindings = new Map<string, ChatterType>();
+    (base.typeVars ?? []).forEach((tv, i) => bindings.set(tv, t.typeArgs![i]));
+    return {
+      ...base,
+      mangled: t.mangled,
+      fields: base.fields.map(f => ({ name: f.name, type: substituteTypeVars(f.type, bindings) })),
+      typeArgs: t.typeArgs,
+    };
   }
 
   // Resolve `empty NAME` where NAME must be a type alias (or struct ref, which
@@ -477,7 +588,17 @@ export class Compiler {
       if (!info) {
         throw new CompileError(`unknown type '${name}'`, loc ?? this.currentLoc);
       }
-      return { kind: 'struct', mangled: info.mangled };
+      const typeArgs = a.typeArgs ?? [];
+      if (typeArgs.length === 0) {
+        if ((info.typeVars ?? []).length > 0) {
+          throw new CompileError(`generic struct '${name}' requires type arguments`, loc ?? this.currentLoc);
+        }
+        return { kind: 'struct', mangled: info.mangled };
+      }
+      if ((info.typeVars ?? []).length !== typeArgs.length) {
+        throw new CompileError(`generic struct '${name}' expects ${(info.typeVars ?? []).length} type arguments, got ${typeArgs.length}`, loc ?? this.currentLoc);
+      }
+      return this.genericStructType(info, typeArgs.map(arg => this.expandAliasBody(arg, chain, loc)));
     }
     if (a.kind === 'dict') {
       return {
@@ -511,6 +632,7 @@ export class Compiler {
         fields: info.fields,
         exported: false,
         imported: true,
+        typeVars: info.typeVars ?? [],
         formatterName: info.formatterName ?? null,
       });
     }
@@ -558,11 +680,17 @@ export class Compiler {
         }
         seen.add(f.name);
       }
+      for (const tv of stmt.typeVars ?? []) {
+        if (this.structs.has(tv) || this.aliases.has(tv) || this.imports.has(tv)) {
+          throw new CompileError(`name '${tv}' is already defined`, locOf(stmt));
+        }
+      }
       this.structs.set(stmt.name, {
         mangled,
         fields: [],  // resolved next
         exported: stmt.exported,
         imported: false,
+        typeVars: stmt.typeVars ?? [],
       });
       this.localStructDecls.set(stmt.name, stmt);
     }
@@ -594,9 +722,15 @@ export class Compiler {
     for (const [localName, decl] of this.localStructDecls) {
       const info = this.structs.get(localName)!;
       const fields: Array<{ name: string; type: ChatterType }> = [];
-      for (const f of decl.fields) {
-        const ft = this.fromAnnotation(f.fieldType, locOf(decl));
-        fields.push({ name: f.name, type: ft });
+      const prevTypeVarSet = this.currentTypeVarSet;
+      this.currentTypeVarSet = new Set(decl.typeVars ?? []);
+      try {
+        for (const f of decl.fields) {
+          const ft = this.fromAnnotation(f.fieldType, locOf(decl));
+          fields.push({ name: f.name, type: ft });
+        }
+      } finally {
+        this.currentTypeVarSet = prevTypeVarSet;
       }
       info.fields = fields;
     }
@@ -629,8 +763,10 @@ export class Compiler {
         color.set(mangled, GRAY);
         stack.push(unmangleTypeName(mangled));
         const collectStructRefs = (t: ChatterType, out: string[]): void => {
-          if (t.kind === 'struct') out.push(t.mangled);
-          else if (t.kind === 'list' || t.kind === 'uniqueList') collectStructRefs(t.element, out);
+          if (t.kind === 'struct') {
+            out.push(t.genericBase ?? t.mangled);
+            for (const arg of t.typeArgs ?? []) collectStructRefs(arg, out);
+          } else if (t.kind === 'list' || t.kind === 'uniqueList') collectStructRefs(t.element, out);
           else if (t.kind === 'dict') {
             collectStructRefs(t.keyType, out);
             collectStructRefs(t.valueType, out);
@@ -840,6 +976,7 @@ export class Compiler {
       structExports.set(localName, {
         mangled: info.mangled,
         fields: info.fields,
+        typeVars: info.typeVars ?? [],
         formatterName: info.formatterName ?? null,
       });
     }
@@ -1936,7 +2073,16 @@ export class Compiler {
           }
           return;
         case 'struct':
-          if (concrete.kind !== 'struct' || annotated.mangled !== concrete.mangled) {
+          if (concrete.kind !== 'struct') {
+            throw new CompileError(`Type mismatch in call to '${call.name}' arg '${paramName}': expected ${typeToString(annotated)}, got ${typeToString(concrete)}`, this.currentLoc);
+          }
+          if (annotated.genericBase && concrete.genericBase && annotated.genericBase === concrete.genericBase && annotated.typeArgs && concrete.typeArgs && annotated.typeArgs.length === concrete.typeArgs.length) {
+            for (let i = 0; i < annotated.typeArgs.length; i++) {
+              bind(annotated.typeArgs[i], concrete.typeArgs[i], paramName);
+            }
+            return;
+          }
+          if (annotated.mangled !== concrete.mangled) {
             throw new CompileError(`Type mismatch in call to '${call.name}' arg '${paramName}': expected ${typeToString(annotated)}, got ${typeToString(concrete)}`, this.currentLoc);
           }
           return;
@@ -2579,6 +2725,107 @@ export class Compiler {
     this.emit(out, { op: 'RETURN' });
   }
 
+
+  /** Unify a generic struct field template with a concrete value type for make-inference. */
+  private bindStructMakeTypeVars(
+    template: ChatterType,
+    concrete: ChatterType,
+    bindings: Map<string, ChatterType>,
+    structName: string,
+  ): boolean {
+    if (template.kind === 'typeVar') {
+      const existing = bindings.get(template.name);
+      if (existing && !typesEqual(existing, concrete)) {
+        throw new CompileError(
+          `Type mismatch: cannot bind ${template.name} to both ${typeToString(existing)} and ${typeToString(concrete)} (in 'make ${structName}')`,
+          this.currentLoc,
+        );
+      }
+      bindings.set(template.name, concrete);
+      return true;
+    }
+    if (template.kind !== concrete.kind) return false;
+    switch (template.kind) {
+      case 'scalar': return concrete.kind === 'scalar' && template.name === concrete.name;
+      case 'list': return concrete.kind === 'list' && this.bindStructMakeTypeVars(template.element, concrete.element, bindings, structName);
+      case 'uniqueList': return concrete.kind === 'uniqueList' && this.bindStructMakeTypeVars(template.element, concrete.element, bindings, structName);
+      case 'dict': return concrete.kind === 'dict'
+        && this.bindStructMakeTypeVars(template.keyType, concrete.keyType, bindings, structName)
+        && this.bindStructMakeTypeVars(template.valueType, concrete.valueType, bindings, structName);
+      case 'struct': {
+        if (concrete.kind !== 'struct') return false;
+        if (template.genericBase && concrete.genericBase && template.genericBase === concrete.genericBase && template.typeArgs && concrete.typeArgs && template.typeArgs.length === concrete.typeArgs.length) {
+          for (let i = 0; i < template.typeArgs.length; i++) {
+            if (!this.bindStructMakeTypeVars(template.typeArgs[i], concrete.typeArgs[i], bindings, structName)) return false;
+          }
+          return true;
+        }
+        return template.mangled === concrete.mangled;
+      }
+    }
+  }
+
+  /** Validate make-fields and infer/cache the concrete StructInfo to emit. */
+  private resolveMakeStruct(
+    expr: MakeStructExpression,
+    info: StructInfo,
+    bindings: Scope,
+  ): StructInfo {
+    const provided = new Map<string, Expression>();
+    for (const f of expr.fields) {
+      if (provided.has(f.name)) {
+        throw new CompileError(`duplicate field '${f.name}' in make ${expr.structName}`, this.currentLoc);
+      }
+      provided.set(f.name, f.value);
+    }
+    for (const f of expr.fields) {
+      if (!info.fields.find(d => d.name === f.name)) {
+        throw new CompileError(`struct '${expr.structName}' has no field '${f.name}'`, this.currentLoc);
+      }
+    }
+    for (const decl of info.fields) {
+      if (!provided.has(decl.name)) {
+        throw new CompileError(`make ${expr.structName} missing field '${decl.name}'`, this.currentLoc);
+      }
+    }
+
+    const typeVars = info.typeVars ?? [];
+    if (typeVars.length === 0) {
+      for (const decl of info.fields) {
+        const vt = this.staticType(provided.get(decl.name)!, bindings);
+        if (vt !== null && !typesEqual(vt, decl.type)) {
+          throw new CompileError(
+            `Type mismatch: field '${decl.name}' of struct '${expr.structName}' expects ${typeToString(decl.type)}, got ${typeToString(vt)}`,
+            this.currentLoc,
+          );
+        }
+      }
+      return info;
+    }
+
+    const inferred = new Map<string, ChatterType>();
+    for (const decl of info.fields) {
+      const vt = this.staticType(provided.get(decl.name)!, bindings);
+      if (vt === null) continue;
+      if (!this.bindStructMakeTypeVars(decl.type, vt, inferred, expr.structName)) {
+        throw new CompileError(
+          `Type mismatch: field '${decl.name}' of struct '${expr.structName}' expects ${typeToString(decl.type)}, got ${typeToString(vt)}`,
+          this.currentLoc,
+        );
+      }
+    }
+    for (const tv of typeVars) {
+      if (!inferred.has(tv)) {
+        throw new CompileError(`cannot infer type variable '${tv}' in make ${expr.structName}`, this.currentLoc);
+      }
+    }
+    const args = typeVars.map(tv => inferred.get(tv)!);
+    const st = this.genericStructType(info, args) as Extract<ChatterType, { kind: 'struct' }>;
+    const concrete = this.structInfoForMangled(st.mangled);
+    if (!concrete) throw new CompileError(`internal error: missing generic struct instance '${expr.structName}'`, this.currentLoc);
+    return concrete;
+  }
+
   private compileExpr(
     expr: Expression,
     out: Instruction[],
@@ -2975,47 +3222,14 @@ export class Compiler {
         if (!info) {
           throw new CompileError(`unknown struct '${expr.structName}'`, this.currentLoc);
         }
-        // Validate fields: every declared field provided, no unknown, no duplicates.
-        const provided = new Map<string, Expression>();
-        for (const f of expr.fields) {
-          if (provided.has(f.name)) {
-            throw new CompileError(
-              `duplicate field '${f.name}' in make ${expr.structName}`,
-            this.currentLoc);
-          }
-          provided.set(f.name, f.value);
-        }
-        for (const f of expr.fields) {
-          if (!info.fields.find(d => d.name === f.name)) {
-            throw new CompileError(
-              `struct '${expr.structName}' has no field '${f.name}'`,
-            this.currentLoc);
-          }
-        }
-        for (const decl of info.fields) {
-          if (!provided.has(decl.name)) {
-            throw new CompileError(
-              `make ${expr.structName} missing field '${decl.name}'`,
-            this.currentLoc);
-          }
-        }
-        // Type-check each value statically.
-        for (const decl of info.fields) {
-          const v = provided.get(decl.name)!;
-          const vt = this.staticType(v, bindings);
-          if (vt !== null && !typesEqual(vt, decl.type)) {
-            throw new CompileError(
-              `Type mismatch: field '${decl.name}' of struct '${expr.structName}' expects ${typeToString(decl.type)}, got ${typeToString(vt)}`,
-            this.currentLoc);
-          }
-        }
-        // Emit values in declaration order.
+        const concreteInfo = this.resolveMakeStruct(expr, info, bindings);
+        const provided = new Map(expr.fields.map(f => [f.name, f.value] as const));
         const fieldNames: string[] = [];
-        for (const decl of info.fields) {
+        for (const decl of concreteInfo.fields) {
           this.compileExpr(provided.get(decl.name)!, out, bindings);
           fieldNames.push(decl.name);
         }
-        this.emit(out, { op: 'MAKE_STRUCT', typeName: info.mangled, fieldNames });
+        this.emit(out, { op: 'MAKE_STRUCT', typeName: concreteInfo.mangled, fieldNames });
         break;
       }
       case 'FieldAccessExpression': {
@@ -3043,8 +3257,7 @@ export class Compiler {
         }
         if (tt && tt.kind === 'struct') {
           // Look up info by mangled to validate field exists.
-          let info: StructInfo | undefined;
-          for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }
+          const info = this.structInfoForType(tt)
           if (info && !info.fields.find(d => d.name === expr.fieldName)) {
             throw new CompileError(
               `struct '${unmangleTypeName(tt.mangled)}' has no field '${expr.fieldName}'`,
@@ -3064,7 +3277,7 @@ export class Compiler {
         }
         let info: StructInfo | undefined;
         if (tt && tt.kind === 'struct') {
-          for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }
+          info = this.structInfoForType(tt);
         }
         const seenU = new Set<string>();
         for (const u of expr.updates) {
@@ -3084,7 +3297,7 @@ export class Compiler {
             const vt = this.staticType(u.value, bindings);
             if (vt !== null && !typesEqual(vt, decl.type)) {
               throw new CompileError(
-                `Type mismatch: field '${u.name}' expects ${typeToString(decl.type)}, got ${typeToString(vt)}`,
+                `Type mismatch: cannot update '${u.name}' from ${typeToString(decl.type)} to ${typeToString(vt)}`,
               this.currentLoc);
             }
           }
@@ -4008,7 +4221,15 @@ export class Compiler {
       case 'MakeStructExpression': {
         const info = this.structs.get(expr.structName);
         if (!info) return null;
-        return { kind: 'struct', mangled: info.mangled };
+        try {
+          const concreteInfo = this.resolveMakeStruct(expr, info, bindings);
+          if ((info.typeVars ?? []).length > 0) {
+            return { kind: 'struct', mangled: concreteInfo.mangled, genericBase: info.mangled, typeArgs: concreteInfo.typeArgs ?? [] };
+          }
+          return { kind: 'struct', mangled: concreteInfo.mangled };
+        } catch {
+          return null;
+        }
       }
       case 'FieldAccessExpression': {
         const tt = this.staticType(expr.target, bindings);
@@ -4022,8 +4243,7 @@ export class Compiler {
           return null;
         }
         if (tt && tt.kind === 'struct') {
-          let info: StructInfo | undefined;
-          for (const v of this.structs.values()) if (v.mangled === tt.mangled) { info = v; break; }
+          const info = this.structInfoForType(tt)
           const f = info?.fields.find(d => d.name === expr.fieldName);
           return f?.type ?? null;
         }

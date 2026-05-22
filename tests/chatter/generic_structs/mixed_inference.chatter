@@ -1,0 +1,8 @@
+struct Mixed over T
+    T one
+    list of T many
+end struct
+
+constant m is make Mixed with one 1, many list of 2, 3
+say m
+say item 2 of many of m

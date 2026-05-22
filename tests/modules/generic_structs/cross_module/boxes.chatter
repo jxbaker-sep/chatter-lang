@@ -1,0 +1,3 @@
+export struct Box over T
+    T value
+end struct

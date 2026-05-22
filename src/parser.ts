@@ -675,10 +675,19 @@ export function parse(tokens: Token[], source?: string): Program {
       return { kind: 'scalar', name: tok.value as ScalarTypeName };
     }
     if (tok.type === 'IDENT') {
-      // Bare IDENT in a type annotation position is a struct reference
-      // (resolved at compile time).
+      // Bare IDENT in a type annotation position is a struct/type-variable reference.
+      // Generic struct instantiations are spelled `Name of T (and U)*`.
       advance();
-      return { kind: 'struct', name: tok.value };
+      let typeArgs: TypeAnnotation[] | undefined;
+      if (peek().type === 'KEYWORD' && peek().value === 'of') {
+        advance();
+        typeArgs = [parseTypeAnnotation()];
+        while (peek().type === 'KEYWORD' && peek().value === 'and') {
+          advance();
+          typeArgs.push(parseTypeAnnotation());
+        }
+      }
+      return { kind: 'struct', name: tok.value, typeArgs };
     }
     throw new ParseError(
       `Expected type annotation, got ${tok.type} '${tok.value}'`,
@@ -854,6 +863,23 @@ export function parse(tokens: Token[], source?: string): Program {
   function parseStructDeclaration(exported: boolean): StructDeclaration {
     const structTok = consume('KEYWORD', 'struct');
     const nameTok = consume('IDENT');
+    const typeVars: string[] = [];
+    if (peek().type === 'KEYWORD' && peek().value === 'over') {
+      advance();
+      const firstTv = consume('IDENT');
+      const seenTv = new Set<string>();
+      seenTv.add(firstTv.value);
+      typeVars.push(firstTv.value);
+      while (peek().type === 'KEYWORD' && peek().value === 'and') {
+        advance();
+        const tvTok = consume('IDENT');
+        if (seenTv.has(tvTok.value)) {
+          throw new ParseError(`duplicate type variable '${tvTok.value}' in 'over' clause`, tvTok);
+        }
+        seenTv.add(tvTok.value);
+        typeVars.push(tvTok.value);
+      }
+    }
     consumeNewline();
     const fields: StructField[] = [];
     let formatExpr: Expression | null = null;
@@ -919,6 +945,7 @@ export function parse(tokens: Token[], source?: string): Program {
     const node: StructDeclaration = {
       type: 'StructDeclaration',
       name: nameTok.value,
+      typeVars,
       fields,
       exported,
       formatExpr,

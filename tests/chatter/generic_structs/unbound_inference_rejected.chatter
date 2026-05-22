@@ -1,0 +1,5 @@
+struct Phantom over T
+    number value
+end struct
+
+constant p is make Phantom with value 1

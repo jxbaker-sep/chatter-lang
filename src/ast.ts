@@ -5,7 +5,7 @@ export type TypeAnnotation =
   | { kind: 'list'; element: TypeAnnotation }
   | { kind: 'uniqueList'; element: TypeAnnotation }
   | { kind: 'dict'; keyType: TypeAnnotation; valueType: TypeAnnotation }
-  | { kind: 'struct'; name: string };  // unmangled struct name
+  | { kind: 'struct'; name: string; typeArgs?: TypeAnnotation[] };  // unmangled struct name, optional generic args
 
 export interface Located {
   line?: number;
@@ -93,6 +93,7 @@ export interface StructField {
 export interface StructDeclaration {
   type: 'StructDeclaration';
   name: string;             // unmangled
+  typeVars?: string[];
   fields: StructField[];
   exported: boolean;
   formatExpr?: Expression | null;  // optional custom `format is EXPR` body

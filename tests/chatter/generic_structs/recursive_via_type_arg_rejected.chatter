@@ -1,0 +1,9 @@
+struct Box over T
+    T value
+end struct
+
+struct Node
+    Box of Node boxed
+end struct
+
+constant n is make Node with boxed (make Box with value 1)

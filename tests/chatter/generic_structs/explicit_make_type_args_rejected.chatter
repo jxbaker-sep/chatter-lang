@@ -1,0 +1,6 @@
+struct Pair over T
+    T first
+    T second
+end struct
+
+constant p is make Pair of number with first 1, second 2

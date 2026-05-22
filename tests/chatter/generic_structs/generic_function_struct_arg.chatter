@@ -1,0 +1,12 @@
+struct Pair over T
+    T first
+    T second
+end struct
+
+function first_of over T takes Pair of T pair returns T is
+    return first of pair
+end function
+
+constant p is make Pair with first 5, second 8
+first_of p
+say it

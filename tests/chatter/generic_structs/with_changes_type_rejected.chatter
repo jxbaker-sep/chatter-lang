@@ -1,0 +1,7 @@
+struct Pair over T
+    T first
+    T second
+end struct
+
+constant a is make Pair with first 1, second 2
+say a with first "oops"

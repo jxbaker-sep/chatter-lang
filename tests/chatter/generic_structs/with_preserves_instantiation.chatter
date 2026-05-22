@@ -1,0 +1,9 @@
+struct Pair over T
+    T first
+    T second
+end struct
+
+constant a is make Pair with first 1, second 2
+constant b is a with first 9
+say a
+say b

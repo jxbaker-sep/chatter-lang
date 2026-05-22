@@ -1,0 +1,11 @@
+struct Pair over T
+    T first
+    T second
+end struct
+
+constant nums is make Pair with first 1, second 2
+constant words is make Pair with first "left", second "right"
+say nums
+say words
+say first of nums
+say second of words

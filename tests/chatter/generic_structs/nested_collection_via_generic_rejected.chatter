@@ -1,0 +1,5 @@
+struct Rows over T
+    list of T rows
+end struct
+
+constant rows is make Rows with rows list of (list of 1, 2)
