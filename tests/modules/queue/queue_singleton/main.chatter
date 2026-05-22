@@ -1,0 +1,10 @@
+use new_queue_with, peek, dequeue, size_of from "std:queue"
+constant q is the result of new_queue_with 42
+size_of q
+say it
+peek q
+say it
+dequeue q
+say it
+size_of q
+say it

@@ -1,0 +1,9 @@
+use new_queue_with, enqueue, peek, dequeue from "std:queue"
+constant q is the result of new_queue_with "a"
+enqueue q with "b"
+peek q
+say it
+dequeue q
+say it
+dequeue q
+say it

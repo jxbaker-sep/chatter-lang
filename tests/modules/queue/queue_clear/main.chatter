@@ -1,0 +1,9 @@
+use new_queue_with, enqueue, clear, size_of, is_empty from "std:queue"
+constant q is the result of new_queue_with 1
+enqueue q with 2
+enqueue q with 3
+clear q
+size_of q
+say it
+is_empty q
+say it

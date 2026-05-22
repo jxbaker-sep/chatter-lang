@@ -1,0 +1,9 @@
+use new_queue_with, enqueue, peek, size_of from "std:queue"
+constant q is the result of new_queue_with 5
+enqueue q with 6
+peek q
+say it
+peek q
+say it
+size_of q
+say it

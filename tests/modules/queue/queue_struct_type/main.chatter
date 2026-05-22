@@ -1,0 +1,13 @@
+use new_queue_with, enqueue, dequeue from "std:queue"
+struct Point
+    number x
+    number y
+end struct
+constant p1 is make Point with x 1, y 2
+constant p2 is make Point with x 3, y 4
+constant q is the result of new_queue_with p1
+enqueue q with p2
+dequeue q
+say it
+dequeue q
+say it

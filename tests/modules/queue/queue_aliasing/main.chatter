@@ -1,0 +1,13 @@
+use Queue, new_queue_with, enqueue, dequeue from "std:queue"
+function add_more takes mutable Queue of number target is
+    enqueue target with 2
+    enqueue target with 3
+end function
+constant q is the result of new_queue_with 1
+add_more q
+dequeue q
+say it
+dequeue q
+say it
+dequeue q
+say it

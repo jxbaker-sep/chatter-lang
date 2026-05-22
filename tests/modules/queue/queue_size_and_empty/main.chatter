@@ -1,0 +1,15 @@
+use new_queue_with, enqueue, dequeue, size_of, is_empty from "std:queue"
+constant q is the result of new_queue_with 7
+size_of q
+say it
+is_empty q
+say it
+enqueue q with 8
+size_of q
+say it
+dequeue q
+dequeue q
+size_of q
+say it
+is_empty q
+say it
