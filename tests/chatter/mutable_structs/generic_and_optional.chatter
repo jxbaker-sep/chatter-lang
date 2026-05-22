@@ -4,14 +4,14 @@ end struct
 
 mutable struct Node over T
     T value
-    optional mutable Node of T next
+    optional Node of T next
 end struct
 
-function same_box over T takes mutable Box of T bx returns mutable Box of T is
+function same_box over T takes Box of T bx returns Box of T is
     return bx
 end function
 
-function some_node takes mutable Node of string n returns optional mutable Node of string is
+function some_node takes Node of string n returns optional Node of string is
     return n
 end function
 

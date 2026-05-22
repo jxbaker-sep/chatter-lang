@@ -715,18 +715,12 @@ export function parse(tokens: Token[], source?: string): Program {
       return { kind: 'uniqueList', element: parseTypeAnnotation() };
     }
     if (tok.type === 'KEYWORD' && tok.value === 'mutable') {
-      advance();
-      const nameTok = consume('IDENT');
-      let typeArgs: TypeAnnotation[] | undefined;
-      if (peek().type === 'KEYWORD' && peek().value === 'of') {
-        advance();
-        typeArgs = [parseTypeAnnotation()];
-        while (peek().type === 'KEYWORD' && peek().value === 'and') {
-          advance();
-          typeArgs.push(parseTypeAnnotation());
-        }
-      }
-      return { kind: 'mutableStruct', name: nameTok.value, typeArgs };
+      const nameTok = tokens[pos + 1];
+      const hint = nameTok?.type === 'IDENT' ? `; just write '${nameTok.value}'` : '';
+      throw new ParseError(
+        `redundant 'mutable' at type reference${hint} — mutability comes from the declaration`,
+        tok,
+      );
     }
     if (tok.type === 'KEYWORD' && tok.value === 'dictionary') {
       advance();

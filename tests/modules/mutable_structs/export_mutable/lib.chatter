@@ -2,10 +2,10 @@ export mutable struct Counter
     number value
 end struct
 
-export function make_counter takes number n returns mutable Counter is
+export function make_counter takes number n returns Counter is
     return make Counter with value n
 end function
 
-export function inc takes mutable Counter c is
+export function inc takes Counter c is
     add 1 to value of c
 end function

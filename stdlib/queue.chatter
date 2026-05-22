@@ -10,25 +10,25 @@
 
 export mutable struct QueueNode over T
     T value
-    optional mutable QueueNode of T next
+    optional QueueNode of T next
 end struct
 
 export mutable struct Queue over T
-    mutable QueueNode of T front
-    mutable QueueNode of T back
+    QueueNode of T front
+    QueueNode of T back
     number length
 end struct
 
 # new_queue_with: return a fresh singleton queue containing first.
 # O(1). Empty construction is intentionally left to typed contexts in v1.
-export function new_queue_with over T takes T first returns mutable Queue of T is
+export function new_queue_with over T takes T first returns Queue of T is
     constant node is make QueueNode with value first, next none
     return make Queue with front node, back node, length 1
 end function
 
 # enqueue: add value to the back of the queue in place.
 # O(1) thanks to the cached back pointer.
-export function enqueue over T takes mutable Queue of T queue with T value is
+export function enqueue over T takes Queue of T queue with T value is
     constant node is make QueueNode with value value, next none
     if length of queue is 0
         change front of queue to node
@@ -43,7 +43,7 @@ end function
 
 # dequeue: remove and return the front value.
 # O(1). Runtime error if the queue is empty.
-export function dequeue over T takes mutable Queue of T queue returns T is
+export function dequeue over T takes Queue of T queue returns T is
     expect length of queue is greater than 0, "cannot dequeue from empty queue"
     constant front_node is front of queue
     constant result is value of front_node
@@ -62,7 +62,7 @@ end function
 
 # peek: return the front value without removing it.
 # O(1). Runtime error if the queue is empty.
-export function peek over T takes mutable Queue of T queue returns T is
+export function peek over T takes Queue of T queue returns T is
     expect length of queue is greater than 0, "cannot peek empty queue"
     constant front_node is front of queue
     return value of front_node
@@ -70,18 +70,18 @@ end function
 
 # size_of: return the cached number of queued values.
 # O(1).
-export function size_of over T takes mutable Queue of T queue returns number is
+export function size_of over T takes Queue of T queue returns number is
     return length of queue
 end function
 
 # is_empty: return true when the queue has no values.
 # O(1).
-export function is_empty over T takes mutable Queue of T queue returns boolean is
+export function is_empty over T takes Queue of T queue returns boolean is
     return length of queue is 0
 end function
 
 # clear: reset the queue to the empty state.
 # O(1). A future enqueue overwrites the cached front and back pointers.
-export function clear over T takes mutable Queue of T queue is
+export function clear over T takes Queue of T queue is
     change length of queue to 0
 end function

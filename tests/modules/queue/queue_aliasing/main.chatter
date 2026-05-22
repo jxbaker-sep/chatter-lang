@@ -1,5 +1,5 @@
 use Queue, new_queue_with, enqueue, dequeue from "std:queue"
-function add_more takes mutable Queue of number target is
+function add_more takes Queue of number target is
     enqueue target with 2
     enqueue target with 3
 end function

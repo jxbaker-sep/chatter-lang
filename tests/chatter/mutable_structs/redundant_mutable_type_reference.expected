@@ -1,0 +1,1 @@
+ERROR: redundant 'mutable' at type reference; just write 'Point' — mutability comes from the declaration

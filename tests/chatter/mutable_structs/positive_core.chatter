@@ -4,16 +4,16 @@ mutable struct Point
 end struct
 
 struct Holder
-    mutable Point point
+    Point point
 end struct
 
-type MaybePoint is optional mutable Point
+type MaybePoint is optional Point
 
 function echo_maybe takes MaybePoint mp returns MaybePoint is
     return mp
 end function
 
-function bump takes mutable Point pt is
+function bump takes Point pt is
     add 1 to x of pt
 end function
 

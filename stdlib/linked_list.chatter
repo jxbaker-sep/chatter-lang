@@ -10,25 +10,25 @@
 
 export mutable struct Node over T
     T value
-    optional mutable Node of T next
+    optional Node of T next
 end struct
 
 export mutable struct LinkedList over T
-    optional mutable Node of T head
-    optional mutable Node of T tail
+    optional Node of T head
+    optional Node of T tail
     number length
 end struct
 
 # new_linked_list_with: return a fresh singleton list containing first.
 # O(1). Empty construction is intentionally left to typed contexts in v1.
-export function new_linked_list_with over T takes T first returns mutable LinkedList of T is
+export function new_linked_list_with over T takes T first returns LinkedList of T is
     constant node is make Node with value first, next none
     return make LinkedList with head node, tail node, length 1
 end function
 
 # prepend: insert value at the front of the list in place.
 # O(1).
-export function prepend over T takes mutable LinkedList of T linked with T value is
+export function prepend over T takes LinkedList of T linked with T value is
     constant node is make Node with value value, next head of linked
     change head of linked to node
     if tail of linked is none
@@ -39,7 +39,7 @@ end function
 
 # append: insert value at the end of the list in place.
 # O(1) thanks to the cached tail pointer.
-export function append over T takes mutable LinkedList of T linked with T value is
+export function append over T takes LinkedList of T linked with T value is
     constant node is make Node with value value, next none
     if tail of linked is none
         change head of linked to node
@@ -58,25 +58,25 @@ end function
 
 # size_of: return the cached number of elements.
 # O(1).
-export function size_of over T takes mutable LinkedList of T linked returns number is
+export function size_of over T takes LinkedList of T linked returns number is
     return length of linked
 end function
 
 # is_empty: return true when list has no nodes.
 # O(1).
-export function is_empty over T takes mutable LinkedList of T linked returns boolean is
+export function is_empty over T takes LinkedList of T linked returns boolean is
     return length of linked is 0
 end function
 
 # head: return the first node, or none for an empty list.
 # O(1).
-export function head over T takes mutable LinkedList of T linked returns optional mutable Node of T is
+export function head over T takes LinkedList of T linked returns optional Node of T is
     return head of linked
 end function
 
 # tail: return the second node, or none when list has fewer than two nodes.
 # O(1).
-export function tail over T takes mutable LinkedList of T linked returns optional mutable Node of T is
+export function tail over T takes LinkedList of T linked returns optional Node of T is
     variable first is head of linked
     if first is none
         return none
@@ -86,7 +86,7 @@ end function
 
 # contains_in: return true if any node value equals value.
 # O(n).
-export function contains_in over T takes mutable LinkedList of T linked with T value returns boolean is
+export function contains_in over T takes LinkedList of T linked with T value returns boolean is
     variable cursor is head of linked
     repeat while cursor is not none
         if value of cursor is value
@@ -99,7 +99,7 @@ end function
 
 # to_list: copy the linked-list values into a fresh plain list.
 # O(n).
-export function to_list over T takes mutable LinkedList of T linked returns list of T is
+export function to_list over T takes LinkedList of T linked returns list of T is
     constant output is empty list of T
     variable cursor is head of linked
     repeat while cursor is not none
@@ -111,7 +111,7 @@ end function
 
 # remove_first: remove the front node in place.
 # O(1). Runtime error if list is empty.
-export function remove_first over T takes mutable LinkedList of T linked is
+export function remove_first over T takes LinkedList of T linked is
     expect length of linked is greater than 0, "cannot remove from empty linked list"
     variable old_head is head of linked
     if old_head is not none
@@ -128,7 +128,7 @@ end function
 
 # remove_last: remove the final node in place.
 # O(n). Runtime error if list is empty.
-export function remove_last over T takes mutable LinkedList of T linked is
+export function remove_last over T takes LinkedList of T linked is
     expect length of linked is greater than 0, "cannot remove from empty linked list"
     if length of linked is 1
         change head of linked to none
@@ -153,7 +153,7 @@ end function
 
 # clear: reset list to the empty state.
 # O(1); old nodes become unreachable and are reclaimed by the host runtime.
-export function clear over T takes mutable LinkedList of T linked is
+export function clear over T takes LinkedList of T linked is
     change head of linked to none
     change tail of linked to none
     change length of linked to 0

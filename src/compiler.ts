@@ -438,11 +438,11 @@ export class Compiler {
         }
         throw new CompileError(`unknown type '${a.name}'`, loc ?? this.currentLoc);
       }
-      if (a.kind === 'mutableStruct' && !info.mutable) {
-        throw new CompileError(`'${a.name}' is not a mutable struct`, loc ?? this.currentLoc);
-      }
-      if (a.kind === 'struct' && info.mutable) {
-        throw new CompileError(`'${a.name}' is a mutable struct; use 'mutable ${a.name}'`, loc ?? this.currentLoc);
+      if (a.kind === 'mutableStruct') {
+        throw new CompileError(
+          `redundant 'mutable' at type reference; just write '${a.name}' — mutability comes from the declaration`,
+          loc ?? this.currentLoc,
+        );
       }
       const declaredTypeVars = info.typeVars ?? [];
       const typeArgs = a.typeArgs ?? [];
@@ -648,8 +648,12 @@ export class Compiler {
       if (!info) {
         throw new CompileError(`unknown type '${name}'`, loc ?? this.currentLoc);
       }
-      if (a.kind === 'mutableStruct' && !info.mutable) throw new CompileError(`'${name}' is not a mutable struct`, loc ?? this.currentLoc);
-      if (a.kind === 'struct' && info.mutable) throw new CompileError(`'${name}' is a mutable struct; use 'mutable ${name}'`, loc ?? this.currentLoc);
+      if (a.kind === 'mutableStruct') {
+        throw new CompileError(
+          `redundant 'mutable' at type reference; just write '${name}' — mutability comes from the declaration`,
+          loc ?? this.currentLoc,
+        );
+      }
       const typeArgs = a.typeArgs ?? [];
       if (typeArgs.length === 0) {
         if ((info.typeVars ?? []).length > 0) {
