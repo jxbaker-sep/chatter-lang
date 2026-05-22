@@ -1,0 +1,4 @@
+constant xs is list of 1, none, 3
+say item 1 of xs
+say item 2 of xs
+say item 3 of xs

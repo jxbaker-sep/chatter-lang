@@ -1,0 +1,7 @@
+function maybe takes number n returns optional number is
+    return n
+end function
+
+constant x is result of maybe 7
+expect x is not none
+say x + 3

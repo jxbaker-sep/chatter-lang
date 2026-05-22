@@ -1,0 +1,8 @@
+function maybe takes number n returns optional number is
+    return n
+end function
+
+maybe 15
+if it is not none
+    say it + 5
+end if

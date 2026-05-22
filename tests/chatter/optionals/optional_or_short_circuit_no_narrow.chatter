@@ -1,0 +1,8 @@
+function maybe takes number dummy returns optional number is
+    return none
+end function
+
+constant x is result of maybe 0
+if x is none or x is greater than 5
+    say "pass"
+end if

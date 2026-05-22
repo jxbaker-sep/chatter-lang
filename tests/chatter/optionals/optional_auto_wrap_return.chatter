@@ -1,0 +1,6 @@
+function maybe_number takes number n returns optional number is
+    return n
+end function
+
+maybe_number 42
+say it

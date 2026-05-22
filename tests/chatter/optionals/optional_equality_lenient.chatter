@@ -1,0 +1,15 @@
+function maybe takes number n returns optional number is
+    return n
+end function
+
+constant x is result of maybe 5
+if x is 5
+    say "found five"
+else
+    say "other"
+end if
+if x is none
+    say "absent"
+else
+    say "present"
+end if

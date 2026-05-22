@@ -83,6 +83,10 @@ export type InstructionKind =
   | { op: 'STORE_SLOT'; slot: number }                // function-frame local write
   | { op: 'STORE_VAR_SLOT'; slot: number; name: string }
   | { op: 'DELETE_SLOT'; slot: number }
+  | { op: 'PUSH_NONE'; element: ChatterType }
+  | { op: 'WRAP_OPTIONAL' }
+  | { op: 'UNWRAP_OPTIONAL' }
+  | { op: 'IS_NONE' }
   | { op: 'ERROR'; message: string };
 
 export type Instruction = InstructionKind & { loc?: SourceLocation };

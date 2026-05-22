@@ -1,0 +1,13 @@
+function maybeN takes number dummy returns optional number is
+    return 1
+end function
+
+function maybeS takes number dummy returns optional string is
+    return "a"
+end function
+
+constant a is result of maybeN 0
+constant b is result of maybeS 0
+if a is b
+    say "equal"
+end if

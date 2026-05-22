@@ -1,0 +1,7 @@
+export function maybe_num takes number dummy returns optional number is
+    return 42
+end function
+
+export function nothing takes number dummy returns optional number is
+    return none
+end function

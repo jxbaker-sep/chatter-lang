@@ -1,0 +1,6 @@
+struct Box
+    optional number val
+end struct
+
+constant b is make Box with val 99
+say val of b

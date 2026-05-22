@@ -1,0 +1,6 @@
+function maybe takes number n returns optional number is
+    return n
+end function
+
+constant x is result of maybe 5
+say x + 1

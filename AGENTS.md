@@ -160,6 +160,9 @@ Note: `by` is reserved (it has special meaning in `multiply X by Y`, `divide X b
 ### Keywords reserved for type aliases
 `type`. See "Type aliases (v1)" below.
 
+### Keywords reserved for optional types
+`optional`, `none`. See "Optionals (v1)" below.
+
 ### Modules (v1)
 One file = one module. The file path (normalized absolute) identifies the module; the entry file passed to the `chatter` CLI is module #1 and may `use` and/or `export` just like any other module.
 
@@ -361,6 +364,46 @@ Naming sugar for any type annotation. Pure compile-time — no runtime represent
 - **Aliases work in every type-annotation position**: function params, function returns, struct fields, list / unique-list element type, dictionary key and value types, and the bodies of other aliases. An alias whose expansion would create a nested collection (e.g. `type Inner is list of number` then using `list of Inner`) → compile error `nested collections not supported (alias 'Inner' expands to ...)`.
 - **Out of scope (v2+)**: function-local aliases, aliasing imported names (deferred — clear error in v1), `type` as an expression-level construct, aliases that introduce nominal distinctions (newtypes).
 
+### Optionals (v1)
+An **optional** wraps any type T as `optional T` — a value that is either present (holding a T) or absent (`none`). Optional types support flow-typing-based narrowing so the compiler tracks whether the value is definitely present before allowing use.
+
+**Type annotation**: `optional T` in any type position (param, return, struct field, list element type, dict value type). Nesting `optional optional T` → parse error `redundant optional`. Dictionary keys may not be optional (`dictionary keys cannot be optional`).
+
+**Literal**: `none` — the absent value. Has no standalone type; legal only when the surrounding slot provides `optional T` context (function return, argument, struct field, list element, dict value). `constant x is none` / `variable y is none` / standalone use → compile error `cannot infer type of none`.
+
+**Type system**:
+- `optional T` is distinct from `T`. Known optional operands to arithmetic/comparison/logical/if/while/length/contains/is empty → compile error unless narrowed.
+- `ChatterType` gains `{ kind: 'optional'; element: ChatterType }`. `typeCode` encodes as `opt:<inner>`. `typeToString` renders as `optional T`.
+
+**Auto-wrapping**: a bare `T` value is implicitly wrapped (`WRAP_OPTIONAL`) when placed into an `optional T` slot (function return, argument, struct field, list element, dict value). The compiler emits WRAP_OPTIONAL in these positions; nothing changes for the user's source.
+
+**Flow-typing narrowing**: the compiler maintains a stack of narrowing maps. When a variable of type `optional T` is narrowed, its static type becomes `T` and the compiler emits `UNWRAP_OPTIONAL` on load. Narrowing patterns:
+- `if x is not none ... end if` — x narrowed to T in body.
+- `if x is none ... else BODY` — x narrowed to T in else body.
+- `if x is none; return; end if; ...` — after the if (none-branch terminates), x narrowed for rest of block.
+- `if x is not none and PREDICATE` — x narrowed inside PREDICATE RHS.
+- `expect x is not none` — x narrowed for rest of block.
+- `it` can also be narrowed via the same patterns using the `__it__` key.
+- Narrowing is invalidated by `change x to ...` on the same variable.
+
+**Equality semantics**:
+- `opt is none` / `opt is not none` — tests presence; emits `IS_NONE` / `IS_NONE NOT`.
+- `opt is VALUE` where opt: `optional T` and VALUE: `T` — lenient comparison; true iff present and inner equals value. VM `aggregateEquals` handles unwrapping.
+- `optional T` == `optional T` — structural (both none→true, one none→false, both present→recursive equality).
+- `optional T` vs `optional U` (T≠U) → compile error `Type mismatch: cannot compare optional T and optional U`.
+
+**Struct cycle relaxation**: optional field edges are skipped in the DFS struct cycle check. `struct Node { optional Node next }` is legal; `struct Bad { Bad next }` is still rejected.
+
+**Collections**: `list of optional T`, `unique list of optional T`, and `dictionary from K to optional V` are all legal. `optional` wrapping a collection type (`optional list of T`) is also legal. The `elementCode` encoding is `opt:<inner>`.
+
+**Formatting**: present optional formats as the inner value (using the standard formatter); absent formats as the literal string `none`. Both `say` and `&` concat use this.
+
+**Runtime representation**: `ChatterOptional = { kind:'optional'; present: boolean; value?: ChatterValue; element: ChatterType }`. Added to `ChatterValue` union in `vm.ts`.
+
+**Exported/imported**: optional return types and param types work across modules via the standard import/export mechanism. The `optional` kind is serialized as part of the `ChatterType` in signatures.
+
+**Out of scope (v2+)**: pattern matching (`match`), optional chaining, `variable`/`constant` type annotations, nullable dict keys, `otherwise` clause.
+
 ### Dictionaries (v1)
 A **dictionary** is a hash-backed key→value map spelled `dictionary from K to V`. Like lists and unique lists, dictionaries are mutable references; assignment, parameter passing, and returning all alias the same underlying storage. Iteration yields entries in insertion order (first-set-wins; overwriting a key keeps its original position).
 
@@ -514,8 +557,12 @@ Statement form goes through the same compile path as the expression form, so all
 - `DICT_KEYS` — pop dict, push fresh `unique list of K` in insertion order.
 - `DICT_VALUES` — pop dict, push fresh `list of V` in insertion order.
 - `SORT_LIST { byKey: boolean; descending: boolean }` — in-place stable sort. With `byKey=false`, pops a single list (element type must be number, string, or boolean) and sorts it. With `byKey=true`, pops a parallel keys list and an items list; sorts items by the corresponding key (key list element type must be number, string, or boolean). Booleans order as `false < true`. Stability via decorate-sort-undecorate over an indices array; pure values, no side effects, no return value pushed. Errors: non-list operand, unsupported element type.
+- `PUSH_NONE { element: ChatterType }` — push an absent optional of the given inner type onto the stack.
+- `WRAP_OPTIONAL` — pop a value, push `ChatterOptional { present:true, value, element: valueTypeOf(value) }`. Emitted by the compiler at auto-wrap sites (function args, returns, struct fields, list/dict elements).
+- `UNWRAP_OPTIONAL` — pop a `ChatterOptional`, push its inner value. Runtime error if absent: `tried to use the value of an absent optional — should have been narrowed`. Emitted when loading a flow-narrowed optional variable.
+- `IS_NONE` — pop a `ChatterOptional`, push `true` if absent, `false` if present. Used for `x is none` / `x is not none` comparisons.
 
-`ChatterValue = number | string | boolean | ChatterList`, where `ChatterList = { kind:'list'; element; items: ChatterValue[] }`.
+`ChatterValue = number | string | boolean | ChatterList | ChatterOptional`, where `ChatterList = { kind:'list'; element; items: ChatterValue[] }` and `ChatterOptional = { kind:'optional'; present: boolean; value?: ChatterValue; element: ChatterType }`.
 
 ### Iteration compilation strategy
 `repeat with x in L` is desugared by the compiler into an index-based `while`-style loop:
@@ -594,7 +641,7 @@ Existing golden cases:
 - **Writing files**: companion to `lines of file` / `read file`. Likely `write LIST to file PATH` and/or `write STRING to file PATH`. Questions for later: overwrite vs append, auto-add trailing newline on line lists, create parent dirs or error?
 - **Higher-order list ops via `it`-block sugar**: **delivered (v1)** — see "Higher-order list operations (v1)" above. `sort` / `map` / `filter` / `reduce` are built-in syntax with `it` rebound per iteration (and `accumulator` for reduce); statement form updates `it`; `[the] result of CALL` is accepted in the body slots of statement-form HOFs (and `sort by`). Open follow-ups: multi-statement transformer blocks (probably `using` + indented block + final expression), runtime element-type inference for `map` (so the body's result type doesn't need to be statically known), nested-HOF support (currently rejected at compile time), and lifting the "no expression-position function calls" restriction inside HOF bodies (so `constant x is map xs using f it` becomes natural).
 - **Type aliases — `type NAME is TYPEEXPR`**: **delivered (v1)** — see "Type aliases (v1)" above.
-- **Optional types / nullable values (Phase 2 for structs).** Needed before recursive structs can be safely supported (including generic recursive shapes like linked lists or trees). Likely spelling and control-flow narrowing are still open.
+- **Optional types / nullable values**: **delivered (v1)** — see "Optionals (v1)" above. Full flow-typing narrowing, auto-wrapping, struct cycle relaxation, `list of optional T`, `dictionary … to optional V`, cross-module optional return/arg types.
 - **Multiline function headers — implemented (lexer-level).** A function header may span any number of lines: the lexer enters "soft layout" mode when it emits the `function` keyword and exits when it emits the matching `is`. While in soft mode it suppresses NEWLINE tokens at end-of-line and skips indent stack updates at line starts (parallel to how Python suppresses NEWLINE/INDENT inside parentheses). Continuation lines may sit at any column. Comment lines and blank lines mid-header work for free (already skipped before indent processing). The `function` keyword inside `end function` does not re-enter header mode (checked: previous token must not be `end`). The body's indent is measured from the `function` line as before. `is` keywords inside the body (`constant x is 5`) are not affected because the flag is already false. **Multiline call sites / `make` / collection literals are still single-line — separate roadmap entry.**
 - **Tail call optimization (TCO).** Currently each `CALL` in `src/vm.ts` pushes a fresh `Frame` and recursively invokes `executeFrame`, so deep tail-recursive Chatter functions blow the **host JS stack** (V8 default ~10k frames) long before any Chatter-level limit. Tail-recursive accumulator-style code (`go n acc` patterns) is unusable; users must rewrite as `repeat while` / `repeat with`. Fix sketch: (1) at compile time, mark `CALL` instructions that are immediately followed by `RETURN` as tail calls (new `TAIL_CALL` op or a flag on `CALL`); be careful that `STORE_IT` *does* get emitted at the call site for typed tail calls — the calling frame is being replaced, so the new frame's eventual `RETURN` value becomes this frame's return value directly. Void tail calls in void functions are also legal (`DROP` becomes a no-op since the frame is replaced). (2) At runtime, instead of pushing a new frame, **reuse the current frame**: replace `instructions`, reset `ip = 0`, swap in fresh `locals` populated from args, clear `varTypes`, reset `it`. (3) Loop on `executeFrame` rather than recursing — turn the per-frame interpreter into a `while (true)` that re-enters the top of the dispatch loop after a tail call. (4) Edge case: tail call to self vs to another function — both fine, both just swap `instructions` + `locals`. (5) Edge case: tail call from inside an `if` / `repeat` — already covered because the analyzer just looks at the next instruction in the linear bytecode, not source structure. (6) Edge case: `the result of CALL` host statements (`return the result of f x`) already lower to `CALL` then `STORE_IT` then `LOAD_IT` then `RETURN` — the `CALL` is *not* immediately followed by `RETURN`, so it wouldn't be marked tail. Either add a peephole that recognises this pattern (CALL → STORE_IT → LOAD_IT → RETURN with no intervening jump targets) and rewrites it to a tail call, or accept that `return the result of f x` doesn't TCO (then `return f x` directly would, except Chatter syntax doesn't allow that because bare-name calls aren't expressions — so the peephole is the only practical answer). (7) Stack debugging: tail-replaced frames lose their call-site location, so a runtime error inside the tail-replaced function wouldn't show the caller in any future stack trace feature. Fine for now (no stack traces yet). Tests would include a known-blowing accumulator factorial / Fibonacci pair (currently throws JS RangeError) and verify they complete; plus a control test that non-tail recursion still works normally.
 

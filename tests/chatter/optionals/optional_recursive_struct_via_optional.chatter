@@ -1,0 +1,12 @@
+struct Node
+    number value
+    optional Node child
+end struct
+
+constant leaf is make Node with value 1, child none
+constant root is make Node with value 2, child leaf
+say value of root
+constant n is child of root
+if n is not none
+    say value of n
+end if

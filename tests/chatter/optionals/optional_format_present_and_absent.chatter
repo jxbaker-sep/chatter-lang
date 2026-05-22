@@ -1,0 +1,14 @@
+function maybe_str takes number dummy returns optional string is
+    return "hello"
+end function
+
+function nothing takes number dummy returns optional string is
+    return none
+end function
+
+maybe_str 0
+say it
+nothing 0
+say it
+maybe_str 0
+say it & " world"

@@ -1,0 +1,12 @@
+function maybe_int takes number dummy returns optional number is
+    return none
+end function
+
+function give_five takes number dummy returns optional number is
+    return 5
+end function
+
+maybe_int 0
+say it
+give_five 0
+say it

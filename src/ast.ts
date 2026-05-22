@@ -5,7 +5,8 @@ export type TypeAnnotation =
   | { kind: 'list'; element: TypeAnnotation }
   | { kind: 'uniqueList'; element: TypeAnnotation }
   | { kind: 'dict'; keyType: TypeAnnotation; valueType: TypeAnnotation }
-  | { kind: 'struct'; name: string; typeArgs?: TypeAnnotation[] };  // unmangled struct name, optional generic args
+  | { kind: 'struct'; name: string; typeArgs?: TypeAnnotation[] }  // unmangled struct name, optional generic args
+  | { kind: 'optional'; element: TypeAnnotation };
 
 export interface Located {
   line?: number;
@@ -22,6 +23,7 @@ export type Expression = (
   | NumberLiteral
   | StringLiteral
   | BooleanLiteral
+  | NoneLiteral
   | ItExpression
   | CallStatement
   | ListLiteral
@@ -247,6 +249,10 @@ export interface ItExpression {
 export interface BooleanLiteral {
   type: 'BooleanLiteral';
   value: boolean;
+}
+
+export interface NoneLiteral {
+  type: 'NoneLiteral';
 }
 
 export interface UnaryExpression {

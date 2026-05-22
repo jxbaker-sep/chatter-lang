@@ -1,0 +1,10 @@
+function wrap takes number n returns optional number is
+    return n
+end function
+
+constant x is result of wrap 7
+if x is not none and x is greater than 5
+    say "big"
+else
+    say "small or absent"
+end if

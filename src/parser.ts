@@ -57,6 +57,7 @@ const NAMED_ARG_STOP_KEYWORDS = new Set([
   'type',
   'sort', 'map', 'filter', 'reduce',
   'using', 'where', 'starting', 'ascending', 'descending', 'accumulator',
+  'optional', 'none',
 ]);;
 
 // Keywords that legally begin an expression (see parsePrimary / parseLogicalNot).
@@ -76,6 +77,7 @@ const EXPRESSION_START_KEYWORDS = new Set([
   'make',
   'map', 'filter', 'reduce',
   'accumulator',
+  'none',
 ]);
 
 function canStartExpression(tok: Token): boolean {
@@ -648,6 +650,14 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseTypeAnnotation(): TypeAnnotation {
     const tok = peek();
+    if (tok.type === 'KEYWORD' && tok.value === 'optional') {
+      advance();
+      const inner = parseTypeAnnotation();
+      if (inner.kind === 'optional') {
+        throw new ParseError('redundant optional', tok);
+      }
+      return { kind: 'optional', element: inner };
+    }
     if (tok.type === 'KEYWORD' && tok.value === 'unique') {
       advance();
       consume('KEYWORD', 'list');
@@ -1936,6 +1946,11 @@ export function parse(tokens: Token[], source?: string): Program {
       if (tok.value === 'true' || tok.value === 'false') {
         advance();
         return { type: 'BooleanLiteral', value: tok.value === 'true' } as BooleanLiteral;
+      }
+      if (tok.value === 'none') {
+        advance();
+        const node: import('./ast').NoneLiteral = { type: 'NoneLiteral' };
+        return withLoc(node, tok);
       }
       if (NAMED_ARG_STOP_KEYWORDS.has(tok.value)) {
         throw new ParseError(

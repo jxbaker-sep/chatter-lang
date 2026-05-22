@@ -1,0 +1,10 @@
+function maybe takes number n returns optional number is
+    return n
+end function
+
+variable x is result of maybe 5
+if x is not none
+    say x + 1
+    change x to none
+end if
+say x

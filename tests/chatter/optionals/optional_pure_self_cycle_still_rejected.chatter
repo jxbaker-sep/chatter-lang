@@ -1,0 +1,4 @@
+struct BadNode
+    number value
+    BadNode child
+end struct

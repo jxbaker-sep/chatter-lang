@@ -1,0 +1,12 @@
+struct Person
+    string name
+    optional number age
+end struct
+
+constant p is make Person with name "Alice", age none
+constant q is make Person with name "Bob", age 30
+
+say name of p
+say age of p
+say name of q
+say age of q

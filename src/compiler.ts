@@ -301,6 +301,38 @@ export class Compiler {
   // Outside a HOF body this is what `staticType(ItExpression)` returns.
   private currentItType: ChatterType | null = null;
 
+  private narrowingStack: Map<string, ChatterType>[] = [new Map()];
+
+  private currentNarrowings(): Map<string, ChatterType> {
+    return this.narrowingStack[this.narrowingStack.length - 1];
+  }
+
+  private getNarrowedType(name: string): ChatterType | undefined {
+    for (let i = this.narrowingStack.length - 1; i >= 0; i--) {
+      const t = this.narrowingStack[i].get(name);
+      if (t !== undefined) return t;
+    }
+    return undefined;
+  }
+
+  private pushNarrowingScope(narrowings: Map<string, ChatterType>): void {
+    const combined = new Map(this.currentNarrowings());
+    for (const [k, v] of narrowings) combined.set(k, v);
+    this.narrowingStack.push(combined);
+  }
+
+  private popNarrowingScope(): void {
+    this.narrowingStack.pop();
+  }
+
+  private applyNarrowing(name: string, type: ChatterType): void {
+    this.currentNarrowings().set(name, type);
+  }
+
+  private invalidateNarrowing(name: string): void {
+    for (const m of this.narrowingStack) m.delete(name);
+  }
+
   private mergeItTypes(types: (ChatterType | null)[]): ChatterType | null {
     if (types.length === 0) return null;
     const first = types[0];
@@ -378,6 +410,11 @@ export class Compiler {
   // the time fromAnnotation runs in normal compilation flow, every local
   // alias has a non-null `resolved` field.
   private fromAnnotation(a: TypeAnnotation, loc?: SourceLocation): ChatterType {
+    if (a.kind === 'optional') {
+      const inner = this.fromAnnotation(a.element, loc);
+      if (inner.kind === 'optional') throw new CompileError('redundant optional', loc ?? this.currentLoc);
+      return { kind: 'optional', element: inner };
+    }
     if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
     if (a.kind === 'struct') {
       const boundTypeVar = this.currentTypeVarBindings.get(a.name);
@@ -420,9 +457,13 @@ export class Compiler {
       return this.genericStructType(info, resolvedArgs);
     }
     if (a.kind === 'dict') {
+      const keyType = this.fromAnnotation(a.keyType, loc);
+      if (keyType.kind === 'optional') {
+        throw new CompileError('dictionary keys cannot be optional', loc ?? this.currentLoc);
+      }
       return {
         kind: 'dict',
-        keyType: this.fromAnnotation(a.keyType, loc),
+        keyType,
         valueType: this.fromAnnotation(a.valueType, loc),
       };
     }
@@ -445,6 +486,7 @@ export class Compiler {
       case 'uniqueList': return this.typeContainsTypeVar(t.element);
       case 'dict': return this.typeContainsTypeVar(t.keyType) || this.typeContainsTypeVar(t.valueType);
       case 'struct': return (t.typeArgs ?? []).some(arg => this.typeContainsTypeVar(arg));
+      case 'optional': return this.typeContainsTypeVar(t.element);
       case 'scalar': return false;
     }
   }
@@ -458,6 +500,8 @@ export class Compiler {
         return true;
       case 'struct':
         return (t.typeArgs ?? []).some(arg => this.typeContainsCollection(arg));
+      case 'optional':
+        return false; // optional breaks collection nesting
       case 'scalar':
       case 'typeVar':
         return false;
@@ -767,6 +811,7 @@ export class Compiler {
             out.push(t.genericBase ?? t.mangled);
             for (const arg of t.typeArgs ?? []) collectStructRefs(arg, out);
           } else if (t.kind === 'list' || t.kind === 'uniqueList') collectStructRefs(t.element, out);
+          else if (t.kind === 'optional') return;
           else if (t.kind === 'dict') {
             collectStructRefs(t.keyType, out);
             collectStructRefs(t.valueType, out);
@@ -1231,6 +1276,8 @@ export class Compiler {
     if (!stmt.message) {
       this.compileExpr(stmt.expression, out, bindings);
       this.emit(out, { op: 'EXPECT', source: stmt.source });
+      const narrowing = this.detectOptionalNoneCheck(stmt.expression, bindings);
+      if (narrowing && !narrowing.isNoneCheck) this.applyNarrowing(narrowing.name, narrowing.innerType);
       return;
     }
 
@@ -1264,6 +1311,8 @@ export class Compiler {
     const endLabel = out.length;
     (out[jmpFail] as any).target = failLabel;
     (out[jmpEnd] as any).target = endLabel;
+    const narrowing = this.detectOptionalNoneCheck(stmt.expression, bindings);
+    if (narrowing && !narrowing.isNoneCheck) this.applyNarrowing(narrowing.name, narrowing.innerType);
   }
 
   private compileFail(
@@ -1391,6 +1440,79 @@ export class Compiler {
     }
   }
 
+  private canAssignToExpected(expected: ChatterType, actual: ChatterType | null, expr: Expression): boolean {
+    if (expr.type === 'NoneLiteral') return expected.kind === 'optional';
+    if (actual === null) return true;
+    return typesEqual(expected, actual) || (expected.kind === 'optional' && typesEqual(expected.element, actual));
+  }
+
+  private compileExprWithExpected(expr: Expression, expected: ChatterType, out: Instruction[], bindings: Scope): void {
+    const actual = this.staticType(expr, bindings);
+    if (!this.canAssignToExpected(expected, actual, expr)) {
+      throw new CompileError(`Type mismatch: expected ${typeToString(expected)}, got ${typeToString(actual!)}`, this.currentLoc);
+    }
+    if (expr.type === 'NoneLiteral') {
+      if (expected.kind !== 'optional') {
+        throw new CompileError('cannot infer type of none', this.currentLoc);
+      }
+      this.emit(out, { op: 'PUSH_NONE', element: expected.element });
+      return;
+    }
+    this.compileExpr(expr, out, bindings);
+    if (expected.kind === 'optional' && actual !== null && typesEqual(expected.element, actual)) {
+      this.emit(out, { op: 'WRAP_OPTIONAL' });
+    }
+  }
+
+  private assignmentTypeError(context: string, expected: ChatterType, actual: ChatterType): CompileError {
+    return new CompileError(`${context}: expected ${typeToString(expected)}, got ${typeToString(actual)}`, this.currentLoc);
+  }
+
+  private mergeLiteralElementType(existing: ChatterType | null, next: ChatterType, context: string): ChatterType {
+    if (existing === null) return next;
+    if (typesEqual(existing, next)) return existing;
+    if (existing.kind === 'optional' && typesEqual(existing.element, next)) return existing;
+    if (next.kind === 'optional' && typesEqual(next.element, existing)) return next;
+    throw new CompileError(
+      `Type mismatch in ${context}: mixed element types (${elementHuman(existing)} and ${elementHuman(next)})`,
+      this.currentLoc,
+    );
+  }
+
+  private rawOptionalTypeForNarrowing(expr: Expression, bindings: Scope): ChatterType | null {
+    if (expr.type === 'IdentifierExpression') {
+      const info = bindings.lookup(expr.name);
+      if (info) return info.type ?? null;
+      if (this.topLevelBindings && bindings !== this.topLevelBindings) {
+        const top = this.topLevelBindings.lookup(expr.name);
+        if (top) return top.type ?? null;
+      }
+      return null;
+    }
+    if (expr.type === 'ItExpression') {
+      if (this.hofItStack.length > 0) return this.hofItStack[this.hofItStack.length - 1].type ?? null;
+      return this.currentItType;
+    }
+    return this.staticType(expr, bindings);
+  }
+
+  private detectOptionalNoneCheck(cond: Expression, bindings: Scope): { name: string; isNoneCheck: boolean; innerType: ChatterType } | null {
+    if (cond.type !== 'BinaryExpression') return null;
+    if (cond.operator !== '==' && cond.operator !== '!=') return null;
+    const isNoneCheck = cond.operator === '==';
+    let varExpr: Expression | null = null;
+    if (cond.right.type === 'NoneLiteral') varExpr = cond.left;
+    else if (cond.left.type === 'NoneLiteral') varExpr = cond.right;
+    if (!varExpr) return null;
+    let name: string;
+    if (varExpr.type === 'IdentifierExpression') name = varExpr.name;
+    else if (varExpr.type === 'ItExpression') name = '__it__';
+    else return null;
+    const st = this.rawOptionalTypeForNarrowing(varExpr, bindings);
+    if (!st || st.kind !== 'optional') return null;
+    return { name, isNoneCheck, innerType: st.element };
+  }
+
   private compileSet(
     stmt: ConstantDeclaration,
     out: Instruction[],
@@ -1450,28 +1572,32 @@ export class Compiler {
     if (stmt.precall) {
       const rt = this.compilePrecall(stmt.precall, out, bindings);
       if (info.type) {
-        if (!typesEqual(info.type, rt)) {
+        if (!this.canAssignToExpected(info.type, rt, stmt.value)) {
           throw new CompileError(
             `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rt)}`,
             this.currentLoc,
           );
         }
       }
-      this.compileExpr(stmt.value, out, bindings);
+      if (info.type) this.compileExprWithExpected(stmt.value, info.type, out, bindings);
+      else this.compileExpr(stmt.value, out, bindings);
       this.emit(out, { op: 'STORE_VAR', name: info.mangled });
+      this.invalidateNarrowing(stmt.name);
       return;
     }
-    // Static type check for list/uniqueList/dict vars: exact match required.
-    if (info.type && (info.type.kind === 'list' || info.type.kind === 'uniqueList' || info.type.kind === 'dict')) {
+    if (info.type) {
       const rhs = this.staticType(stmt.value, bindings);
-      if (rhs !== null && !typesEqual(rhs, info.type)) {
+      if (!this.canAssignToExpected(info.type, rhs, stmt.value)) {
         throw new CompileError(
-          `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${typeToString(rhs)}`,
+          `Type mismatch: cannot change '${stmt.name}' from ${typeToString(info.type)} to ${rhs ? typeToString(rhs) : 'unknown'}`,
         this.currentLoc);
       }
+      this.compileExprWithExpected(stmt.value, info.type, out, bindings);
+    } else {
+      this.compileExpr(stmt.value, out, bindings);
     }
-    this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'STORE_VAR', name: info.mangled });
+    this.invalidateNarrowing(stmt.name);
   }
 
   private compileChangeItem(
@@ -2060,6 +2186,10 @@ export class Compiler {
         }
         return;
       }
+      if (annotated.kind === 'optional' && concrete.kind !== 'optional') {
+        bind(annotated.element, concrete, paramName);
+        return;
+      }
       if (annotated.kind !== concrete.kind) {
         throw new CompileError(
           `Type mismatch in call to '${call.name}' arg '${paramName}': expected ${typeToString(annotated)}, got ${typeToString(concrete)}`,
@@ -2094,6 +2224,7 @@ export class Compiler {
           bind(annotated.valueType, c.valueType, paramName);
           return;
         }
+        case 'optional': bind(annotated.element, (concrete as Extract<ChatterType, { kind: 'optional' }>).element, paramName); return;
       }
     };
 
@@ -2210,7 +2341,8 @@ export class Compiler {
     const typeBindings = this.bindGenericTypeVarsForCall(stmt, genInfo, boundArgs, bindings, false);
     const instanceName = this.monomorphize(genInfo, typeBindings, this.currentLoc);
 
-    for (const argExpr of boundArgs) this.compileExpr(argExpr, out, bindings);
+    const concreteParamTypes = genInfo.params.map(p => this.withGenericTypeVars(genInfo, typeBindings, () => this.fromAnnotation(p.paramType, this.currentLoc)));
+    for (let i = 0; i < boundArgs.length; i++) this.compileExprWithExpected(boundArgs[i], concreteParamTypes[i], out, bindings);
     this.emit(out, { op: 'CALL', name: instanceName, argCount: genInfo.params.length });
 
     if (!genInfo.returnType) return null;
@@ -2286,14 +2418,12 @@ export class Compiler {
         // Static type check for arguments.
         const paramType = sig[i].type;
         const argType = this.staticType(argExpr, bindings);
-        if (argType !== null) {
-          if (!typesEqual(paramType, argType)) {
-            throw new CompileError(
-              `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${typeToString(argType)}`,
-            this.currentLoc);
-          }
+        if (!this.canAssignToExpected(paramType, argType, argExpr)) {
+          throw new CompileError(
+            `Type mismatch in call to '${stmt.name}' arg '${sig[i].name}': expected ${typeToString(paramType)}, got ${argType ? typeToString(argType) : 'unknown'}`,
+          this.currentLoc);
         }
-        this.compileExpr(argExpr, out, bindings);
+        this.compileExprWithExpected(argExpr, paramType, out, bindings);
       }
 
       this.emit(out, { op: 'CALL', name: stmt.name, argCount: sig.length });
@@ -2314,6 +2444,7 @@ export class Compiler {
 
     const itTypeBefore = this.currentItType;
     const branchEndItTypes: (ChatterType | null)[] = [];
+    const fallthroughNarrowings = new Map<string, ChatterType>();
 
     for (const branch of stmt.branches) {
       const ct = this.staticType(branch.condition, bindings);
@@ -2322,31 +2453,55 @@ export class Compiler {
           `Type mismatch: 'if' condition must be a boolean, got ${typeToString(ct)}`,
         this.currentLoc);
       }
+      const detected = this.detectOptionalNoneCheck(branch.condition, bindings);
       this.compileExpr(branch.condition, out, bindings);
       const jifIdx = out.length;
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
       this.currentItType = itTypeBefore;
-      const branchScope = new Scope(bindings);
-      for (const s of branch.body) {
+      const branchNarrowings = new Map(fallthroughNarrowings);
+      // For `x is not none`, narrow x in the if-body
+      if (detected && !detected.isNoneCheck) branchNarrowings.set(detected.name, detected.innerType);
+      // For `x is none`, narrow x in the else/fallthrough (inverse logic)
+      // But if the body terminates, this narrowing applies to what comes after the if
+      this.pushNarrowingScope(branchNarrowings);
+      const bodyTerminates = blockTerminates(branch.body);
+      try {
+        const branchScope = new Scope(bindings);
+        for (const s of branch.body) {
         this.compileStatement(s, out, branchScope);
+        }
+        branchEndItTypes.push(this.currentItType);
+      } finally {
+        this.popNarrowingScope();
       }
-      branchEndItTypes.push(this.currentItType);
 
       const exitIdx = out.length;
       this.emit(out, { op: 'JUMP', target: -1 });
       exitJumps.push(exitIdx);
 
       (out[jifIdx] as { op: 'JUMP_IF_FALSE'; target: number }).target = out.length;
+      // For `x is none` with terminating body OR any `x is none` (for else), narrow x in fallthrough
+      if (detected && detected.isNoneCheck) {
+        fallthroughNarrowings.set(detected.name, detected.innerType);
+      }
     }
 
     if (stmt.elseBody) {
       this.currentItType = itTypeBefore;
-      const elseScope = new Scope(bindings);
-      for (const s of stmt.elseBody) {
+      // The else block sees the inverse narrowing: if condition was `x is none`, else sees x narrowed
+      this.pushNarrowingScope(fallthroughNarrowings);
+      try {
+        const elseScope = new Scope(bindings);
+        for (const s of stmt.elseBody) {
         this.compileStatement(s, out, elseScope);
+        }
+        branchEndItTypes.push(this.currentItType);
+      } finally {
+        this.popNarrowingScope();
       }
-      branchEndItTypes.push(this.currentItType);
+      // Clear fallthrough narrowings since both paths are covered
+      fallthroughNarrowings.clear();
     } else {
       // No else: fall-through carries the pre-statement `it` type.
       branchEndItTypes.push(itTypeBefore);
@@ -2358,6 +2513,11 @@ export class Compiler {
     }
 
     this.currentItType = this.mergeItTypes(branchEndItTypes);
+    
+    // Persist narrowings from fallthrough into the parent scope (when if-body terminated and no else)
+    for (const [name, type] of fallthroughNarrowings) {
+      this.currentNarrowings().set(name, type);
+    }
   }
 
   private compileRepeat(
@@ -2696,25 +2856,23 @@ export class Compiler {
     }
     if (stmt.precall) {
       const callRt = this.compilePrecall(stmt.precall, out, bindings);
-      if (!typesEqual(callRt, rt)) {
+      if (!this.canAssignToExpected(rt, callRt, stmt.value)) {
         throw new CompileError(
           `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(callRt)}`,
           this.currentLoc,
         );
       }
-      this.compileExpr(stmt.value, out, bindings);
+      this.compileExprWithExpected(stmt.value, rt, out, bindings);
       this.emit(out, { op: 'RETURN' });
       return;
     }
     const st = this.staticType(stmt.value, bindings);
-    if (st !== null) {
-      if (!typesEqual(rt, st)) {
-        throw new CompileError(
-          `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${typeToString(st)}`,
-        this.currentLoc);
-      }
+    if (!this.canAssignToExpected(rt, st, stmt.value)) {
+      throw new CompileError(
+        `Type mismatch: function '${this.currentFuncName}' declared to return ${typeToString(rt)}, but return expression has type ${st ? typeToString(st) : 'unknown'}`,
+      this.currentLoc);
     }
-    this.compileExpr(stmt.value, out, bindings);
+    this.compileExprWithExpected(stmt.value, rt, out, bindings);
     if (st === null && rt.kind === 'scalar') {
       this.emit(out, {
         op: 'CHECK_TYPE',
@@ -2746,22 +2904,30 @@ export class Compiler {
     }
     if (template.kind !== concrete.kind) return false;
     switch (template.kind) {
-      case 'scalar': return concrete.kind === 'scalar' && template.name === concrete.name;
-      case 'list': return concrete.kind === 'list' && this.bindStructMakeTypeVars(template.element, concrete.element, bindings, structName);
-      case 'uniqueList': return concrete.kind === 'uniqueList' && this.bindStructMakeTypeVars(template.element, concrete.element, bindings, structName);
-      case 'dict': return concrete.kind === 'dict'
-        && this.bindStructMakeTypeVars(template.keyType, concrete.keyType, bindings, structName)
-        && this.bindStructMakeTypeVars(template.valueType, concrete.valueType, bindings, structName);
-      case 'struct': {
+      case 'scalar':
+        return concrete.kind === 'scalar' && template.name === concrete.name;
+      case 'struct':
         if (concrete.kind !== 'struct') return false;
-        if (template.genericBase && concrete.genericBase && template.genericBase === concrete.genericBase && template.typeArgs && concrete.typeArgs && template.typeArgs.length === concrete.typeArgs.length) {
-          for (let i = 0; i < template.typeArgs.length; i++) {
-            if (!this.bindStructMakeTypeVars(template.typeArgs[i], concrete.typeArgs[i], bindings, structName)) return false;
-          }
-          return true;
+        if (!template.typeArgs || !concrete.typeArgs) {
+          return template.mangled === concrete.mangled;
         }
-        return template.mangled === concrete.mangled;
-      }
+        if (template.typeArgs.length !== concrete.typeArgs.length) return false;
+        for (let i = 0; i < template.typeArgs.length; i++) {
+          if (!this.bindStructMakeTypeVars(template.typeArgs[i], concrete.typeArgs[i], bindings, structName)) return false;
+        }
+        return true;
+      case 'list':
+        return concrete.kind === 'list' && this.bindStructMakeTypeVars(template.element, concrete.element, bindings, structName);
+      case 'uniqueList':
+        return concrete.kind === 'uniqueList' && this.bindStructMakeTypeVars(template.element, concrete.element, bindings, structName);
+      case 'dict':
+        return concrete.kind === 'dict' &&
+          this.bindStructMakeTypeVars(template.keyType, concrete.keyType, bindings, structName) &&
+          this.bindStructMakeTypeVars(template.valueType, concrete.valueType, bindings, structName);
+      case 'optional':
+        return concrete.kind === 'optional'
+          ? this.bindStructMakeTypeVars(template.element, concrete.element, bindings, structName)
+          : this.bindStructMakeTypeVars(template.element, concrete, bindings, structName);
     }
   }
 
@@ -2792,10 +2958,11 @@ export class Compiler {
     const typeVars = info.typeVars ?? [];
     if (typeVars.length === 0) {
       for (const decl of info.fields) {
-        const vt = this.staticType(provided.get(decl.name)!, bindings);
-        if (vt !== null && !typesEqual(vt, decl.type)) {
+        const value = provided.get(decl.name)!;
+        const vt = this.staticType(value, bindings);
+        if (!this.canAssignToExpected(decl.type, vt, value)) {
           throw new CompileError(
-            `Type mismatch: field '${decl.name}' of struct '${expr.structName}' expects ${typeToString(decl.type)}, got ${typeToString(vt)}`,
+            `Type mismatch: field '${decl.name}' of struct '${expr.structName}' expects ${typeToString(decl.type)}, got ${vt ? typeToString(vt) : 'unknown'}`,
             this.currentLoc,
           );
         }
@@ -2854,6 +3021,8 @@ export class Compiler {
       case 'BooleanLiteral':
         this.emit(out, { op: 'PUSH_BOOL', value: expr.value });
         break;
+      case 'NoneLiteral':
+        throw new CompileError('cannot infer type of none', this.currentLoc);
       case 'IdentifierExpression':
         if (expr.name === 'accumulator') {
           if (this.hofAccStack.length === 0) {
@@ -2878,6 +3047,7 @@ export class Compiler {
           this.currentLoc);
         }
         this.emit(out, { op: 'LOAD', name: scopeInfo?.mangled ?? expr.name });
+        if (this.getNarrowedType(expr.name)) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
         break;
       case 'ItExpression':
         if (this.hofItStack.length > 0) {
@@ -2885,6 +3055,7 @@ export class Compiler {
         } else {
           this.emit(out, { op: 'LOAD_IT' });
         }
+        if (this.getNarrowedType('__it__')) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
         break;
       case 'BinaryExpression':
         this.compileBinary(expr, out, bindings);
@@ -3226,7 +3397,7 @@ export class Compiler {
         const provided = new Map(expr.fields.map(f => [f.name, f.value] as const));
         const fieldNames: string[] = [];
         for (const decl of concreteInfo.fields) {
-          this.compileExpr(provided.get(decl.name)!, out, bindings);
+          this.compileExprWithExpected(provided.get(decl.name)!, decl.type, out, bindings);
           fieldNames.push(decl.name);
         }
         this.emit(out, { op: 'MAKE_STRUCT', typeName: concreteInfo.mangled, fieldNames });
@@ -3295,9 +3466,9 @@ export class Compiler {
               this.currentLoc);
             }
             const vt = this.staticType(u.value, bindings);
-            if (vt !== null && !typesEqual(vt, decl.type)) {
+            if (!this.canAssignToExpected(decl.type, vt, u.value)) {
               throw new CompileError(
-                `Type mismatch: cannot update '${u.name}' from ${typeToString(decl.type)} to ${typeToString(vt)}`,
+                `Type mismatch: cannot update '${u.name}' from ${typeToString(decl.type)} to ${vt ? typeToString(vt) : 'unknown'}`,
               this.currentLoc);
             }
           }
@@ -3305,7 +3476,9 @@ export class Compiler {
         this.compileExpr(expr.target, out, bindings);
         const fieldNames: string[] = [];
         for (const u of expr.updates) {
-          this.compileExpr(u.value, out, bindings);
+          const decl = info?.fields.find(d => d.name === u.name);
+          if (decl) this.compileExprWithExpected(u.value, decl.type, out, bindings);
+          else this.compileExpr(u.value, out, bindings);
           fieldNames.push(u.name);
         }
         this.emit(out, { op: 'STRUCT_WITH', fieldNames });
@@ -3738,6 +3911,7 @@ export class Compiler {
   ): void {
     if (expr.kind === 'empty') {
       const kCode = this.elementAnnotationToCode(expr.keyType!);
+      if (kCode.kind === 'optional') throw new CompileError('dictionary keys cannot be optional', this.currentLoc);
       const vCode = this.elementAnnotationToCode(expr.valueType!);
       this.emit(out, { op: 'MAKE_EMPTY_DICT', keyType: kCode, valueType: vCode });
       return;
@@ -3745,10 +3919,12 @@ export class Compiler {
     // Infer key + value types from entries.
     let kInferred: ChatterType | null = null;
     let vInferred: ChatterType | null = null;
+    let vHasNone = false;
     for (const e of expr.entries) {
       const kt = this.staticType(e.key, bindings);
       if (kt) {
         const c = kt;
+        if (c.kind === 'optional') throw new CompileError('dictionary keys cannot be optional', this.currentLoc);
         if (kInferred === null) kInferred = c;
         else if (!typesEqual(kInferred, c)) {
           throw new CompileError(
@@ -3757,14 +3933,10 @@ export class Compiler {
         }
       }
       const vt = this.staticType(e.value, bindings);
-      if (vt) {
-        const c = vt;
-        if (vInferred === null) vInferred = c;
-        else if (!typesEqual(vInferred, c)) {
-          throw new CompileError(
-            `Type mismatch in dictionary literal: mixed value types (${elementHuman(vInferred)} and ${elementHuman(c)})`,
-          this.currentLoc);
-        }
+      if (vt === null) {
+        if (e.value.type === 'NoneLiteral') vHasNone = true;
+      } else {
+        vInferred = this.mergeLiteralElementType(vInferred, vt, 'dictionary literal');
       }
     }
     if (kInferred === null || vInferred === null) {
@@ -3772,9 +3944,13 @@ export class Compiler {
         `cannot infer dictionary key/value types; use 'empty dictionary from K to V' for empty dictionaries`,
       this.currentLoc);
     }
+    // If any value is none, the value type must be optional T
+    if (vHasNone && vInferred.kind !== 'optional') {
+      vInferred = { kind: 'optional', element: vInferred };
+    }
     for (const e of expr.entries) {
-      this.compileExpr(e.key, out, bindings);
-      this.compileExpr(e.value, out, bindings);
+      this.compileExprWithExpected(e.key, kInferred, out, bindings);
+      this.compileExprWithExpected(e.value, vInferred, out, bindings);
     }
     this.emit(out, {
       op: 'MAKE_DICT',
@@ -3835,16 +4011,17 @@ export class Compiler {
         this.currentLoc);
       }
       const vt = this.staticType(stmt.value, bindings);
-      const vc = elementCode(vt);
-      if (vc !== null && !typesEqual(vc, info.type.valueType)) {
+      if (!this.canAssignToExpected(info.type.valueType, vt, stmt.value)) {
         throw new CompileError(
-          `Type mismatch: dictionary value has type ${elementHuman(info.type.valueType)}, got ${elementHuman(vc)}`,
+          `Type mismatch: dictionary value has type ${elementHuman(info.type.valueType)}, got ${vt ? elementHuman(vt) : 'unknown'}`,
         this.currentLoc);
       }
     }
     this.emit(out, { op: 'LOAD', name: info.mangled });
-    this.compileExpr(stmt.key, out, bindings);
-    this.compileExpr(stmt.value, out, bindings);
+    if (info.type && info.type.kind === 'dict') this.compileExprWithExpected(stmt.key, info.type.keyType, out, bindings);
+    else this.compileExpr(stmt.key, out, bindings);
+    if (info.type && info.type.kind === 'dict') this.compileExprWithExpected(stmt.value, info.type.valueType, out, bindings);
+    else this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'DICT_SET' });
   }
 
@@ -3858,25 +4035,34 @@ export class Compiler {
       return;
     }
     let inferred: ChatterType | null = null;
-    let allKnown = true;
+    let hasUnknownNonNone = false;
+    let hasNone = false;
     for (const e of expr.elements) {
       const t = this.staticType(e, bindings);
-      if (t === null) { allKnown = false; continue; }
-      const c = t;
-      if (inferred === null) inferred = c;
-      else if (!typesEqual(inferred, c)) {
-        throw new CompileError(
-          `Type mismatch in unique list literal: mixed element types (${elementHuman(inferred)} and ${elementHuman(c)})`,
-        this.currentLoc);
+      if (t === null) {
+        if (e.type === 'NoneLiteral') {
+          hasNone = true;
+        } else {
+          hasUnknownNonNone = true;
+        }
+        continue;
       }
+      inferred = this.mergeLiteralElementType(inferred, t, 'unique list literal');
+    }
+    if (inferred === null) {
+      throw new CompileError(`cannot infer unique list element type`, this.currentLoc);
+    }
+    // If the list contains none, the element type must be optional T
+    if (hasNone && inferred.kind !== 'optional') {
+      inferred = { kind: 'optional', element: inferred };
     }
     for (const e of expr.elements) {
-      this.compileExpr(e, out, bindings);
+      this.compileExprWithExpected(e, inferred, out, bindings);
     }
     this.emit(out, {
       op: 'MAKE_UNIQUE_LIST',
       count: expr.elements.length,
-      elementType: allKnown ? inferred : null,
+      elementType: hasUnknownNonNone ? null : inferred,
     });
   }
 
@@ -3890,25 +4076,34 @@ export class Compiler {
       return;
     }
     let inferred: ChatterType | null = null;
-    let allKnown = true;
+    let hasUnknownNonNone = false;
+    let hasNone = false;
     for (const e of expr.elements) {
       const t = this.staticType(e, bindings);
-      if (t === null) { allKnown = false; continue; }
-      const c = t;
-      if (inferred === null) inferred = c;
-      else if (!typesEqual(inferred, c)) {
-        throw new CompileError(
-          `Type mismatch in list literal: mixed element types (${elementHuman(inferred)} and ${elementHuman(c)})`,
-        this.currentLoc);
+      if (t === null) {
+        if (e.type === 'NoneLiteral') {
+          hasNone = true;
+        } else {
+          hasUnknownNonNone = true;
+        }
+        continue;
       }
+      inferred = this.mergeLiteralElementType(inferred, t, 'list literal');
+    }
+    if (inferred === null) {
+      throw new CompileError(`cannot infer list element type`, this.currentLoc);
+    }
+    // If the list contains none, the element type must be optional T
+    if (hasNone && inferred.kind !== 'optional') {
+      inferred = { kind: 'optional', element: inferred };
     }
     for (const e of expr.elements) {
-      this.compileExpr(e, out, bindings);
+      this.compileExprWithExpected(e, inferred, out, bindings);
     }
     this.emit(out, {
       op: 'MAKE_LIST',
       count: expr.elements.length,
-      elementType: allKnown ? inferred : null,
+      elementType: hasUnknownNonNone ? null : inferred,
     });
   }
 
@@ -3960,6 +4155,21 @@ export class Compiler {
       this.compileLogicalShortCircuit(expr, out, bindings);
       return;
     }
+    if (expr.operator === '==' || expr.operator === '!=') {
+      const leftIsNone = expr.left.type === 'NoneLiteral';
+      const rightIsNone = expr.right.type === 'NoneLiteral';
+      if (leftIsNone || rightIsNone) {
+        const subject = leftIsNone ? expr.right : expr.left;
+        const subjectType = this.staticType(subject, bindings);
+        if (subjectType && subjectType.kind !== 'optional') {
+          throw new CompileError(`Type mismatch: cannot compare ${typeToString(subjectType)} and none`, this.currentLoc);
+        }
+        this.compileExpr(subject, out, bindings);
+        this.emit(out, { op: 'IS_NONE' });
+        if (expr.operator === '!=') this.emit(out, { op: 'NOT' });
+        return;
+      }
+    }
     this.compileExpr(expr.left, out, bindings);
     this.compileExpr(expr.right, out, bindings);
     const op = expr.operator;
@@ -3996,7 +4206,9 @@ export class Compiler {
       if (lt && rt) {
         const compatible =
           typesEqual(lt, rt) ||
-          ((lt.kind === 'list' && rt.kind === 'uniqueList') || (lt.kind === 'uniqueList' && rt.kind === 'list')) && typesEqual(lt.element, rt.element);
+          ((lt.kind === 'list' && rt.kind === 'uniqueList') || (lt.kind === 'uniqueList' && rt.kind === 'list')) && typesEqual(lt.element, rt.element) ||
+          (lt.kind === 'optional' && typesEqual(lt.element, rt)) ||
+          (rt.kind === 'optional' && typesEqual(rt.element, lt));
         if (!compatible) {
           throw new CompileError(
             `Type mismatch: cannot compare ${typeToString(lt)} and ${typeToString(rt)}`,
@@ -4035,6 +4247,7 @@ export class Compiler {
   //   EXPECT_BOOL_OP and     ; type-check b at runtime when its static type is unknown
   // end:
   // Static type checks on both operands still fire when types are statically known.
+  // For 'and', narrowing applies: if LHS is `x is not none`, RHS compiles with x narrowed.
   private compileLogicalShortCircuit(
     expr: BinaryExpression,
     out: Instruction[],
@@ -4058,7 +4271,26 @@ export class Compiler {
     this.compileExpr(expr.left, out, bindings);
     const jumpIdx = out.length;
     this.emit(out, { op: 'JUMP_BOOL_OP', logicalOp: op, target: -1 });
-    this.compileExpr(expr.right, out, bindings);
+    
+    // For 'and', apply narrowing if LHS is an optional-none-check
+    if (op === 'and') {
+      const detected = this.detectOptionalNoneCheck(expr.left, bindings);
+      if (detected && !detected.isNoneCheck) {
+        // LHS is `x is not none` - narrow x to innerType for RHS
+        const narrowMap = new Map([[detected.name, detected.innerType]]);
+        this.pushNarrowingScope(narrowMap);
+        try {
+          this.compileExpr(expr.right, out, bindings);
+        } finally {
+          this.popNarrowingScope();
+        }
+      } else {
+        this.compileExpr(expr.right, out, bindings);
+      }
+    } else {
+      this.compileExpr(expr.right, out, bindings);
+    }
+    
     this.emit(out, { op: 'EXPECT_BOOL_OP', logicalOp: op });
     (out[jumpIdx] as any).target = out.length;
   }
@@ -4069,6 +4301,7 @@ export class Compiler {
       case 'NumberLiteral': return { kind: 'scalar', name: 'number' };
       case 'StringLiteral': return { kind: 'scalar', name: 'string' };
       case 'BooleanLiteral': return { kind: 'scalar', name: 'boolean' };
+      case 'NoneLiteral': return null;
       case 'UnaryExpression':
         return expr.operator === '-'
           ? { kind: 'scalar', name: 'number' }
@@ -4106,6 +4339,8 @@ export class Compiler {
         return { kind: 'scalar', name: 'boolean' };
       }
       case 'IdentifierExpression': {
+        const narrowed = this.getNarrowedType(expr.name);
+        if (narrowed) return narrowed;
         if (expr.name === 'accumulator' && this.hofAccStack.length > 0) {
           return this.hofAccStack[this.hofAccStack.length - 1].type ?? null;
         }
@@ -4269,11 +4504,14 @@ export class Compiler {
       }
       case 'ReduceExpression':
         return this.staticType(expr.start, bindings);
-      case 'ItExpression':
+      case 'ItExpression': {
+        const narrowed = this.getNarrowedType('__it__');
+        if (narrowed) return narrowed;
         if (this.hofItStack.length > 0) {
           return this.hofItStack[this.hofItStack.length - 1].type ?? null;
         }
         return this.currentItType;
+      }
       default:
         return null;
     }

@@ -1,0 +1,7 @@
+constant d is empty dictionary from string to optional number
+change value of "a" in d to 1
+change value of "b" in d to none
+change value of "c" in d to 3
+say value of "a" in d
+say value of "b" in d
+say value of "c" in d

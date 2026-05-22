@@ -36,7 +36,14 @@ export interface ChatterDict {
   items: Map<string, { key: ChatterValue; value: ChatterValue }>;  // canonicalKey -> entry
 }
 
-export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct | ChatterDict;
+export interface ChatterOptional {
+  kind: 'optional';
+  present: boolean;
+  value?: ChatterValue;  // defined iff present === true
+  element: ChatterType;  // inner element type
+}
+
+export type ChatterValue = number | string | boolean | ChatterList | ChatterUniqueList | ChatterStruct | ChatterDict | ChatterOptional;
 
 function isList(v: ChatterValue): v is ChatterList {
   return typeof v === 'object' && v !== null && (v as any).kind === 'list';
@@ -54,6 +61,10 @@ function isDict(v: ChatterValue): v is ChatterDict {
   return typeof v === 'object' && v !== null && (v as any).kind === 'dict';
 }
 
+function isOptional(v: ChatterValue): v is ChatterOptional {
+  return typeof v === 'object' && v !== null && (v as any).kind === 'optional';
+}
+
 function isAnyList(v: ChatterValue): v is ChatterList | ChatterUniqueList {
   return isList(v) || isUniqueList(v);
 }
@@ -65,6 +76,7 @@ function valueTypeOf(v: ChatterValue): ChatterType {
   if (isStruct(v)) return { kind: 'struct', mangled: v.typeName };
   if (isList(v)) return { kind: 'list', element: v.element };
   if (isUniqueList(v)) return { kind: 'uniqueList', element: v.element };
+  if (isOptional(v)) return { kind: 'optional', element: v.element };
   return { kind: 'dict', keyType: v.keyType, valueType: v.valueType };
 }
 
@@ -80,6 +92,10 @@ function scalarCanonicalKey(v: number | string | boolean): string {
 
 function canonicalKey(v: ChatterValue): string {
   if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') return scalarCanonicalKey(v);
+  if (isOptional(v)) {
+    if (!v.present) return 'O:none';
+    return 'O:' + canonicalKey(v.value!);
+  }
   if (isStruct(v)) {
     const parts: string[] = [];
     for (const [fname, fval] of v.fields) parts.push(fname + '=' + canonicalKey(fval));
@@ -206,6 +222,10 @@ export class VM {
   // synchronously through a freshly-pushed frame; all other values use
   // the default formatting (recursing into elements).
   private formatValue(v: ChatterValue): string {
+    if (isOptional(v)) {
+      if (!v.present) return 'none';
+      return this.formatValue(v.value!);
+    }
     if (isStruct(v)) {
       const formatterName = this.program.structFormatters?.get(v.typeName);
       if (formatterName) {
@@ -233,18 +253,18 @@ export class VM {
     }
     if (isUniqueList(v)) {
       return '[' + uniqueListValues(v).map(e => {
-        if (isAnyList(e) || isDict(e)) return this.formatValue(e);
+        if (isAnyList(e) || isDict(e) || isOptional(e)) return this.formatValue(e);
         if (isStruct(e)) return this.formatValue(e);
         if (typeof e === 'string') return `"${e}"`;
-        return formatScalar(e);
+        return formatScalar(e as number | string | boolean);
       }).join(', ') + ']';
     }
     if (isList(v)) {
       return '[' + v.items.map(e => {
-        if (isAnyList(e) || isDict(e)) return this.formatValue(e);
+        if (isAnyList(e) || isDict(e) || isOptional(e)) return this.formatValue(e);
         if (isStruct(e)) return this.formatValue(e);
         if (typeof e === 'string') return `"${e}"`;
-        return formatScalar(e);
+        return formatScalar(e as number | string | boolean);
       }).join(', ') + ']';
     }
     if (isDict(v)) {
@@ -252,9 +272,9 @@ export class VM {
         return 'empty dictionary from ' + typeToString(v.keyType) + ' to ' + typeToString(v.valueType);
       }
       const fmt = (e: ChatterValue): string => {
-        if (isAnyList(e) || isStruct(e) || isDict(e)) return this.formatValue(e);
+        if (isAnyList(e) || isStruct(e) || isDict(e) || isOptional(e)) return this.formatValue(e);
         if (typeof e === 'string') return `"${e}"`;
-        return formatScalar(e);
+        return formatScalar(e as number | string | boolean);
       };
       const parts: string[] = [];
       for (const entry of v.items.values()) {
@@ -262,7 +282,7 @@ export class VM {
       }
       return 'dictionary ' + parts.join(', ');
     }
-    return formatScalar(v);
+    return formatScalar(v as number | string | boolean);
   }
 
   private stringify(v: ChatterValue): string {
@@ -1446,6 +1466,43 @@ export class VM {
         this.stack.push(s);
         break;
       }
+
+      case 'PUSH_NONE': {
+        this.stack.push({ kind: 'optional', present: false, element: instr.element });
+        break;
+      }
+
+      case 'WRAP_OPTIONAL': {
+        const val = this.pop();
+        const elem = valueTypeOf(val);
+        this.stack.push({ kind: 'optional', present: true, value: val, element: elem });
+        break;
+      }
+
+      case 'UNWRAP_OPTIONAL': {
+        const val = this.pop();
+        if (!isOptional(val)) {
+          throw new RuntimeError(
+            `tried to use the value of an absent optional — should have been narrowed`,
+            instr.loc);
+        }
+        if (!val.present) {
+          throw new RuntimeError(
+            `tried to use the value of an absent optional — should have been narrowed`,
+            instr.loc);
+        }
+        this.stack.push(val.value!);
+        break;
+      }
+
+      case 'IS_NONE': {
+        const val = this.pop();
+        if (!isOptional(val)) {
+          throw new RuntimeError(`IS_NONE requires an optional value`, instr.loc);
+        }
+        this.stack.push(!val.present);
+        break;
+      }
     }
   }
 
@@ -1457,6 +1514,27 @@ export class VM {
   }
 
   private aggregateEquals(a: ChatterValue, b: ChatterValue, loc?: SourceLocation): boolean {
+    // optional <-> optional: structural equality
+    if (isOptional(a) && isOptional(b)) {
+      if (!typesEqual(a.element, b.element)) {
+        throw new RuntimeError(
+          `Type mismatch: cannot compare ${describe(a)} and ${describe(b)}`,
+          loc,
+        );
+      }
+      if (!a.present && !b.present) return true;
+      if (!a.present || !b.present) return false;
+      return this.aggregateEquals(a.value!, b.value!, loc);
+    }
+    // optional <-> non-optional: auto-lift lenient comparison
+    if (isOptional(a)) {
+      if (!a.present) return false;
+      return this.aggregateEquals(a.value!, b, loc);
+    }
+    if (isOptional(b)) {
+      if (!b.present) return false;
+      return this.aggregateEquals(a, b.value!, loc);
+    }
     // struct <-> struct: same type, every field equal (recursive).
     if (isStruct(a) && isStruct(b)) {
       if (a.typeName !== b.typeName) {

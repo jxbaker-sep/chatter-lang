@@ -1,0 +1,15 @@
+use maybe_num, nothing from "maybe"
+
+constant x is result of maybe_num 0
+if x is not none
+    say x + 1
+else
+    say "absent"
+end if
+
+constant y is result of nothing 0
+if y is none
+    say "nothing here"
+else
+    say y
+end if

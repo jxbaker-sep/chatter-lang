@@ -504,9 +504,8 @@ describe('VM', () => {
       expect(runSource('variable x is 1\nchange x to 2\nsay x')).toEqual(['2']);
     });
 
-    test('change to a different type throws a RuntimeError mentioning the name and types', () => {
-      const program = compile(parse(lex('variable x is 5\nchange x to "hi"')));
-      expect(() => new VM(program).run()).toThrow(/Type mismatch.*x.*number.*string/);
+    test('change to a different type throws a CompileError mentioning the name and types', () => {
+      expect(() => compile(parse(lex('variable x is 5\nchange x to "hi"')))).toThrow(/Type mismatch.*x.*number.*string/);
     });
 
     test('add/subtract/multiply/divide mutate a numeric var', () => {

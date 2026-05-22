@@ -1,0 +1,3 @@
+function f takes optional optional number x returns number is
+    return 0
+end function

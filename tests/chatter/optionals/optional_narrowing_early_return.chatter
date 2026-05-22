@@ -1,0 +1,11 @@
+function process takes optional number n returns number is
+    if n is none
+        return 0
+    end if
+    return n + 1
+end function
+
+process 42
+say it
+process none
+say it

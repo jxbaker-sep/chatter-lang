@@ -6,7 +6,8 @@ export type ChatterType =
   | { kind: 'uniqueList'; element: ChatterType }
   | { kind: 'dict'; keyType: ChatterType; valueType: ChatterType }
   | { kind: 'struct'; mangled: string; genericBase?: string; typeArgs?: ChatterType[] }
-  | { kind: 'typeVar'; name: string };
+  | { kind: 'typeVar'; name: string }
+  | { kind: 'optional'; element: ChatterType };
 
 export function unmangleTypeName(s: string): string {
   const idx = s.indexOf('::');
@@ -24,6 +25,7 @@ export function typeCode(t: ChatterType): string {
     case 'list': return 'list:' + typeCode(t.element);
     case 'uniqueList': return 'uniqueList:' + typeCode(t.element);
     case 'dict': return 'dict:' + typeCode(t.keyType) + ':to:' + typeCode(t.valueType);
+    case 'optional': return 'opt:' + typeCode(t.element);
   }
 }
 
@@ -41,6 +43,7 @@ export function typesEqual(a: ChatterType, b: ChatterType): boolean {
     case 'list': return b.kind === 'list' && typesEqual(a.element, b.element);
     case 'uniqueList': return b.kind === 'uniqueList' && typesEqual(a.element, b.element);
     case 'dict': return b.kind === 'dict' && typesEqual(a.keyType, b.keyType) && typesEqual(a.valueType, b.valueType);
+    case 'optional': return b.kind === 'optional' && typesEqual(a.element, b.element);
   }
 }
 
@@ -57,6 +60,7 @@ export function typeToString(t: ChatterType): string {
     case 'list': return 'list of ' + typeToString(t.element);
     case 'uniqueList': return 'unique list of ' + typeToString(t.element);
     case 'dict': return 'dictionary from ' + typeToString(t.keyType) + ' to ' + typeToString(t.valueType);
+    case 'optional': return 'optional ' + typeToString(t.element);
   }
 }
 
@@ -82,6 +86,7 @@ export function substituteTypeVars(t: ChatterType, map: Map<string, ChatterType>
       keyType: substituteTypeVars(t.keyType, map),
       valueType: substituteTypeVars(t.valueType, map),
     };
+    case 'optional': return { kind: 'optional', element: substituteTypeVars(t.element, map) };
   }
 }
 
@@ -116,6 +121,7 @@ export function bindTypeVars(
     case 'dict': return concrete.kind === 'dict' &&
       bindTypeVars(annotated.keyType, concrete.keyType, bindings) &&
       bindTypeVars(annotated.valueType, concrete.valueType, bindings);
+    case 'optional': return concrete.kind === 'optional' && bindTypeVars(annotated.element, concrete.element, bindings);
   }
 }
 
