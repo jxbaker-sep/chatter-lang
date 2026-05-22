@@ -40,6 +40,8 @@ export class ParseError extends ChatterError {
 // Keywords that may NOT be used as a named-argument label in a call statement
 // OR as a parameter separator label / body name in a function declaration.
 // These start new statements or form expression operators.
+const CALLABLE_KEYWORD_NAMES = new Set(['append', 'prepend']);
+
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
   'true', 'false', 'is', 'say', 'constant', 'function', 'over', 'takes', 'returns', 'return',
@@ -154,6 +156,25 @@ export function parse(tokens: Token[], source?: string): Program {
     return advance();
   }
 
+  function consumeCallableName(): Token {
+    const tok = peek();
+    if (tok.type === 'IDENT' || (tok.type === 'KEYWORD' && CALLABLE_KEYWORD_NAMES.has(tok.value))) {
+      return advance();
+    }
+    throw new ParseError(`Expected function name, got ${tok.type} '${tok.value}'`, tok);
+  }
+
+  function parseKeywordMutationOrCall(parseMutation: () => Statement): Statement {
+    const start = pos;
+    try {
+      return parseMutation();
+    } catch (e) {
+      if (!(e instanceof ParseError)) throw e;
+      pos = start;
+      return parseCallStatement();
+    }
+  }
+
   function consumeNewline(): void {
     consume('NEWLINE');
   }
@@ -218,8 +239,10 @@ export function parse(tokens: Token[], source?: string): Program {
         case 'return':   return parseReturnStatement();
         case 'if':       return parseIfStatement();
         case 'repeat':   return parseRepeatStatement();
-        case 'append':   return parseAppendStatement();
-        case 'prepend':  return parsePrependStatement();
+        case 'append':
+          return parseKeywordMutationOrCall(parseAppendStatement);
+        case 'prepend':
+          return parseKeywordMutationOrCall(parsePrependStatement);
         case 'insert':   return parseInsertStatement();
         case 'remove':   return parseRemoveStatement();
         case 'read':     return parseReadFileStatement();
@@ -748,7 +771,7 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseFunctionDeclaration(exported: boolean): FunctionDeclaration {
     consume('KEYWORD', 'function');
-    const nameTok = consume('IDENT');
+    const nameTok = consumeCallableName();
 
     // A valid label / body-name token is IDENT or a non-stop KEYWORD.
     const isValidParamWord = (tok: Token): boolean => {
@@ -1052,12 +1075,12 @@ export function parse(tokens: Token[], source?: string): Program {
     const useTok = consume('KEYWORD', 'use');
     const names: string[] = [];
     const nameLocs: Array<{ line: number; col: number; length: number; file?: string }> = [];
-    const firstName = consume('IDENT');
+    const firstName = consumeCallableName();
     names.push(firstName.value);
     nameLocs.push({ line: firstName.line, col: firstName.col, length: firstName.value.length, file: firstName.file });
     while (peek().type === 'COMMA') {
       consume('COMMA');
-      const n = consume('IDENT');
+      const n = consumeCallableName();
       names.push(n.value);
       nameLocs.push({ line: n.line, col: n.col, length: n.value.length, file: n.file });
     }
@@ -1137,7 +1160,7 @@ export function parse(tokens: Token[], source?: string): Program {
   }
 
   function parseCallStatement(consumeTerminator: boolean = true): CallStatement {
-    const nameTok = consume('IDENT');
+    const nameTok = consumeCallableName();
     const args: Array<{ name: string | null; value: Expression }> = [];
 
     // First positional arg (optional): anything that can start an expression.
@@ -1475,7 +1498,7 @@ export function parse(tokens: Token[], source?: string): Program {
         updates.push({ name: fnTok.value, value });
       };
       parsePair();
-      while (peek().type === 'COMMA' && (tokens[pos + 1]?.type === 'IDENT' || (tokens[pos + 1]?.type === 'KEYWORD' && !EXPRESSION_START_KEYWORDS.has(tokens[pos + 1].value)))) {
+      while (peek().type === 'COMMA' && (tokens[pos + 1]?.type === 'IDENT' || (tokens[pos + 1]?.type === 'KEYWORD' && (!EXPRESSION_START_KEYWORDS.has(tokens[pos + 1].value) || tokens[pos + 1].value === 'length')))) {
         advance();
         parsePair();
       }
@@ -1904,7 +1927,7 @@ export function parse(tokens: Token[], source?: string): Program {
           });
         };
         parsePair();
-        while (peek().type === 'COMMA' && (tokens[pos + 1]?.type === 'IDENT' || (tokens[pos + 1]?.type === 'KEYWORD' && !EXPRESSION_START_KEYWORDS.has(tokens[pos + 1].value)))) {
+        while (peek().type === 'COMMA' && (tokens[pos + 1]?.type === 'IDENT' || (tokens[pos + 1]?.type === 'KEYWORD' && (!EXPRESSION_START_KEYWORDS.has(tokens[pos + 1].value) || tokens[pos + 1].value === 'length')))) {
           advance();
           parsePair();
         }

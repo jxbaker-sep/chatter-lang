@@ -40,8 +40,20 @@ export function typesEqual(a: ChatterType, b: ChatterType): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case 'scalar': return b.kind === 'scalar' && a.name === b.name;
-    case 'struct': return b.kind === 'struct' && a.mangled === b.mangled;
-    case 'mutableStruct': return b.kind === 'mutableStruct' && a.mangled === b.mangled;
+    case 'struct': {
+      if (b.kind !== 'struct') return false;
+      if (a.genericBase && b.genericBase && a.genericBase === b.genericBase && a.typeArgs && b.typeArgs && a.typeArgs.length === b.typeArgs.length) {
+        return a.typeArgs.every((arg, i) => typesEqual(arg, b.typeArgs![i]));
+      }
+      return a.mangled === b.mangled;
+    }
+    case 'mutableStruct': {
+      if (b.kind !== 'mutableStruct') return false;
+      if (a.genericBase && b.genericBase && a.genericBase === b.genericBase && a.typeArgs && b.typeArgs && a.typeArgs.length === b.typeArgs.length) {
+        return a.typeArgs.every((arg, i) => typesEqual(arg, b.typeArgs![i]));
+      }
+      return a.mangled === b.mangled;
+    }
     case 'typeVar': return b.kind === 'typeVar' && a.name === b.name;
     case 'list': return b.kind === 'list' && typesEqual(a.element, b.element);
     case 'uniqueList': return b.kind === 'uniqueList' && typesEqual(a.element, b.element);

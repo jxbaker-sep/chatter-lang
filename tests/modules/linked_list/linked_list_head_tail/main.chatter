@@ -1,0 +1,14 @@
+use new_linked_list_with, append, head, tail from "std:linked_list"
+constant ll is the result of new_linked_list_with 10
+constant t0 is the result of tail ll
+say t0 is none
+append ll with 20
+append ll with 30
+constant h is the result of head ll
+constant t is the result of tail ll
+if h is not none
+    say value of h
+end if
+if t is not none
+    say value of t
+end if

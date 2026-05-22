@@ -1,0 +1,9 @@
+use new_linked_list_with, prepend, append, to_list from "std:linked_list"
+function mutate takes mutable LinkedList of number linked is
+    prepend linked with 0
+    append linked with 2
+end function
+constant ll is the result of new_linked_list_with 1
+mutate ll
+to_list ll
+say it

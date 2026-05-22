@@ -1,0 +1,10 @@
+use new_linked_list_with, prepend, append, contains_in, to_list from "std:linked_list"
+constant ll is the result of new_linked_list_with "b"
+prepend ll with "a"
+append ll with "c"
+to_list ll
+say it
+contains_in ll with "c"
+say it
+contains_in ll with "z"
+say it

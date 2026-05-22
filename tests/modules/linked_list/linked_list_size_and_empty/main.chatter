@@ -1,0 +1,19 @@
+use new_linked_list_with, append, remove_first, size_of, is_empty, clear from "std:linked_list"
+constant ll is the result of new_linked_list_with 1
+size_of ll
+say it
+is_empty ll
+say it
+append ll with 2
+size_of ll
+say it
+remove_first ll
+remove_first ll
+size_of ll
+say it
+is_empty ll
+say it
+append ll with 9
+clear ll
+is_empty ll
+say it

@@ -1,0 +1,4 @@
+use new_linked_list_with, remove_first from "std:linked_list"
+constant ll is the result of new_linked_list_with 1
+remove_first ll
+remove_first ll

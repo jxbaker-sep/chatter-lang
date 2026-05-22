@@ -1,0 +1,11 @@
+use new_linked_list_with, append, clear, size_of, head, tail from "std:linked_list"
+constant ll is the result of new_linked_list_with 1
+append ll with 2
+append ll with 3
+clear ll
+size_of ll
+say it
+constant h is the result of head ll
+constant t is the result of tail ll
+say h is none
+say t is none

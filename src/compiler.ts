@@ -1698,21 +1698,23 @@ export class Compiler {
       throw new CompileError(`Cannot change field of '${stmt.targetName}': no such binding`, this.currentLoc);
     }
     const info = resolved.info;
+    const narrowedType = this.getNarrowedType(stmt.targetName);
+    const targetType = narrowedType ?? info.type;
     let fieldType: ChatterType | null = null;
-    if (info.type) {
-      if (info.type.kind === 'struct') {
+    if (targetType) {
+      if (targetType.kind === 'struct') {
         throw new CompileError(
-          `cannot mutate immutable struct ${unmangleTypeName(info.type.mangled)} — use 'with' for copy-on-update`,
+          `cannot mutate immutable struct ${unmangleTypeName(targetType.mangled)} — use 'with' for copy-on-update`,
           this.currentLoc,
         );
       }
-      if (info.type.kind !== 'mutableStruct') {
-        throw new CompileError(`Cannot change field of '${stmt.targetName}': not a mutable struct (type ${typeToString(info.type)})`, this.currentLoc);
+      if (targetType.kind !== 'mutableStruct') {
+        throw new CompileError(`Cannot change field of '${stmt.targetName}': not a mutable struct (type ${typeToString(targetType)})`, this.currentLoc);
       }
-      const sinfo = this.structInfoForType(info.type);
+      const sinfo = this.structInfoForType(targetType);
       const decl = sinfo?.fields.find(d => d.name === stmt.fieldName);
       if (!decl) {
-        throw new CompileError(`struct '${unmangleTypeName(info.type.mangled)}' has no field '${stmt.fieldName}'`, this.currentLoc);
+        throw new CompileError(`struct '${unmangleTypeName(targetType.mangled)}' has no field '${stmt.fieldName}'`, this.currentLoc);
       }
       fieldType = decl.type;
       const vt = this.staticType(stmt.value, bindings);
@@ -1724,6 +1726,7 @@ export class Compiler {
       }
     }
     this.emit(out, { op: 'LOAD', name: info.mangled });
+    if (narrowedType) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
     if (fieldType) this.compileExprWithExpected(stmt.value, fieldType, out, bindings);
     else this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'MUTABLE_STRUCT_SET', fieldName: stmt.fieldName });
@@ -2067,20 +2070,22 @@ export class Compiler {
       throw new CompileError(`Cannot ${stmt.op} field of '${target.targetName}': no such binding`, this.currentLoc);
     }
     const info = resolved.info;
-    if (info.type) {
-      if (info.type.kind === 'struct') {
+    const narrowedType = this.getNarrowedType(target.targetName);
+    const targetType = narrowedType ?? info.type;
+    if (targetType) {
+      if (targetType.kind === 'struct') {
         throw new CompileError(
-          `cannot mutate immutable struct ${unmangleTypeName(info.type.mangled)} — use 'with' for copy-on-update`,
+          `cannot mutate immutable struct ${unmangleTypeName(targetType.mangled)} — use 'with' for copy-on-update`,
           this.currentLoc,
         );
       }
-      if (info.type.kind !== 'mutableStruct') {
-        throw new CompileError(`Cannot ${stmt.op} field of '${target.targetName}': not a mutable struct (type ${typeToString(info.type)})`, this.currentLoc);
+      if (targetType.kind !== 'mutableStruct') {
+        throw new CompileError(`Cannot ${stmt.op} field of '${target.targetName}': not a mutable struct (type ${typeToString(targetType)})`, this.currentLoc);
       }
-      const sinfo = this.structInfoForType(info.type);
+      const sinfo = this.structInfoForType(targetType);
       const decl = sinfo?.fields.find(d => d.name === target.fieldName);
       if (!decl) {
-        throw new CompileError(`struct '${unmangleTypeName(info.type.mangled)}' has no field '${target.fieldName}'`, this.currentLoc);
+        throw new CompileError(`struct '${unmangleTypeName(targetType.mangled)}' has no field '${target.fieldName}'`, this.currentLoc);
       }
       if (!(decl.type.kind === 'scalar' && decl.type.name === 'number')) {
         throw new CompileError(`Cannot ${stmt.op} field '${target.fieldName}' of '${target.targetName}': its type is ${typeToString(decl.type)}, not number`, this.currentLoc);
@@ -2088,6 +2093,7 @@ export class Compiler {
     }
     const targetTmp = this.freshName('cassign_struct');
     this.emit(out, { op: 'LOAD', name: info.mangled });
+    if (narrowedType) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
     this.emit(out, { op: 'STORE', name: targetTmp });
     this.emit(out, { op: 'LOAD', name: targetTmp });
     this.emit(out, { op: 'LOAD', name: targetTmp });
@@ -3028,6 +3034,9 @@ export class Compiler {
       bindings.set(template.name, concrete);
       return true;
     }
+    if (template.kind === 'optional' && concrete.kind !== 'optional') {
+      return this.bindStructMakeTypeVars(template.element, concrete, bindings, structName);
+    }
     if (template.kind !== concrete.kind) return false;
     switch (template.kind) {
       case 'scalar':
@@ -3035,6 +3044,13 @@ export class Compiler {
       case 'struct':
       case 'mutableStruct':
         if (concrete.kind !== template.kind) return false;
+        if (template.genericBase && concrete.genericBase && template.genericBase === concrete.genericBase && template.typeArgs && concrete.typeArgs) {
+          if (template.typeArgs.length !== concrete.typeArgs.length) return false;
+          for (let i = 0; i < template.typeArgs.length; i++) {
+            if (!this.bindStructMakeTypeVars(template.typeArgs[i], concrete.typeArgs[i], bindings, structName)) return false;
+          }
+          return true;
+        }
         if (!template.typeArgs || !concrete.typeArgs) {
           return template.mangled === concrete.mangled;
         }
@@ -3116,7 +3132,20 @@ export class Compiler {
     const args = typeVars.map(tv => inferred.get(tv)!);
     const st = this.genericStructType(info, args) as Extract<ChatterType, { kind: 'struct' | 'mutableStruct' }>;
     const concrete = this.structInfoForMangled(st.mangled);
-    if (!concrete) throw new CompileError(`internal error: missing generic struct instance '${expr.structName}'`, this.currentLoc);
+    if (!concrete) {
+      if (this.inGenericValidation && this.typeContainsTypeVar(st)) {
+        const tvBindings = new Map<string, ChatterType>();
+        typeVars.forEach((tv, i) => tvBindings.set(tv, args[i]));
+        return {
+          ...info,
+          mangled: st.mangled,
+          fields: info.fields.map(f => ({ name: f.name, type: substituteTypeVars(f.type, tvBindings) })),
+          typeVars: [],
+          typeArgs: args,
+        };
+      }
+      throw new CompileError(`internal error: missing generic struct instance '${expr.structName}'`, this.currentLoc);
+    }
     return concrete;
   }
 
@@ -3303,6 +3332,18 @@ export class Compiler {
       }
       case 'LengthExpression': {
         const tt = this.staticType(expr.target, bindings);
+        if (tt && (tt.kind === 'struct' || tt.kind === 'mutableStruct')) {
+          const info = this.structInfoForType(tt);
+          const field = info?.fields.find(d => d.name === 'length');
+          if (!field) {
+            throw new CompileError(
+              `'length of' requires a list or string or dictionary, got ${typeToString(tt)}`,
+            this.currentLoc);
+          }
+          this.compileExpr(expr.target, out, bindings);
+          this.emit(out, { op: tt.kind === 'mutableStruct' ? 'MUTABLE_STRUCT_GET' : 'STRUCT_GET', fieldName: 'length' } as InstructionKind);
+          break;
+        }
         if (tt !== null
             && !(tt.kind === 'scalar' && tt.name === 'string')
             && tt.kind !== 'list'
@@ -4559,8 +4600,15 @@ export class Compiler {
         }
         return null;
       }
-      case 'LengthExpression':
+      case 'LengthExpression': {
+        const tt = this.staticType(expr.target, bindings);
+        if (tt && (tt.kind === 'struct' || tt.kind === 'mutableStruct')) {
+          const info = this.structInfoForType(tt);
+          const f = info?.fields.find(d => d.name === 'length');
+          if (f) return f.type;
+        }
         return { kind: 'scalar', name: 'number' };
+      }
       case 'EndIndexSentinel':
         return { kind: 'scalar', name: 'number' };
       case 'CharacterAccessExpression':

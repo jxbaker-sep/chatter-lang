@@ -1,0 +1,15 @@
+use new_linked_list_with, append, contains_in, to_list from "std:linked_list"
+struct Point
+    number x
+    number y
+end struct
+constant p1 is make Point with x 1, y 2
+constant p2 is make Point with x 3, y 4
+constant ll is the result of new_linked_list_with p1
+append ll with p2
+to_list ll
+say it
+contains_in ll with make Point with x 3, y 4
+say it
+contains_in ll with make Point with x 9, y 9
+say it

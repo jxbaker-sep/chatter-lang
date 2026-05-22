@@ -268,6 +268,11 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
         }
         if (isFunc) {
           imports.set(n, depExports.get(n)!);
+          for (const [structName, structInfo] of depStructExports) {
+            if (!imports.has(structName) && !structImports.has(structName) && !aliasImports.has(structName)) {
+              structImports.set(structName, structInfo);
+            }
+          }
         } else if (isStruct) {
           structImports.set(n, depStructExports.get(n)!);
         } else {

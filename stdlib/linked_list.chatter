@@ -1,0 +1,160 @@
+# Chatter standard library: linked_list
+#
+# Mutable singly-linked lists built from generic mutable structs.
+#
+# Invariants:
+# - Empty list: head is none, tail is none, length is 0.
+# - Non-empty list: head points at the first node, tail points at the last
+#   node, tail's next is none, and length equals the number of nodes.
+# - Single-element list: head and tail point at the same Node instance.
+
+export mutable struct Node over T
+    T value
+    optional mutable Node of T next
+end struct
+
+export mutable struct LinkedList over T
+    optional mutable Node of T head
+    optional mutable Node of T tail
+    number length
+end struct
+
+# new_linked_list_with: return a fresh singleton list containing first.
+# O(1). Empty construction is intentionally left to typed contexts in v1.
+export function new_linked_list_with over T takes T first returns mutable LinkedList of T is
+    constant node is make Node with value first, next none
+    return make LinkedList with head node, tail node, length 1
+end function
+
+# prepend: insert value at the front of the list in place.
+# O(1).
+export function prepend over T takes mutable LinkedList of T linked with T value is
+    constant node is make Node with value value, next head of linked
+    change head of linked to node
+    if tail of linked is none
+        change tail of linked to node
+    end if
+    add 1 to length of linked
+end function
+
+# append: insert value at the end of the list in place.
+# O(1) thanks to the cached tail pointer.
+export function append over T takes mutable LinkedList of T linked with T value is
+    constant node is make Node with value value, next none
+    if tail of linked is none
+        change head of linked to node
+        change tail of linked to node
+    else
+        variable old_tail is tail of linked
+        if old_tail is not none
+            change next of old_tail to node
+            change tail of linked to node
+        else
+            fail "linked list invariant broken"
+        end if
+    end if
+    add 1 to length of linked
+end function
+
+# size_of: return the cached number of elements.
+# O(1).
+export function size_of over T takes mutable LinkedList of T linked returns number is
+    return length of linked
+end function
+
+# is_empty: return true when list has no nodes.
+# O(1).
+export function is_empty over T takes mutable LinkedList of T linked returns boolean is
+    return length of linked is 0
+end function
+
+# head: return the first node, or none for an empty list.
+# O(1).
+export function head over T takes mutable LinkedList of T linked returns optional mutable Node of T is
+    return head of linked
+end function
+
+# tail: return the second node, or none when list has fewer than two nodes.
+# O(1).
+export function tail over T takes mutable LinkedList of T linked returns optional mutable Node of T is
+    variable first is head of linked
+    if first is none
+        return none
+    end if
+    return next of first
+end function
+
+# contains_in: return true if any node value equals value.
+# O(n).
+export function contains_in over T takes mutable LinkedList of T linked with T value returns boolean is
+    variable cursor is head of linked
+    repeat while cursor is not none
+        if value of cursor is value
+            return true
+        end if
+        change cursor to next of cursor
+    end repeat
+    return false
+end function
+
+# to_list: copy the linked-list values into a fresh plain list.
+# O(n).
+export function to_list over T takes mutable LinkedList of T linked returns list of T is
+    constant output is empty list of T
+    variable cursor is head of linked
+    repeat while cursor is not none
+        append value of cursor to output
+        change cursor to next of cursor
+    end repeat
+    return output
+end function
+
+# remove_first: remove the front node in place.
+# O(1). Runtime error if list is empty.
+export function remove_first over T takes mutable LinkedList of T linked is
+    expect length of linked is greater than 0, "cannot remove from empty linked list"
+    variable old_head is head of linked
+    if old_head is not none
+        constant next_node is next of old_head
+        change head of linked to next_node
+        if next_node is none
+            change tail of linked to none
+        end if
+        subtract 1 from length of linked
+    else
+        fail "linked list invariant broken"
+    end if
+end function
+
+# remove_last: remove the final node in place.
+# O(n). Runtime error if list is empty.
+export function remove_last over T takes mutable LinkedList of T linked is
+    expect length of linked is greater than 0, "cannot remove from empty linked list"
+    if length of linked is 1
+        change head of linked to none
+        change tail of linked to none
+        change length of linked to 0
+        return
+    end if
+
+    variable cursor is head of linked
+    repeat while cursor is not none
+        constant next_node is next of cursor
+        if next_node is tail of linked
+            change next of cursor to none
+            change tail of linked to cursor
+            subtract 1 from length of linked
+            return
+        end if
+        change cursor to next_node
+    end repeat
+    fail "linked list invariant broken"
+end function
+
+# clear: reset list to the empty state.
+# O(1); old nodes become unreachable and are reclaimed by the host runtime.
+export function clear over T takes mutable LinkedList of T linked is
+    change head of linked to none
+    change tail of linked to none
+    change length of linked to 0
+end function
