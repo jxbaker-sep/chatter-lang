@@ -50,9 +50,11 @@ export function lex(source: string, filename?: string): Token[] {
   const indentStack: number[] = [0];
   // Soft-layout flag: while true, suppress NEWLINE / INDENT / DEDENT and don't
   // touch the indent stack. Toggled on by `function` keyword and off by the
-  // first `is` keyword that follows. Lets multi-line function headers ignore
-  // line breaks the way Python ignores them inside parentheses.
+  // first `is` keyword that follows. Parentheses also enter soft layout, so
+  // line breaks inside parenthesized expressions are ignored like Python.
   let inFunctionHeader = false;
+  let parenDepth = 0;
+  let continuedLineIndent: number | null = null;
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
@@ -67,7 +69,25 @@ export function lex(source: string, filename?: string): Token[] {
     // Skip blank lines and comment lines entirely
     if (col >= line.length || line[col] === '#') continue;
 
-    if (!inFunctionHeader) {
+    const leadingWordMatch = /^[a-zA-Z_][a-zA-Z0-9_]*/.exec(line.slice(col));
+    const isLogicalContinuation =
+      parenDepth === 0 &&
+      !inFunctionHeader &&
+      leadingWordMatch !== null &&
+      (leadingWordMatch[0] === 'and' || leadingWordMatch[0] === 'or');
+    const suppressLayout = inFunctionHeader || parenDepth > 0 || isLogicalContinuation;
+
+    if (isLogicalContinuation) {
+      const continuedIndent = continuedLineIndent;
+      if (continuedIndent !== null && col <= continuedIndent) {
+        throw new Error(
+          `continuation line starting with '${leadingWordMatch[0]}' must be indented more than the line it continues at line ${lineNum}, col ${col + 1}`,
+        );
+      }
+      if (tokens.length > 0 && tokens[tokens.length - 1].type === 'NEWLINE') {
+        tokens.pop();
+      }
+    } else if (!suppressLayout) {
       const indent = col;
       const currentIndent = indentStack[indentStack.length - 1];
 
@@ -83,6 +103,7 @@ export function lex(source: string, filename?: string): Token[] {
           throw new Error(`Inconsistent indentation at line ${lineNum}`);
         }
       }
+      continuedLineIndent = indent;
     }
 
     // Tokenize line content
@@ -151,11 +172,13 @@ export function lex(source: string, filename?: string): Token[] {
       // Punctuation
       if (line[col] === '(') {
         tokens.push({ type: 'LPAREN', value: '(', line: lineNum, col: startCol });
+        parenDepth++;
         col++;
         continue;
       }
       if (line[col] === ')') {
         tokens.push({ type: 'RPAREN', value: ')', line: lineNum, col: startCol });
+        if (parenDepth > 0) parenDepth--;
         col++;
         continue;
       }
@@ -193,7 +216,7 @@ export function lex(source: string, filename?: string): Token[] {
       throw new Error(`Unexpected character '${line[col]}' at line ${lineNum}, col ${col + 1}`);
     }
 
-    if (!inFunctionHeader) {
+    if (!inFunctionHeader && parenDepth === 0) {
       tokens.push({ type: 'NEWLINE', value: '\n', line: lineNum, col: line.length });
     }
   }

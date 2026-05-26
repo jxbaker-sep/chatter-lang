@@ -1,0 +1,11 @@
+constant a is true
+constant b is false
+constant c is true
+constant d is true
+
+if a
+   and (b
+        or c)
+   and d
+    say "mixed ok"
+end if

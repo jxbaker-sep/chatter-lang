@@ -1,0 +1,8 @@
+constant p is true
+constant q is true
+expect (p
+        and q), "first should pass"
+
+constant r is false
+expect (p
+        and r), "multiline predicate failed"

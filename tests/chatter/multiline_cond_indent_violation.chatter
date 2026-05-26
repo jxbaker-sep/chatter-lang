@@ -1,0 +1,6 @@
+constant a is true
+constant b is true
+if a
+and b
+    say "bad"
+end if

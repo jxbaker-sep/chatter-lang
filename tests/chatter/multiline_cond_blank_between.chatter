@@ -1,0 +1,10 @@
+constant a is true
+constant b is true
+constant c is true
+
+if a
+   and b
+
+   and c
+    say "blank ok"
+end if

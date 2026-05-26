@@ -1,0 +1,16 @@
+constant a is true
+constant b is true
+constant c is true
+
+if a
+   and b
+   and c
+    say "all true"
+end if
+
+constant d is false
+if a
+   and d
+   and c
+    say "should not print"
+end if

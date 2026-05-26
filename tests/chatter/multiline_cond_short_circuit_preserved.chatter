@@ -1,0 +1,5 @@
+if false
+   and character 99 of "hi" is "x"
+    say "should not print"
+end if
+say "shorted"

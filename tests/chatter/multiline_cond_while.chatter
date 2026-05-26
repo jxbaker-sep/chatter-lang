@@ -1,0 +1,8 @@
+variable n is 3
+variable keep_going is true
+
+repeat while n is greater than 0
+   and keep_going
+    say n
+    subtract 1 from n
+end repeat

@@ -1,0 +1,10 @@
+constant a is true
+constant b is true
+constant c is true
+
+if a
+   and b
+# comment between continuation lines
+   and c
+    say "comment ok"
+end if

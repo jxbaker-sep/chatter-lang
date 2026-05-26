@@ -1,0 +1,9 @@
+function both takes boolean x with boolean y returns boolean is
+    return x
+       and y
+end function
+
+both true with true
+say it
+both true with false
+say it
