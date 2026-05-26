@@ -1,5 +1,5 @@
-use new_linked_list_with, prepend, append, contains_in, to_list from "std:linked_list"
-constant ll is the result of new_linked_list_with "b"
+use make_linked_list_with, prepend, append, contains_in, to_list from "std:linked_list"
+constant ll is the result of make_linked_list_with "b"
 prepend ll with "a"
 append ll with "c"
 to_list ll

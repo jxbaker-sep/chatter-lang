@@ -1,5 +1,5 @@
-use new_queue_with, enqueue, dequeue, clear, size_of from "std:queue"
-constant q is the result of new_queue_with 1
+use make_queue_with, enqueue, dequeue, clear, size_of from "std:queue"
+constant q is the result of make_queue_with 1
 enqueue q with 2
 clear q
 enqueue q with 9

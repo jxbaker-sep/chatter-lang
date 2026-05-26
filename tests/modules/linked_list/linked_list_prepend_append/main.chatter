@@ -1,5 +1,5 @@
-use new_linked_list_with, prepend, append, to_list from "std:linked_list"
-constant ll is the result of new_linked_list_with 5
+use make_linked_list_with, prepend, append, to_list from "std:linked_list"
+constant ll is the result of make_linked_list_with 5
 prepend ll with 3
 append ll with 7
 to_list ll

@@ -19,9 +19,9 @@ export mutable struct LinkedList over T
     number length
 end struct
 
-# new_linked_list_with: return a fresh singleton list containing first.
+# make_linked_list_with: return a fresh singleton list containing first.
 # O(1). Empty construction is intentionally left to typed contexts in v1.
-export function new_linked_list_with over T takes T first returns LinkedList of T is
+export function make_linked_list_with over T takes T first returns LinkedList of T is
     constant node is make Node with value first, next none
     return make LinkedList with head node, tail node, length 1
 end function

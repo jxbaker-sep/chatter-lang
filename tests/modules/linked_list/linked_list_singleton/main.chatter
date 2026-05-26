@@ -1,5 +1,5 @@
-use new_linked_list_with, size_of, head, to_list from "std:linked_list"
-constant ll is the result of new_linked_list_with 42
+use make_linked_list_with, size_of, head, to_list from "std:linked_list"
+constant ll is the result of make_linked_list_with 42
 size_of ll
 say it
 constant first is the result of head ll

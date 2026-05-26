@@ -1,5 +1,5 @@
-use new_linked_list_with, append, head from "std:linked_list"
-constant ll is the result of new_linked_list_with 1
+use make_linked_list_with, append, head from "std:linked_list"
+constant ll is the result of make_linked_list_with 1
 append ll with 2
 append ll with 3
 variable cursor is the result of head ll

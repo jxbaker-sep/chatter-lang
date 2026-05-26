@@ -1,5 +1,5 @@
-use new_linked_list_with, append, remove_first, size_of, is_empty, clear from "std:linked_list"
-constant ll is the result of new_linked_list_with 1
+use make_linked_list_with, append, remove_first, size_of, is_empty, clear from "std:linked_list"
+constant ll is the result of make_linked_list_with 1
 size_of ll
 say it
 is_empty ll

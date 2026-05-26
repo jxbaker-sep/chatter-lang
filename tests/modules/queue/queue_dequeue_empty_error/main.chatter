@@ -1,4 +1,4 @@
-use new_queue_with, dequeue from "std:queue"
-constant q is the result of new_queue_with 1
+use make_queue_with, dequeue from "std:queue"
+constant q is the result of make_queue_with 1
 dequeue q
 dequeue q

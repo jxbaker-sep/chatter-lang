@@ -1,5 +1,5 @@
-use new_linked_list_with, append, head, tail from "std:linked_list"
-constant ll is the result of new_linked_list_with 10
+use make_linked_list_with, append, head, tail from "std:linked_list"
+constant ll is the result of make_linked_list_with 10
 constant t0 is the result of tail ll
 say t0 is none
 append ll with 20

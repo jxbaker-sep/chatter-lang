@@ -19,9 +19,9 @@ export mutable struct Queue over T
     number length
 end struct
 
-# new_queue_with: return a fresh singleton queue containing first.
+# make_queue_with: return a fresh singleton queue containing first.
 # O(1). Empty construction is intentionally left to typed contexts in v1.
-export function new_queue_with over T takes T first returns Queue of T is
+export function make_queue_with over T takes T first returns Queue of T is
     constant node is make QueueNode with value first, next none
     return make Queue with front node, back node, length 1
 end function

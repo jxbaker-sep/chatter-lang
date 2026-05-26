@@ -1,5 +1,5 @@
-use new_linked_list_with, append, contains_in from "std:linked_list"
-constant ll is the result of new_linked_list_with 2
+use make_linked_list_with, append, contains_in from "std:linked_list"
+constant ll is the result of make_linked_list_with 2
 append ll with 4
 append ll with 6
 contains_in ll with 4
