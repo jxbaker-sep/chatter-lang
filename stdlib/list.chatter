@@ -33,3 +33,19 @@ export function uniquify over T takes list of T input returns unique list of T i
   end repeat
   return output
 end function
+
+export function clone_unique_list over T takes unique list of T input returns unique list of T is
+  constant output is empty unique list of T
+  repeat with i in input
+    add i to output
+  end repeat
+  return output
+end function
+
+export function enlist over T takes unique list of T input returns list of T is
+  constant output is empty list of T
+  repeat with i in input
+    append i to output
+  end repeat
+  return output
+end function
