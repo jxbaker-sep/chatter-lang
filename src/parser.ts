@@ -45,9 +45,9 @@ const CALLABLE_KEYWORD_NAMES = new Set(['append', 'prepend']);
 const NAMED_ARG_STOP_KEYWORDS = new Set([
   'and', 'or', 'not', 'if', 'else', 'end',
   'true', 'false', 'is', 'say', 'constant', 'function', 'over', 'takes', 'returns', 'return',
-  'repeat', 'times', 'while', 'exit', 'next',
+  'repeat', 'times', 'while', 'forever', 'exit', 'next',
   'less', 'greater', 'than', 'at', 'least', 'most', 'equal',
-  'variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'mod',
+  'variable', 'change', 'add', 'subtract', 'multiply', 'divide', 'mod', 'down',
   'list', 'of', 'empty', 'unique', 'dictionary',
   'item', 'last', 'length', 'contains',
   'append', 'prepend', 'insert', 'remove',
@@ -1258,7 +1258,10 @@ export function parse(tokens: Token[], source?: string): Program {
 
     let result: RepeatStatement;
 
-    if (next.type === 'KEYWORD' && next.value === 'with') {
+    if (next.type === 'KEYWORD' && next.value === 'forever') {
+      advance();
+      result = { type: 'RepeatStatement', kind: 'forever', body: [] };
+    } else if (next.type === 'KEYWORD' && next.value === 'with') {
       advance();
       const varTok = peek();
       if (varTok.type !== 'IDENT') {
@@ -1282,16 +1285,33 @@ export function parse(tokens: Token[], source?: string): Program {
       } else {
         consume('KEYWORD', 'from');
         const fromExpr = parseExpression();
-        consume('KEYWORD', 'to');
-        const toExpr = parseExpression();
+        let toExpr: Expression;
         let stepExpr: Expression | undefined;
-        if (peek().type === 'KEYWORD' && peek().value === 'by') {
+        let direction: 'up' | 'down';
+        if (peek().type === 'KEYWORD' && peek().value === 'down') {
           advance();
-          stepExpr = parseExpression();
+          consume('KEYWORD', 'to');
+          toExpr = parseExpression();
+          direction = 'down';
+          if (peek().type === 'KEYWORD' && peek().value === 'by') {
+            throw new ParseError(
+              `'repeat with ... from A down to B' does not support 'by' in v1`,
+              peek(),
+            );
+          }
+        } else {
+          consume('KEYWORD', 'to');
+          toExpr = parseExpression();
+          direction = 'up';
+          if (peek().type === 'KEYWORD' && peek().value === 'by') {
+            advance();
+            stepExpr = parseExpression();
+          }
         }
         result = {
           type: 'RepeatStatement',
           kind: 'range',
+          direction,
           varName: varTok.value,
           from: fromExpr,
           to: toExpr,

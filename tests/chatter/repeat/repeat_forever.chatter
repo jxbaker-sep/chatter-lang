@@ -1,0 +1,9 @@
+variable i is 0
+repeat forever
+    add 1 to i
+    say i
+    if i is 3
+        exit repeat
+    end if
+end repeat
+say "done"

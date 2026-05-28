@@ -105,7 +105,7 @@ describe('Lexer', () => {
     expect(tokens.length).toBeGreaterThan(0);
   });
 
-  test('repeat/times/with/from/while tokenise as KEYWORD', () => {
+  test('repeat loop keywords tokenise as KEYWORD', () => {
     const tokens = lex('repeat 3 times\n    say "hi"\nend repeat');
     const kws = tokens.filter(t => t.type === 'KEYWORD').map(t => t.value);
     expect(kws).toContain('repeat');
@@ -118,6 +118,12 @@ describe('Lexer', () => {
     expect(kws2).toContain('to');
     const tokens3 = lex('repeat while false\n    say 1\nend repeat');
     expect(tokens3.filter(t => t.type === 'KEYWORD').map(t => t.value)).toContain('while');
+    const tokens4 = lex('repeat with i from 10 down to 1\n    say i\nend repeat');
+    const kws4 = tokens4.filter(t => t.type === 'KEYWORD').map(t => t.value);
+    expect(kws4).toContain('down');
+    const tokens5 = lex('repeat forever\n    exit repeat\nend repeat');
+    const kws5 = tokens5.filter(t => t.type === 'KEYWORD').map(t => t.value);
+    expect(kws5).toContain('forever');
   });
 
   test('comparison words tokenize as KEYWORDs', () => {

@@ -447,6 +447,18 @@ describe('VM', () => {
       expect(runSource('repeat with i from 5 to 3\n    say i\nend repeat\nsay "done"')).toEqual(['done']);
     });
 
+    test('repeat with i from A down to B is inclusive', () => {
+      expect(runSource('repeat with i from 3 down to 1\n    say i\nend repeat')).toEqual(['3', '2', '1']);
+    });
+
+    test('repeat with A down to B where A < B runs zero iterations', () => {
+      expect(runSource('repeat with i from 1 down to 3\n    say i\nend repeat\nsay "done"')).toEqual(['done']);
+    });
+
+    test('repeat forever runs until exit repeat', () => {
+      expect(runSource('variable i is 0\nrepeat forever\n    add 1 to i\n    say i\n    if i is 3\n        exit repeat\n    end if\nend repeat')).toEqual(['1', '2', '3']);
+    });
+
     test('repeat while false runs zero iterations', () => {
       expect(runSource('repeat while false\n    say "x"\nend repeat\nsay "done"')).toEqual(['done']);
     });

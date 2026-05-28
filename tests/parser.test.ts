@@ -322,9 +322,22 @@ describe('Parser', () => {
       expect(ast.body[0]).toMatchObject({
         type: 'RepeatStatement',
         kind: 'range',
+        direction: 'up',
         varName: 'i',
         from: { type: 'NumberLiteral', value: 1 },
         to: { type: 'NumberLiteral', value: 10 },
+      });
+    });
+
+    test('repeat with i from A down to B produces kind=range direction=down', () => {
+      const ast = parseSource('repeat with i from 10 down to 1\n    say i\nend repeat');
+      expect(ast.body[0]).toMatchObject({
+        type: 'RepeatStatement',
+        kind: 'range',
+        direction: 'down',
+        varName: 'i',
+        from: { type: 'NumberLiteral', value: 10 },
+        to: { type: 'NumberLiteral', value: 1 },
       });
     });
 
@@ -334,6 +347,14 @@ describe('Parser', () => {
         type: 'RepeatStatement',
         kind: 'while',
         condition: { type: 'BooleanLiteral', value: false },
+      });
+    });
+
+    test('repeat forever produces kind=forever', () => {
+      const ast = parseSource('repeat forever\n    say "x"\nend repeat');
+      expect(ast.body[0]).toMatchObject({
+        type: 'RepeatStatement',
+        kind: 'forever',
       });
     });
 
@@ -351,9 +372,16 @@ describe('Parser', () => {
       expect(ast.body[0]).toMatchObject({
         type: 'RepeatStatement',
         kind: 'range',
+        direction: 'up',
         from: { type: 'BinaryExpression', operator: '+' },
         to:   { type: 'BinaryExpression', operator: '*' },
       });
+    });
+
+    test('down-to range rejects by clause in v1', () => {
+      expect(() =>
+        parseSource('repeat with i from 10 down to 1 by 2\n    say i\nend repeat'),
+      ).toThrow(/does not support 'by' in v1/);
     });
   });
 

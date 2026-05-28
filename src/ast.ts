@@ -285,7 +285,8 @@ export interface IfStatement {
 
 export type RepeatStatement =
   | { type: 'RepeatStatement'; kind: 'times'; count: Expression; body: Statement[] }
-  | { type: 'RepeatStatement'; kind: 'range'; varName: string; from: Expression; to: Expression; step?: Expression; body: Statement[] }
+  | { type: 'RepeatStatement'; kind: 'range'; direction: 'up' | 'down'; varName: string; from: Expression; to: Expression; step?: Expression; body: Statement[] }
+  | { type: 'RepeatStatement'; kind: 'forever'; body: Statement[] }
   | { type: 'RepeatStatement'; kind: 'while'; condition: Expression; body: Statement[] }
   | { type: 'RepeatStatement'; kind: 'list'; varName: string; list: Expression; body: Statement[] };
 
@@ -488,4 +489,3 @@ export interface HofStatement {
   type: 'HofStatement';
   expr: MapExpression | FilterExpression | ReduceExpression;
 }
-

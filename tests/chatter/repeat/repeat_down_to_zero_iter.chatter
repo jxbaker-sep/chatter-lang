@@ -1,0 +1,4 @@
+repeat with i from 1 down to 3
+    say i
+end repeat
+say "done"

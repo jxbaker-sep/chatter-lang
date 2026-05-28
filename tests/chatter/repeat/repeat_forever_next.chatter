@@ -1,0 +1,13 @@
+variable i is 0
+variable shown is 0
+repeat forever
+    add 1 to i
+    if i mod 2 is 1
+        next repeat
+    end if
+    add 1 to shown
+    say i
+    if shown is 3
+        exit repeat
+    end if
+end repeat

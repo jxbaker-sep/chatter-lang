@@ -2727,6 +2727,7 @@ export class Compiler {
 
     if (stmt.kind === 'range') {
       const loopVar = stmt.varName;
+      const isDownRange = stmt.direction === 'down';
       // Pre-check shadow against module top-level outer bindings.
       if (this.outerBindings.has(loopVar) && bindings !== this.topLevelBindings) {
         throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
@@ -2737,6 +2738,12 @@ export class Compiler {
       // Validate step (if present) and determine whether a runtime check is needed.
       let stepIsKnownPositive = false;
       if (stmt.step !== undefined) {
+        if (isDownRange) {
+          throw new CompileError(
+            `'repeat with ... from A down to B' does not support 'by' in v1`,
+            this.currentLoc,
+          );
+        }
         const step = stmt.step;
         // Literal-positive or literal-non-positive detection.
         if (step.type === 'NumberLiteral') {
@@ -2807,7 +2814,7 @@ export class Compiler {
       const topIdx = out.length;
       this.emit(out, { op: 'LOAD', name: loopVarMangled });
       this.emit(out, { op: 'LOAD', name: limit });
-      this.emit(out, { op: 'LE' });
+      this.emit(out, { op: isDownRange ? 'GE' : 'LE' });
       const jifEndIdx = out.length;
       this.emit(out, { op: 'JUMP_IF_FALSE', target: -1 });
 
@@ -2820,12 +2827,17 @@ export class Compiler {
 
       const continueIdx = out.length;
       this.emit(out, { op: 'LOAD', name: loopVarMangled });
-      if (stepTmp !== null) {
-        this.emit(out, { op: 'LOAD', name: stepTmp });
-      } else {
+      if (isDownRange) {
         this.emit(out, { op: 'PUSH_INT', value: 1 });
+        this.emit(out, { op: 'SUB' });
+      } else {
+        if (stepTmp !== null) {
+          this.emit(out, { op: 'LOAD', name: stepTmp });
+        } else {
+          this.emit(out, { op: 'PUSH_INT', value: 1 });
+        }
+        this.emit(out, { op: 'ADD' });
       }
-      this.emit(out, { op: 'ADD' });
       this.emit(out, { op: 'STORE', name: loopVarMangled });
       this.emit(out, { op: 'JUMP', target: topIdx });
       const exitIdx = out.length;
@@ -2839,6 +2851,27 @@ export class Compiler {
       this.emit(out, { op: 'DELETE', name: limit });
       if (stepTmp !== null) {
         this.emit(out, { op: 'DELETE', name: stepTmp });
+      }
+      return;
+    }
+
+    if (stmt.kind === 'forever') {
+      const topIdx = out.length;
+      const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
+      this.loopStack.push(frame);
+      const bodyScope = new Scope(bindings);
+      for (const s of stmt.body) {
+        this.compileStatement(s, out, bodyScope);
+      }
+      this.loopStack.pop();
+      const continueIdx = out.length;
+      this.emit(out, { op: 'JUMP', target: topIdx });
+      const exitIdx = out.length;
+      for (const j of frame.continueJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = continueIdx;
+      }
+      for (const j of frame.exitJumps) {
+        (out[j] as { op: 'JUMP'; target: number }).target = exitIdx;
       }
       return;
     }

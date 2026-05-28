@@ -219,6 +219,14 @@ describe('Compiler', () => {
       expect(bc.main).not.toContainEqual({ op: 'DELETE', name: 'i' });
     });
 
+    test('repeat down-to range emits GE comparison and decrements by one', () => {
+      const bc = compileSource('repeat with i from 3 down to 1\n    say i\nend repeat');
+      const ops = bc.main.map(i => i.op);
+      expect(ops).toContain('GE');
+      expect(ops).toContain('SUB');
+      expect(ops).not.toContain('ADD');
+    });
+
     test('repeat while emits no LT/LE/ERROR, just cond + JUMP_IF_FALSE + back-edge', () => {
       const bc = compileSource('repeat while false\n    say "x"\nend repeat');
       const ops = bc.main.map(i => i.op);
@@ -227,6 +235,16 @@ describe('Compiler', () => {
       expect(ops).not.toContain('LT');
       expect(ops).not.toContain('LE');
       expect(ops).not.toContain('ERROR');
+    });
+
+    test('repeat forever emits an unconditional back-edge with no condition checks', () => {
+      const bc = compileSource('repeat forever\n    exit repeat\nend repeat');
+      const ops = bc.main.map(i => i.op);
+      expect(ops).toContain('JUMP');
+      expect(ops).not.toContain('JUMP_IF_FALSE');
+      expect(ops).not.toContain('LT');
+      expect(ops).not.toContain('LE');
+      expect(ops).not.toContain('GE');
     });
 
     test('loop variable shadowing outer set raises CompileError', () => {
