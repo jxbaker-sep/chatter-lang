@@ -1,0 +1,4 @@
+use difference_in_place from "std:set"
+constant left is unique list of 1, 2, 3
+difference_in_place left with unique list of 2, 4
+say left

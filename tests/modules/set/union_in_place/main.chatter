@@ -1,0 +1,4 @@
+use union_in_place from "std:set"
+constant left is unique list of 1, 2, 3
+union_in_place left with unique list of 3, 4, 5
+say left

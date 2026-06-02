@@ -1,7 +1,8 @@
 # Chatter standard library: set
 #
 # Set-theoretic operations on `unique list` values (Chatter's set type).
-# Every function returns a fresh unique list — inputs are never mutated.
+# The pure functions return fresh unique lists; the *_in_place variants mutate
+# their first argument.
 
 # union: every element of `left` (in left's insertion order), followed by
 # every element of `right` not already present (in right's insertion order).
@@ -59,4 +60,49 @@ is
         end if
     end repeat
     return result
+end function
+
+# union_in_place: mutate `left` to include every element from `right`.
+#
+#   union_in_place left with right
+#   # left now contains left ∪ right
+export function union_in_place over T takes
+    unique list of T left
+    with unique list of T right
+is
+    repeat with x in right
+        add x to left
+    end repeat
+end function
+
+# intersection_in_place: mutate `left` to keep only elements also in `right`.
+#
+#   intersection_in_place left with right
+#   # left now contains left ∩ right
+export function intersection_in_place over T takes
+    unique list of T left
+    with unique list of T right
+is
+    constant removed is empty unique list of T
+    repeat with x in left
+        if not right contains x
+            add x to removed
+        end if
+    end repeat
+    repeat with x in removed
+        remove x from left
+    end repeat
+end function
+
+# difference_in_place: mutate `left` by removing anything contained in `right`.
+#
+#   difference_in_place left with right
+#   # left now contains left − right
+export function difference_in_place over T takes
+    unique list of T left
+    with unique list of T right
+is
+    repeat with x in right
+        remove x from left
+    end repeat
 end function
