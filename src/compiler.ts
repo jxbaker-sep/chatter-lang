@@ -397,6 +397,7 @@ export class Compiler {
       });
     }
     out.push(withLoc);
+    if (instr.op === 'LOAD') this.trackLoad(instr.name);
   }
 
   private freshName(tag: string): string {
@@ -3329,7 +3330,6 @@ export class Compiler {
         }
         const loadName = scopeInfo?.mangled ?? expr.name;
         this.emit(out, { op: 'LOAD', name: loadName });
-        this.trackLoad(loadName);
         if (this.getNarrowedType(expr.name)) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
         break;
       case 'ItExpression':
