@@ -22,23 +22,24 @@ export class AggregateChatterError extends Error {
   }
 }
 
+export class CompileWarning extends ChatterError {
+  constructor(message: string, location?: SourceLocation) {
+    super(message, location);
+    this.name = 'CompileWarning';
+  }
+}
+
 function hasLocation(e: Error): e is Error & { location?: SourceLocation } {
   return 'location' in (e as object);
 }
 
-export function formatError(error: Error, source: string, filename: string): string {
-  if (error instanceof AggregateChatterError) {
-    return error.errors.map((e) => formatError(e, source, filename)).join('\n\n');
-  }
+function formatDiagnostic(prefix: string, error: Error, source: string, filename: string): string {
   const fname = filename || '<source>';
   const loc = hasLocation(error) ? error.location : undefined;
-  const header = `error: ${error.message}`;
+  const header = `${prefix}: ${error.message}`;
 
   if (!loc) return header;
 
-  // If de loc came from a different file than the entry source we have access
-  // to (e.g. an imported stdlib module), don't render a misleading source-line
-  // caret — just print the right filename + line:col.
   if (loc.file && loc.file !== filename) {
     return `${header}\n --> ${loc.file}:${loc.line}:${loc.col + 1}`;
   }
@@ -57,7 +58,6 @@ export function formatError(error: Error, source: string, filename: string): str
   const caretPad = ' '.repeat(caretCol);
   const carets = '^'.repeat(caretLen);
 
-  // 1-indexed column in the --> line.
   return [
     header,
     `${gutterPad}--> ${fname}:${loc.line}:${loc.col + 1}`,
@@ -65,4 +65,15 @@ export function formatError(error: Error, source: string, filename: string): str
     `${lineNumStr} | ${srcLine}`,
     `${gutterPad} | ${caretPad}${carets}`,
   ].join('\n');
+}
+
+export function formatWarning(warning: CompileWarning, source: string, filename: string): string {
+  return formatDiagnostic('warning', warning, source, filename);
+}
+
+export function formatError(error: Error, source: string, filename: string): string {
+  if (error instanceof AggregateChatterError) {
+    return error.errors.map((e) => formatError(e, source, filename)).join('\n\n');
+  }
+  return formatDiagnostic('error', error, source, filename);
 }

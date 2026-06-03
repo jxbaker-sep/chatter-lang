@@ -1,5 +1,0 @@
-use Point from "geom"
-
-type P is Point
-
-say "unreachable"

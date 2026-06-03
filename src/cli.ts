@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { loadProgram } from './moduleLoader';
 import { VM } from './vm';
-import { formatError } from './errors';
+import { formatError, formatWarning } from './errors';
 
 export function run(args: string[]): number {
   if (args.length < 1) {
@@ -19,6 +19,9 @@ export function run(args: string[]): number {
   try {
     source = fs.readFileSync(filepath, 'utf8');
     const program = loadProgram(filepath, { args: scriptArgs });
+    for (const w of program.warnings ?? []) {
+      process.stderr.write(formatWarning(w, source, filepath) + '\n\n');
+    }
     const vm = new VM(program);
     vm.run();
     if (process.env.CHATTER_PROFILE) vm.dumpOpProfile();

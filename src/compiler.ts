@@ -23,7 +23,7 @@ import {
   SortStatement, MapExpression, FilterExpression, ReduceExpression,
 } from './ast';
 import { Instruction, InstructionKind, FunctionDef, BytecodeProgram } from './bytecode';
-import { ChatterError, SourceLocation } from './errors';
+import { ChatterError, CompileWarning, SourceLocation } from './errors';
 import { ChatterType, typesEqual, typeToString, typeCode, unmangleTypeName, substituteTypeVars, bindTypeVars, monomorphizedStructName } from './types';
 export type { ChatterType } from './types';
 
@@ -233,6 +233,7 @@ export interface CompiledModule {
   // Populated for every struct (local or imported re-export) that has a
   // `format is EXPR` clause in its home module.
   structFormatters: Map<string, string>;
+  warnings: CompileWarning[];
 }
 
 export class Compiler {
@@ -303,6 +304,26 @@ export class Compiler {
   // Outside a HOF body this is what `staticType(ItExpression)` returns.
   private currentItType: ChatterType | null = null;
 
+  // ── Unused-binding / warning tracking ────────────────────────────────────
+  // Warnings accumulated during compilation of this module.
+  private warnings: CompileWarning[] = [];
+
+  // All mangled binding names loaded anywhere in the module (top-level + all
+  // function bodies). Used at end of module to detect unused imported names.
+  private moduleUsedNames = new Set<string>();
+
+  // All user-facing function names called anywhere in the module (unmangled).
+  private calledFunctions = new Set<string>();
+
+  // Per-function-body: set non-null during compileFuncDecl / compileGenericMonomorphization;
+  // null while compiling module top-level code.
+  private currentFuncDeclared: Map<string, { name: string; kind: BindingKind; loc?: SourceLocation }> | null = null;
+  private currentFuncUsed: Set<string> | null = null;
+
+  // Import locations: populated during pass 1 so we can emit a source location
+  // on unused-import warnings.
+  private importLocs = new Map<string, SourceLocation | undefined>();
+
   private narrowingStack: Map<string, ChatterType>[] = [new Map()];
 
   private currentNarrowings(): Map<string, ChatterType> {
@@ -315,6 +336,20 @@ export class Compiler {
       if (t !== undefined) return t;
     }
     return undefined;
+  }
+
+  private trackDeclaration(name: string, mangled: string, kind: BindingKind, loc?: SourceLocation): void {
+    if (name.startsWith('_')) return;
+    if (this.currentFuncDeclared !== null) {
+      this.currentFuncDeclared.set(mangled, { name, kind, loc });
+    }
+  }
+
+  private trackLoad(mangled: string): void {
+    if (this.currentFuncUsed !== null) {
+      this.currentFuncUsed.add(mangled);
+    }
+    this.moduleUsedNames.add(mangled);
   }
 
   private pushNarrowingScope(narrowings: Map<string, ChatterType>): void {
@@ -626,23 +661,12 @@ export class Compiler {
     }
   }
 
-  // Walk an alias body, rejecting any reference to an imported name.
-  // Local struct refs and local alias refs are allowed (recurses for
-  // alias-of-alias). Cycle detection lives in resolveLocalAlias.
+  // Walk an alias body. Local and imported struct/alias refs are all allowed.
+  // Cycle detection lives in resolveLocalAlias.
   private expandAliasBody(a: TypeAnnotation, chain: string[], loc?: SourceLocation): ChatterType {
     if (a.kind === 'scalar') return { kind: 'scalar', name: a.name };
     if (a.kind === 'struct' || a.kind === 'mutableStruct') {
       const name = a.name;
-      if (
-        this.imports.has(name) ||
-        (this.structs.get(name)?.imported === true) ||
-        (this.aliases.get(name)?.imported === true)
-      ) {
-        throw new CompileError(
-          `aliasing imported names is not supported in v1`,
-          loc ?? this.currentLoc,
-        );
-      }
       if (a.kind === 'struct' && this.aliases.has(name)) return this.resolveLocalAlias(name, chain, loc);
       const info = this.structs.get(name);
       if (!info) {
@@ -684,14 +708,28 @@ export class Compiler {
 
   compile(program: Program): BytecodeProgram {
     const m = this.compileModule(program, {});
-    return { functions: m.functions, main: m.topLevel, structFormatters: m.structFormatters };
+    return { functions: m.functions, main: m.topLevel, structFormatters: m.structFormatters, warnings: m.warnings };
   }
 
   compileModule(program: Program, opts: CompileOptions): CompiledModule {
     this.moduleId = opts.moduleId ?? null;
     this.imports = opts.imports ?? new Map();
+    this.warnings = [];
+    this.moduleUsedNames = new Set();
+    this.calledFunctions = new Set();
+    this.currentFuncDeclared = null;
+    this.currentFuncUsed = null;
+    this.importLocs = new Map();
     const structImports = opts.structImports ?? new Map<string, ImportedStruct>();
     const aliasImports = opts.aliasImports ?? new Map<string, ImportedAlias>();
+
+    // Record source locations for imported names (for unused-import warnings).
+    for (const stmt of program.body) {
+      if (stmt.type !== 'UseStatement') continue;
+      for (const name of (stmt as any).names as string[]) {
+        this.importLocs.set(name, locOf(stmt as any));
+      }
+    }
 
     // Pass 1a: register all structs (local + imported) and aliases (local +
     // imported) by local name. Imported entries first.
@@ -1077,7 +1115,28 @@ export class Compiler {
       }
     }
 
-    return { functions: this.functions, topLevel, exports, structExports, aliasExports, structFormatters };
+    // Module-level warnings: unused non-exported functions
+    for (const [name, decl] of this.localFunctions) {
+      if (!decl.exported && !name.startsWith('_') && !name.startsWith('__')
+          && !this.calledFunctions.has(name)) {
+        this.warnings.push(new CompileWarning(`unused function '${name}'`, locOf(decl as any)));
+      }
+    }
+
+    // Module-level warnings: unused imported function names
+    for (const [localName] of this.imports) {
+      if (!localName.startsWith('_') && !this.calledFunctions.has(localName)) {
+        this.warnings.push(new CompileWarning(
+          `unused import '${localName}'`,
+          this.importLocs.get(localName),
+        ));
+      }
+    }
+
+    // Sort warnings by line number for deterministic output
+    this.warnings.sort((a, b) => (a.location?.line ?? 0) - (b.location?.line ?? 0));
+
+    return { functions: this.functions, topLevel, exports, structExports, aliasExports, structFormatters, warnings: this.warnings };
   }
 
   // Compile a `format is EXPR` clause as a synthetic FunctionDef. `it` is the
@@ -1558,6 +1617,7 @@ export class Compiler {
       this.compileExpr(stmt.value, out, bindings);
       const mangled = bindings.declare(stmt.name, { kind: 'constant', type: rt }, this.currentLoc,
         bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name));
+      this.trackDeclaration(stmt.name, mangled, 'constant', this.currentLoc);
       this.emit(out, { op: 'STORE', name: mangled });
       return;
     }
@@ -1565,6 +1625,7 @@ export class Compiler {
     const st = this.staticType(stmt.value, bindings);
     const mangled = bindings.declare(stmt.name, { kind: 'constant', type: st ?? undefined }, this.currentLoc,
       bindings !== this.topLevelBindings && this.outerBindings.has(stmt.name));
+    this.trackDeclaration(stmt.name, mangled, 'constant', this.currentLoc);
     this.emit(out, { op: 'STORE', name: mangled });
   }
 
@@ -1578,12 +1639,14 @@ export class Compiler {
       const rt = this.compilePrecall(stmt.precall, out, bindings);
       this.compileExpr(stmt.value, out, bindings);
       const mangled = bindings.declare(stmt.name, { kind: 'var', type: rt }, this.currentLoc, extraOuter);
+      this.trackDeclaration(stmt.name, mangled, 'var', this.currentLoc);
       this.emit(out, { op: 'STORE_VAR', name: mangled });
       return;
     }
     this.compileExpr(stmt.value, out, bindings);
     const st = this.staticType(stmt.value, bindings);
     const mangled = bindings.declare(stmt.name, { kind: 'var', type: st ?? undefined }, this.currentLoc, extraOuter);
+    this.trackDeclaration(stmt.name, mangled, 'var', this.currentLoc);
     this.emit(out, { op: 'STORE_VAR', name: mangled });
   }
 
@@ -2136,11 +2199,18 @@ export class Compiler {
     this.functions.set(mangledName, funcDef);
 
     const funcBindings: Scope = new Scope(null, null);
+    // Set up per-function tracking
+    const prevFuncDeclared = this.currentFuncDeclared;
+    const prevFuncUsed = this.currentFuncUsed;
+    this.currentFuncDeclared = new Map();
+    this.currentFuncUsed = new Set();
+
     for (const p of stmt.params) {
-      funcBindings.declare(p.name, {
+      const paramMangled = funcBindings.declare(p.name, {
         kind: 'param',
         type: this.fromAnnotation(p.paramType),
       }, this.currentLoc);
+      this.trackDeclaration(p.name, paramMangled, 'param', locOf(stmt as any));
     }
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
@@ -2162,6 +2232,20 @@ export class Compiler {
       this.emit(instructions, { op: 'PUSH_INT', value: 0 });
       this.emit(instructions, { op: 'RETURN' });
     }
+    // Generate unused-binding warnings for this function
+    for (const [mangled, info] of this.currentFuncDeclared) {
+      if (!this.currentFuncUsed.has(mangled)) {
+        const kindLabel = info.kind === 'param' ? 'parameter'
+                        : info.kind === 'loop'  ? 'loop variable'
+                        : info.kind;
+        this.warnings.push(new CompileWarning(`unused ${kindLabel} '${info.name}'`, info.loc));
+      }
+    }
+    // Merge used names into module-level set
+    for (const n of this.currentFuncUsed) this.moduleUsedNames.add(n);
+    this.currentFuncDeclared = prevFuncDeclared;
+    this.currentFuncUsed = prevFuncUsed;
+
     // Snapshot every name minted inside this function (params + block-scope
     // locals + compiler temps). The post-processor uses this to avoid
     // rewriting local references when a local shares a name with a top-level
@@ -2472,6 +2556,7 @@ export class Compiler {
     const concreteParamTypes = genInfo.params.map(p => this.withGenericTypeVars(genInfo, typeBindings, () => this.fromAnnotation(p.paramType, this.currentLoc)));
     for (let i = 0; i < boundArgs.length; i++) this.compileExprWithExpected(boundArgs[i], concreteParamTypes[i], out, bindings);
     this.emit(out, { op: 'CALL', name: instanceName, argCount: genInfo.params.length });
+    this.calledFunctions.add(stmt.name);
 
     if (!genInfo.returnType) return null;
     return this.withGenericTypeVars(genInfo, typeBindings, () => this.fromAnnotation(genInfo.returnType!, this.currentLoc));
@@ -2561,6 +2646,7 @@ export class Compiler {
       }
       this.emit(out, { op: 'CALL', name: stmt.name, argCount: stmt.args.length });
     }
+    this.calledFunctions.add(stmt.name);
   }
 
   private compileIf(
@@ -2779,6 +2865,7 @@ export class Compiler {
       let loopVarMangled: string;
       try {
         loopVarMangled = bodyScope.declare(loopVar, { kind: 'loop', type: { kind: 'scalar', name: 'number' } }, this.currentLoc);
+        this.trackDeclaration(loopVar, loopVarMangled, 'loop', this.currentLoc);
       } catch (e) {
         if (e instanceof CompileError && /shadows outer binding|already declared/.test(e.message)) {
           throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
@@ -2902,6 +2989,7 @@ export class Compiler {
       let loopVarMangled: string;
       try {
         loopVarMangled = bodyScope.declare(loopVar, { kind: 'loop', type: elemType }, this.currentLoc);
+        this.trackDeclaration(loopVar, loopVarMangled, 'loop', this.currentLoc);
       } catch (e) {
         if (e instanceof CompileError && /shadows outer binding|already declared/.test(e.message)) {
           throw new CompileError(`Loop variable '${loopVar}' shadows outer binding`, this.currentLoc);
@@ -3239,7 +3327,9 @@ export class Compiler {
             `Undefined variable: '${expr.name}'`,
           this.currentLoc);
         }
-        this.emit(out, { op: 'LOAD', name: scopeInfo?.mangled ?? expr.name });
+        const loadName = scopeInfo?.mangled ?? expr.name;
+        this.emit(out, { op: 'LOAD', name: loadName });
+        this.trackLoad(loadName);
         if (this.getNarrowedType(expr.name)) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
         break;
       case 'ItExpression':

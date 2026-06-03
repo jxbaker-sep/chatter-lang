@@ -1,0 +1,10 @@
+use Point from "geom"
+
+type P is Point
+
+function make_point takes number xv with number yv returns P is
+    return make Point with x xv, y yv
+end function
+
+make_point 3 with 4
+say x of it

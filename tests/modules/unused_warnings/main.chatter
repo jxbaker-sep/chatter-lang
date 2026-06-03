@@ -1,0 +1,23 @@
+function used takes number x returns number is
+    return x * 2
+end function
+
+function unused takes number n returns number is
+    return n + 1
+end function
+
+function has_unused_param takes number a with number b returns number is
+    return a
+end function
+
+function has_unused_constant returns number is
+    constant result is 42
+    constant _ignored is 99
+    return 0
+end function
+
+used 5
+say it
+has_unused_param 3 with 7
+say it
+has_unused_constant

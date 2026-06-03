@@ -5,7 +5,7 @@ import { parse } from './parser';
 import { Compiler, CompileError, CompiledModule, ImportedFunction, ImportedStruct, ImportedAlias } from './compiler';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 import { Program, UseStatement } from './ast';
-import { SourceLocation } from './errors';
+import { SourceLocation, CompileWarning } from './errors';
 
 interface ModuleInfo {
   absPath: string;
@@ -125,6 +125,7 @@ function buildStdCliModule(moduleId: string, registryKey: string, absPath: strin
     structExports: new Map(),
     aliasExports: new Map(),
     structFormatters: new Map(),
+    warnings: [],
   };
 
   // Synthetic AST: an empty Program is enough; the loader only consults `ast`
@@ -334,5 +335,10 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
     }
   }
 
-  return { functions, main, args: opts.args ?? [], structFormatters };
+  const warnings: CompileWarning[] = [];
+  for (const m of orderPostOrder) {
+    warnings.push(...m.compiled!.warnings);
+  }
+
+  return { functions, main, args: opts.args ?? [], structFormatters, warnings };
 }

@@ -8,17 +8,25 @@ const MODULES_DIR = path.join(__dirname, 'modules');
 interface Expectation {
   stdout: string;
   error: string | null;
+  warnings: string[] | null;  // null means: don't check warnings
 }
 
-function loadExpectation(expectedPath: string): Expectation {
+function loadExpectation(expectedPath: string, warningsPath: string): Expectation {
   const raw = fs.readFileSync(expectedPath, 'utf8');
   const trimmed = raw.replace(/\n$/, '');
   const firstLine = trimmed.split('\n')[0];
   const errorMatch = /^ERROR:\s*(.*)$/.exec(firstLine);
-  if (errorMatch) {
-    return { stdout: '', error: errorMatch[1].trim() };
+
+  let warnings: string[] | null = null;
+  if (fs.existsSync(warningsPath)) {
+    const wRaw = fs.readFileSync(warningsPath, 'utf8');
+    warnings = wRaw.replace(/\n$/, '').split('\n').filter(Boolean);
   }
-  return { stdout: trimmed, error: null };
+
+  if (errorMatch) {
+    return { stdout: '', error: errorMatch[1].trim(), warnings };
+  }
+  return { stdout: trimmed, error: null, warnings };
 }
 
 function loadArgs(argsPath: string): string[] {
@@ -30,7 +38,7 @@ function loadArgs(argsPath: string): string[] {
   return trimmed.split('\n');
 }
 
-function runEntry(entryPath: string, args: string[]): { stdout: string; error: Error | null } {
+function runEntry(entryPath: string, args: string[]): { stdout: string; error: Error | null; warnings: string[] } {
   const logs: string[] = [];
   const originalLog = console.log;
   console.log = (...a: unknown[]) => {
@@ -38,28 +46,31 @@ function runEntry(entryPath: string, args: string[]): { stdout: string; error: E
   };
   try {
     const program = loadProgram(entryPath, { args });
+    const warnings = (program.warnings ?? []).map(w => w.message);
     const vm = new VM(program);
     vm.run();
-    return { stdout: logs.join('\n'), error: null };
+    return { stdout: logs.join('\n'), error: null, warnings };
   } catch (e) {
-    return { stdout: logs.join('\n'), error: e as Error };
+    return { stdout: logs.join('\n'), error: e as Error, warnings: [] };
   } finally {
     console.log = originalLog;
   }
 }
 
-function discoverCases(): Array<{ name: string; entryPath: string; expectedPath: string; argsPath: string }> {
+function discoverCases(): Array<{ name: string; entryPath: string; expectedPath: string; warningsPath: string; argsPath: string }> {
   if (!fs.existsSync(MODULES_DIR)) return [];
-  const cases: Array<{ name: string; entryPath: string; expectedPath: string; argsPath: string }> = [];
+  const cases: Array<{ name: string; entryPath: string; expectedPath: string; warningsPath: string; argsPath: string }> = [];
   const walk = (dir: string): void => {
     const entryPath = path.join(dir, 'main.chatter');
     const expectedPath = path.join(dir, '.expected');
+    const warningsPath = path.join(dir, '.warnings');
     const argsPath = path.join(dir, 'args.txt');
     if (fs.existsSync(entryPath) && fs.existsSync(expectedPath)) {
       cases.push({
         name: path.relative(MODULES_DIR, dir).split(path.sep).join('/'),
         entryPath,
         expectedPath,
+        warningsPath,
         argsPath,
       });
       return;
@@ -85,7 +96,7 @@ describe('chatter module golden tests', () => {
 
   for (const c of cases) {
     test(c.name, () => {
-      const expectation = loadExpectation(c.expectedPath);
+      const expectation = loadExpectation(c.expectedPath, c.warningsPath);
       const args = loadArgs(c.argsPath);
       const result = runEntry(c.entryPath, args);
 
@@ -99,6 +110,10 @@ describe('chatter module golden tests', () => {
           );
         }
         expect(result.stdout).toBe(expectation.stdout);
+      }
+
+      if (expectation.warnings !== null) {
+        expect(result.warnings).toEqual(expectation.warnings);
       }
     });
   }

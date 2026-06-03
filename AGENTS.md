@@ -27,7 +27,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-709 tests passing (plus 1 intentionally-failing stdlib_trim_tab_lf_cr test tracked separately). Total: 710.
+1217 tests passing (plus 1 intentionally-failing stdlib_trim_tab_lf_cr test tracked separately). Total: 1218.
 
 ## Language spec (current)
 
@@ -369,11 +369,11 @@ Naming sugar for any type annotation. Pure compile-time — no runtime represent
 - **Forward references within a module are allowed** (parallel to forward struct refs). `type Coord is Point` may appear before `struct Point`.
 - **Cycle detection** via DFS through alias bodies: `type A is B / type B is A` → compile error `circular type alias: A → B → A`. Self-cycle `type A is A` → `circular type alias: A → A`.
 - **`type` is a reserved keyword.** Cannot be used as an identifier.
-- **v1 forbids aliases of imported names**: `use Point from "geom"` then `type P is Point` → compile error `aliasing imported names is not supported in v1`. (Aliasing an aliased import is also forbidden by transitivity.) Aliasing a struct declared in the same module is allowed (`type P is Point` when `Point` is local).
+- **Aliases may reference imported names**: `use Point from "geom"` then `type P is Point` is legal. Aliases of imported structs, imported aliases, or complex types containing imported structs (e.g. `type HeightMap is dictionary from Point to unique list of Point`) all work — the compiler resolves them using the already-registered mangled names.
 - **`export type` + `use ... from`** work just like functions/structs. The exported alias is shipped as its fully-expanded `ChatterType` so importers don't need to walk the source's alias chain. Mangled per-module like structs (`<moduleId>::<Name>`).
 - **Error messages always print the expanded form.** `function f takes Counts c` where `type Counts is dictionary from string to number` and the caller passes a `list of number` → error says `expected dictionary from string to number, got list of number`, NOT `expected Counts`. Multiple aliases of the same underlying type therefore look identical in errors, which is the right call (avoids confusion).
 - **Aliases work in every type-annotation position**: function params, function returns, struct fields, list / unique-list element type, dictionary key and value types, and the bodies of other aliases. An alias whose expansion would create a nested collection (e.g. `type Inner is list of number` then using `list of Inner`) → compile error `nested collections not supported (alias 'Inner' expands to ...)`.
-- **Out of scope (v2+)**: function-local aliases, aliasing imported names (deferred — clear error in v1), `type` as an expression-level construct, aliases that introduce nominal distinctions (newtypes).
+- **Out of scope (v2+)**: function-local aliases, `type` as an expression-level construct, aliases that introduce nominal distinctions (newtypes).
 
 ### Optionals (v1)
 An **optional** wraps any type T as `optional T` — a value that is either present (holding a T) or absent (`none`). Optional types support flow-typing-based narrowing so the compiler tracks whether the value is definitely present before allowing use.
@@ -516,6 +516,26 @@ Statement form goes through the same compile path as the expression form, so all
   - `&` (string concat) is **never** type-checked statically — it always succeeds at runtime by coercing to string.
 - **Runtime**: list OOB (get/set/insert/remove), non-list targets when static type is unknown, wrong-type elements when compile-time type couldn't verify, empty `last item`/`last character`, non-number index, all of the above operator/control-flow checks when at least one operand's static type is unknown.
 
+## Compiler warnings
+
+The compiler emits non-fatal warnings to stderr. Warnings do not prevent execution — the program still runs after warnings are printed.
+
+**What is warned about:**
+- `unused constant 'X'` — a `constant` declared inside a function body that is never loaded.
+- `unused variable 'X'` — a `variable` declared inside a function body that is never loaded.
+- `unused parameter 'X'` — a function parameter that is never loaded in the function body.
+- `unused loop variable 'X'` — a `repeat with X in …` or `repeat with X from … to …` loop variable that is never loaded in the loop body.
+- `unused function 'X'` — a non-exported function that is never called anywhere in the module.
+- `unused import 'X'` — a function name brought in via `use … from "…"` that is never called.
+
+**Not warned about:** exported functions, module top-level constants/variables, `it`, `accumulator`, compiler-generated temps (names starting with `_`), struct formatter functions (names starting with `__`).
+
+**Suppression convention:** any user-chosen name beginning with `_` is silently exempt from all unused warnings (e.g. `_unused`, `_` as a throwaway loop variable). This applies to constants, variables, parameters, loop variables, functions, and imports.
+
+**Output format:** same source-location format as errors but with `warning:` prefix. Sent to stderr; one blank line between warnings. Sorted by line number.
+
+**Testing:** module tests may include a `.warnings` file listing expected warning messages (one per line, just the message without the location caret). If `.warnings` is absent the test does not assert anything about warnings.
+
 ## Keyword `takes` / `returns`
 `takes` is reserved and introduces the parameter list of a function declaration. `returns` is reserved and introduces the return-type clause (before `is`). Both are "stop keywords" — they cannot be used as a named-argument label or parameter separator label.
 
@@ -641,6 +661,7 @@ Existing golden cases:
 2. I ask targeted clarifying questions (one block at a time, wait for answers).
 3. When spec is fully clear, I summarize and delegate implementation to a `general-purpose` background agent with a comprehensive prompt.
 4. Agent builds + tests; I verify all tests pass afterward.
+5. **After completing any work**: (a) compile dist (`npm run build`), (b) commit, (c) push.
 
 ## Open items / roadmap
 

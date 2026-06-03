@@ -1,4 +1,4 @@
-import { SourceLocation } from './errors';
+import { SourceLocation, CompileWarning } from './errors';
 import type { ChatterType } from './types';
 
 export type InstructionKind =
@@ -110,6 +110,7 @@ export interface BytecodeProgram {
   // When formatValue renders a struct whose typeName is a key here, it
   // invokes the named function instead of the default `Type(field: v, …)`.
   structFormatters?: Map<string, string>;
+  warnings?: CompileWarning[];
 }
 
 export type { ChatterType } from './types';
