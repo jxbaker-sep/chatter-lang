@@ -54,3 +54,22 @@ export function sign takes number n returns number is
     return 1
   end if
 end function
+
+# isqrt: integer square root -- the largest r such that r * r <= n.
+# Runtime error on negative input.
+export function isqrt takes number n returns number is
+  expect n is at least 0, "isqrt requires a non-negative number, got " & n
+  if n is less than 2
+    return n
+  end if
+
+  # Newton's method, starting from ceil(n / 2). Written as n / 2 + n mod 2
+  # rather than (n + 1) / 2 so n = 2^53 - 1 does not overflow.
+  variable x is n
+  variable y is n / 2 + n mod 2
+  repeat while y is less than x
+    change x to y
+    change y to (x + n / x) / 2
+  end repeat
+  return x
+end function

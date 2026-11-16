@@ -1,0 +1,7 @@
+use isqrt from "std:math"
+repeat with n from 0 to 2000
+  constant r is the result of isqrt n
+  expect r * r is at most n, "isqrt " & n & " too big: " & r
+  expect (r + 1) * (r + 1) is greater than n, "isqrt " & n & " too small: " & r
+end repeat
+say "ok"

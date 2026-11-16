@@ -1,0 +1,3 @@
+use isqrt from "std:math"
+isqrt 1
+say it

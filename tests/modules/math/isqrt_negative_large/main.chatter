@@ -1,0 +1,2 @@
+use isqrt from "std:math"
+isqrt -9_007_199_254_740_991

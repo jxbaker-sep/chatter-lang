@@ -1,0 +1,5 @@
+use isqrt from "std:math"
+constant a is the result of isqrt 1_000_000
+constant b is the result of isqrt 999_999
+constant c is the result of isqrt 4_503_599_627_370_496
+say a, b, c

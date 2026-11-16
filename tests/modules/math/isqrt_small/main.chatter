@@ -1,0 +1,5 @@
+use isqrt from "std:math"
+repeat with n from 2 to 10
+  constant r is the result of isqrt n
+  say n, r
+end repeat

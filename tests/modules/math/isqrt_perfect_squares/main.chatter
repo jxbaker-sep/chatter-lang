@@ -1,0 +1,6 @@
+use isqrt from "std:math"
+repeat with r from 0 to 50
+  constant got is the result of isqrt r * r
+  expect got is r, "isqrt of " & r * r & " gave " & got
+end repeat
+say "ok"

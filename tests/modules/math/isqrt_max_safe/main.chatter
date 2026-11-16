@@ -1,0 +1,5 @@
+use isqrt from "std:math"
+constant a is the result of isqrt 9_007_199_254_740_991
+constant b is the result of isqrt 9_007_199_136_250_225
+constant c is the result of isqrt 9_007_199_136_250_224
+say a, b, c
