@@ -1367,7 +1367,7 @@ export class Compiler {
       this.currentLoc);
     }
 
-    if (!stmt.message) {
+    if (stmt.messages.length === 0) {
       this.compileExpr(stmt.expression, out, bindings);
       this.emit(out, { op: 'EXPECT', source: stmt.source });
       const narrowing = this.detectOptionalNoneCheck(stmt.expression, bindings);
@@ -1375,23 +1375,14 @@ export class Compiler {
       return;
     }
 
-    // Statically reject non-string messages.
-    const mt = this.staticType(stmt.message, bindings);
-    if (mt && !(mt.kind === 'scalar' && mt.name === 'string')) {
-      throw new CompileError(
-        `expect message must be a string, got ${typeToString(mt)}`,
-        this.currentLoc,
-      );
-    }
-
-    // Emitted shape (message evaluated lazily, only on failure):
+    // Emitted shape (message items evaluated lazily, only on failure):
     //   <eval predicate>
     //   EXPECT_BOOL_CHECK         ; throws "expect requires a boolean, got X" if non-bool; peeks
     //   JUMP_IF_FALSE L_fail      ; pops; branch if false
     //   JUMP L_end
     // L_fail:
-    //   <eval message>            ; pushes string (runtime type check below)
-    //   EXPECT_FAIL_WITH_MSG      ; pops string, throws "expect failed: <msg>"
+    //   <eval item 1> ... <eval item N>   ; any types, left to right
+    //   EXPECT_FAIL_MULTI { count: N }    ; formats like SAY_MULTI, throws "expect failed: <joined>"
     // L_end:
     this.compileExpr(stmt.expression, out, bindings);
     this.emit(out, { op: 'EXPECT_BOOL_CHECK' });
@@ -1400,8 +1391,10 @@ export class Compiler {
     const jmpEnd = out.length;
     this.emit(out, { op: 'JUMP', target: -1 });
     const failLabel = out.length;
-    this.compileExpr(stmt.message, out, bindings);
-    this.emit(out, { op: 'EXPECT_FAIL_WITH_MSG' });
+    for (const m of stmt.messages) {
+      this.compileExpr(m, out, bindings);
+    }
+    this.emit(out, { op: 'EXPECT_FAIL_MULTI', count: stmt.messages.length });
     const endLabel = out.length;
     (out[jmpFail] as any).target = failLabel;
     (out[jmpEnd] as any).target = endLabel;

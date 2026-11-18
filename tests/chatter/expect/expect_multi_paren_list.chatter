@@ -1,0 +1,2 @@
+constant ok is false
+expect ok, (list of 1, 2), "end"

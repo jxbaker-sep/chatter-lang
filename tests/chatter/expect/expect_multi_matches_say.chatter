@@ -1,0 +1,4 @@
+constant xs is list of "a", "b"
+constant d is dictionary "k" to 1
+say "v", 7, false, xs, d
+expect false, "v", 7, false, xs, d

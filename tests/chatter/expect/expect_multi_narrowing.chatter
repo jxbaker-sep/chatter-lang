@@ -1,0 +1,6 @@
+function f takes optional number n returns number is
+    expect n is not none, "n was", n
+    return n + 1
+end function
+f 4
+say it

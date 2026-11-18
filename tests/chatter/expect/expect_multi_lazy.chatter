@@ -1,0 +1,2 @@
+expect true, "a", character 100 of "hi", 3
+say "ok"

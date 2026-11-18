@@ -1,8 +1,5 @@
 # Chatter Language — Project Memory
 
-## Persona
-Always speak like Gambit from the X-Men. "Mon ami", "bon", "non", "oui", "de" for "the", etc.
-
 ## Project
 Path: `/Users/jxbaker/dev/chatter`
 Stack: TypeScript, Jest, Node. Scripts: `npm test`, `npm run build`, `npm run dev`.
@@ -27,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1228 tests passing.
+1238 tests passing.
 
 ## Language spec (current)
 
@@ -88,7 +85,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - All three variants require `end repeat` as the closer (bare `end` is a parse error).
 - `exit repeat` — immediately terminates the innermost enclosing `repeat` loop, transferring control to the statement immediately after `end repeat`. Compile error if used outside any `repeat` (including inside an `if` that is not inside a repeat, and inside a function body outside a loop). Valid inside `if` / `else` blocks nested inside a repeat. Always targets the innermost repeat. Works in all four loop forms.
 - `next repeat` — skips to the next iteration of the innermost enclosing `repeat` loop. For `N times` / `with i from A to B` / `with x in LIST`: runs the loop's increment (counter / `i` by step / index) then re-checks the bound. For `while COND`: jumps straight back to re-evaluate the condition. Same scope rules as `exit repeat`. Bare `exit` / `next` without `repeat` is a parse error.
-- `expect PREDICATE [, MSG_EXPR]` — assertion statement.
+- `expect PREDICATE (, EXPR)*` — assertion statement.
   - `PREDICATE` forms:
     - Any boolean expression: `expect c is a digit`, `expect n > 0 and n < 10` (via existing ops), `expect list contains 5`, etc.
     - `to be` sugar (standalone statement only — not an expression), equivalent to the matching `is`-form:
@@ -100,11 +97,13 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
       - `be` is NOT a reserved keyword; parsed contextually after `to` (or `to not`). `to` is already reserved.
   - Predicate must evaluate to boolean at runtime (`expect requires a boolean, got X` otherwise).
   - On failure without a message: throws `expect failed: <source-echo>` where `<source-echo>` is the original source text of the predicate (including the `to be` wording if that form was used).
-  - **Optional message clause** `, MSG_EXPR`:
-    - Comma is literal and required when present.
-    - `MSG_EXPR` must evaluate to a string. Statically-known non-string → compile error (`expect message must be a string, got X`). Runtime non-string → `expect message must be a string, got X` runtime error.
-    - **Lazy evaluation**: the message is evaluated ONLY when the predicate fails. On success it is not evaluated at all (so `expect true, character 100 of "hi"` never raises).
-    - On failure with a message, the error is `expect failed: <msg>` — the author-provided string REPLACES the source-echo. The `expect failed:` prefix is unchanged.
+  - **Optional variadic message clause** `, EXPR (, EXPR)*` (parallel to `say`):
+    - Zero or more comma-separated message items. Works with every predicate form, including the `to be` sugar (`expect x to be 5, "x was", x`).
+    - Items may be **any type** (number, boolean, list, struct, dict, optional, ...). Each is formatted exactly as `say` formats it and items are joined with single spaces — byte-identical to `say item1, item2, ...` minus the newline. (No string requirement.)
+    - Trailing comma after the last item → parse error (`Expected expression after ',' in expect statement`). List literals are greedy in item position — parenthesize to mix a list with other items: `expect ok, (list of 1, 2), "end"`.
+    - **Lazy evaluation**: items are evaluated ONLY when the predicate fails, left to right. On success none run (so `expect true, character 100 of "hi"` never raises).
+    - On failure with ≥1 item, the error is `expect failed: <joined items>` — the joined text REPLACES the source-echo. With zero items: `expect failed: <source-echo>` (unchanged).
+  - Narrowing via `expect x is not none` works with or without message items.
   - `expect` does NOT update `it`.
 
 ### Expressions
@@ -552,7 +551,7 @@ The compiler emits non-fatal warnings to stderr. Warnings do not prevent executi
 `ERROR` (message) — throws a RuntimeError with the given message; used by the compiler to emit runtime-check branches (e.g., negative `repeat` count).
 `EXPECT` (source) — pops a value; if not boolean, throws "expect requires a boolean, got X"; if false, throws "expect failed: <source>". Used for the bare-form `expect PREDICATE` with no message clause.
 `EXPECT_BOOL_CHECK` — peeks the stack top; throws "expect requires a boolean, got X" if not boolean. Stack unchanged. Used as a type guard for the message-form of expect before `JUMP_IF_FALSE` branches on the value.
-`EXPECT_FAIL_WITH_MSG` — pops a string; throws "expect failed: <string>". Throws "expect message must be a string, got X" if not a string. Emitted only on the failure branch of `expect PREDICATE, MSG_EXPR`.
+`EXPECT_FAIL_MULTI { count }` — pops `count` values (order-preserving), formats each with the `say` formatter (shared with `SAY_MULTI`), joins with single spaces, and throws "expect failed: <joined>". Emitted only on the failure branch of `expect PREDICATE, EXPR (, EXPR)*`.
 `DELETE` — removes a local from the current frame; used to scope loop variables.
 `LT` / `LE` / `GT` / `GE` — numeric comparison; RuntimeError on non-numbers.
 `STORE_VAR` — type-locked store for mutable `variable` bindings. On first store in a frame it records the value's type (number/string/boolean/`list:<element>`); on subsequent stores (from `change` or the arithmetic sugar) it checks the value's type matches the locked type and throws a RuntimeError if not. Each call frame has its own varTypes map, so recursive calls re-lock per invocation.

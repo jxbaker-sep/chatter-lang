@@ -335,15 +335,21 @@ export function parse(tokens: Token[], source?: string): Program {
       snippet = parts.join(' ');
     }
 
-    // Optional `, MSG_EXPR` trailing message clause.
-    let message: Expression | undefined;
-    if (peek().type === 'COMMA') {
-      advance();
-      message = parseExpression();
+    // Optional `, EXPR (, EXPR)*` trailing message items (parallel to `say`).
+    const messages: Expression[] = [];
+    while (peek().type === 'COMMA') {
+      consume('COMMA');
+      if (peek().type === 'NEWLINE' || peek().type === 'EOF') {
+        throw new ParseError(
+          "Expected expression after ',' in expect statement",
+          peek(),
+        );
+      }
+      messages.push(parseExpression());
     }
 
     consumeNewline();
-    return { type: 'ExpectStatement', expression, source: snippet, message };
+    return { type: 'ExpectStatement', expression, source: snippet, messages };
   }
 
   function parseFailStatement(): FailStatement {

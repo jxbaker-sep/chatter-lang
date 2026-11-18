@@ -251,6 +251,20 @@ export class VM {
   // custom formatter (see program.structFormatters) invoke the formatter
   // synchronously through a freshly-pushed frame; all other values use
   // the default formatting (recursing into elements).
+  /** Pops `count` values (order-preserving) and joins them space-separated
+   *  using the `say` formatter. Shared by SAY_MULTI and EXPECT_FAIL_MULTI. */
+  private popAndFormatMulti(count: number, opName: string, loc?: SourceLocation): string {
+    const vals: ChatterValue[] = new Array(count);
+    for (let i = count - 1; i >= 0; i--) {
+      const v = this.pop();
+      if (v === undefined) {
+        throw new RuntimeError(`Stack underflow in ${opName}`, loc);
+      }
+      vals[i] = v;
+    }
+    return vals.map(v => this.formatValue(v)).join(' ');
+  }
+
   private formatValue(v: ChatterValue): string {
     if (isOptional(v)) {
       if (!v.present) return 'none';
@@ -606,16 +620,7 @@ export class VM {
       }
 
       case 'SAY_MULTI': {
-        const count = instr.count;
-        const vals: ChatterValue[] = new Array(count);
-        for (let i = count - 1; i >= 0; i--) {
-          const v = this.pop();
-          if (v === undefined) {
-            throw new RuntimeError('Stack underflow in SAY_MULTI', instr.loc);
-          }
-          vals[i] = v;
-        }
-        console.log(vals.map(v => this.formatValue(v)).join(' '));
+        console.log(this.popAndFormatMulti(instr.count, 'SAY_MULTI', instr.loc));
         break;
       }
 
@@ -673,12 +678,9 @@ export class VM {
         break;
       }
 
-      case 'EXPECT_FAIL_WITH_MSG': {
-        const m = this.pop();
-        if (typeof m !== 'string') {
-          throw new RuntimeError(`expect message must be a string, got ${describe(m)}`, instr.loc);
-        }
-        throw new RuntimeError(`expect failed: ${m}`, instr.loc);
+      case 'EXPECT_FAIL_MULTI': {
+        const msg = this.popAndFormatMulti(instr.count, 'EXPECT_FAIL_MULTI', instr.loc);
+        throw new RuntimeError(`expect failed: ${msg}`, instr.loc);
       }
 
       case 'FAIL': {

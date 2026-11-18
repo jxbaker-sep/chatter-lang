@@ -384,7 +384,8 @@ export interface ExpectStatement {
   type: 'ExpectStatement';
   expression: Expression;
   source: string;
-  message?: Expression;
+  /** Zero or more message items (`expect P, a, b, ...`), formatted like `say`. */
+  messages: Expression[];
 }
 
 export interface FailStatement {
