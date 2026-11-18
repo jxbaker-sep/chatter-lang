@@ -1,0 +1,10 @@
+function check takes number n returns number is
+    if n is greater than 0
+        return n * 2
+    else
+        fail "bad input:", n
+    end if
+end function
+
+constant a is the result of check 3
+say a

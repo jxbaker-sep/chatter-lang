@@ -1407,15 +1407,11 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const mt = this.staticType(stmt.message, bindings);
-    if (mt && !(mt.kind === 'scalar' && mt.name === 'string')) {
-      throw new CompileError(
-        `fail message must be a string, got ${typeToString(mt)}`,
-        this.currentLoc,
-      );
+    // Items evaluated left to right, any type; formatted like SAY_MULTI.
+    for (const m of stmt.messages) {
+      this.compileExpr(m, out, bindings);
     }
-    this.compileExpr(stmt.message, out, bindings);
-    this.emit(out, { op: 'FAIL' });
+    this.emit(out, { op: 'FAIL_MULTI', count: stmt.messages.length });
   }
 
   private compileReadFileStatement(

@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1238 tests passing.
+1245 tests passing.
 
 ## Language spec (current)
 
@@ -105,6 +105,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
     - On failure with ≥1 item, the error is `expect failed: <joined items>` — the joined text REPLACES the source-echo. With zero items: `expect failed: <source-echo>` (unchanged).
   - Narrowing via `expect x is not none` works with or without message items.
   - `expect` does NOT update `it`.
+- `fail EXPR (, EXPR)*` — unconditionally raises a runtime error. One or more comma-separated items of any type, evaluated left to right, formatted exactly as `say` formats them and joined with single spaces; the error is `fail: <joined>` (so `fail "oops"` → `fail: oops`). Bare `fail` → parse error (`fail requires a message expression`); trailing comma → parse error. List literals are greedy in item position like `say` — use parens to mix a list with other items. Does NOT update `it`. Counts as a **terminating** statement for missing-return path analysis (e.g. a typed function's `else` arm may end in `fail` instead of `return`).
 
 ### Expressions
 - Arithmetic: `+ - * / ** mod`. Standard precedence: `**` > `*/ mod` > `+-`. `mod` is a keyword, same precedence as `*` and `/`, left-associative. **Floored-division modulo** (sign follows divisor, à la Python/Ruby). Result of `a mod b` (when `b > 0`) is always in `[0, b)`. Runtime error on `mod 0`.
@@ -552,6 +553,7 @@ The compiler emits non-fatal warnings to stderr. Warnings do not prevent executi
 `EXPECT` (source) — pops a value; if not boolean, throws "expect requires a boolean, got X"; if false, throws "expect failed: <source>". Used for the bare-form `expect PREDICATE` with no message clause.
 `EXPECT_BOOL_CHECK` — peeks the stack top; throws "expect requires a boolean, got X" if not boolean. Stack unchanged. Used as a type guard for the message-form of expect before `JUMP_IF_FALSE` branches on the value.
 `EXPECT_FAIL_MULTI { count }` — pops `count` values (order-preserving), formats each with the `say` formatter (shared with `SAY_MULTI`), joins with single spaces, and throws "expect failed: <joined>". Emitted only on the failure branch of `expect PREDICATE, EXPR (, EXPR)*`.
+`FAIL_MULTI { count }` — pops `count` values (order-preserving), formats them like `SAY_MULTI` (shared `popAndFormatMulti`), and throws "fail: <joined>". Emitted by `fail EXPR (, EXPR)*`.
 `DELETE` — removes a local from the current frame; used to scope loop variables.
 `LT` / `LE` / `GT` / `GE` — numeric comparison; RuntimeError on non-numbers.
 `STORE_VAR` — type-locked store for mutable `variable` bindings. On first store in a frame it records the value's type (number/string/boolean/`list:<element>`); on subsequent stores (from `change` or the arithmetic sugar) it checks the value's type matches the locked type and throws a RuntimeError if not. Each call frame has its own varTypes map, so recursive calls re-lock per invocation.

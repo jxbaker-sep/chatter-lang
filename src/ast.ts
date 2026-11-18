@@ -390,7 +390,8 @@ export interface ExpectStatement {
 
 export interface FailStatement {
   type: 'FailStatement';
-  message: Expression;
+  /** One or more message items (`fail a, b, ...`), formatted like `say`. */
+  messages: Expression[];
 }
 
 export interface AppendStatement {

@@ -1,0 +1,2 @@
+say "before"
+fail "just one string"

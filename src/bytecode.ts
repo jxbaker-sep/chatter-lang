@@ -67,7 +67,7 @@ export type InstructionKind =
   | { op: 'EXPECT'; source: string }
   | { op: 'EXPECT_BOOL_CHECK' }       // peeks top; throws "expect requires a boolean, got X" if not boolean
   | { op: 'EXPECT_FAIL_MULTI'; count: number } // pops `count` values, formats like SAY_MULTI; throws "expect failed: <joined>"
-  | { op: 'FAIL' }  // pops string message; throws "fail: <msg>"
+  | { op: 'FAIL_MULTI'; count: number } // pops `count` values, formats like SAY_MULTI; throws "fail: <joined>"
   | { op: 'MAKE_DICT'; count: number; keyType: ChatterType; valueType: ChatterType }
   | { op: 'MAKE_EMPTY_DICT'; keyType: ChatterType; valueType: ChatterType }
   | { op: 'DICT_GET' }

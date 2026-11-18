@@ -252,7 +252,7 @@ export class VM {
   // synchronously through a freshly-pushed frame; all other values use
   // the default formatting (recursing into elements).
   /** Pops `count` values (order-preserving) and joins them space-separated
-   *  using the `say` formatter. Shared by SAY_MULTI and EXPECT_FAIL_MULTI. */
+   *  using the `say` formatter. Shared by SAY_MULTI, EXPECT_FAIL_MULTI, and FAIL_MULTI. */
   private popAndFormatMulti(count: number, opName: string, loc?: SourceLocation): string {
     const vals: ChatterValue[] = new Array(count);
     for (let i = count - 1; i >= 0; i--) {
@@ -683,12 +683,9 @@ export class VM {
         throw new RuntimeError(`expect failed: ${msg}`, instr.loc);
       }
 
-      case 'FAIL': {
-        const m = this.pop();
-        if (typeof m !== 'string') {
-          throw new RuntimeError(`fail message must be a string, got ${describe(m)}`, instr.loc);
-        }
-        throw new RuntimeError(`fail: ${m}`, instr.loc);
+      case 'FAIL_MULTI': {
+        const msg = this.popAndFormatMulti(instr.count, 'FAIL_MULTI', instr.loc);
+        throw new RuntimeError(`fail: ${msg}`, instr.loc);
       }
 
       case 'DROP': {

@@ -1,0 +1,7 @@
+struct Point
+    number x
+    number y
+end struct
+constant p is make Point with x 1, y 2
+constant xs is list of 1, 2, 3
+fail "got", 42, true, xs, p, "end"

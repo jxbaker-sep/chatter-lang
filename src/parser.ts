@@ -357,9 +357,20 @@ export function parse(tokens: Token[], source?: string): Program {
     if (peek().type === 'NEWLINE' || peek().type === 'EOF') {
       throw new ParseError('fail requires a message expression', peek());
     }
-    const message = parseExpression();
+    // `fail EXPR (, EXPR)*` — items formatted like `say` (parallel to `say`).
+    const messages: Expression[] = [parseExpression()];
+    while (peek().type === 'COMMA') {
+      consume('COMMA');
+      if (peek().type === 'NEWLINE' || peek().type === 'EOF') {
+        throw new ParseError(
+          "Expected expression after ',' in fail statement",
+          peek(),
+        );
+      }
+      messages.push(parseExpression());
+    }
     consumeNewline();
-    return { type: 'FailStatement', message };
+    return { type: 'FailStatement', messages };
   }
 
   // Parse the tail after `to be`, returning a comparison/char-class AST node
