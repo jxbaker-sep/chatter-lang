@@ -21,7 +21,7 @@ export function parse takes string input returns number is
   repeat with i from start to length of input
     multiply result by 10
     constant c is character i of input
-    expect c to be a digit, "expected a number but got " & input
+    expect c to be a digit, "expected character", i, "of", input, "to be a digit"
     constant digit_value is code of c - zero
     add digit_value to result
   end repeat

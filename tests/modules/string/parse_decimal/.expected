@@ -1,1 +1,1 @@
-ERROR: expect failed: expected a number but got 3.14
+ERROR: expect failed: expected character 2 of 3.14 to be a digit
