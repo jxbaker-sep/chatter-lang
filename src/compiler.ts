@@ -7,7 +7,7 @@ import {
   ListLiteral, ItemAccessExpression, LastItemExpression,
   LengthExpression, AppendStatement, PrependStatement, InsertStatement,
   RemoveItemStatement, RemoveValueStatement, UniqueListLiteral,
-  DictionaryLiteral, DictGetExpression, DictSetStatement,
+  DictionaryLiteral, DictGetExpression, DictSetStatement, MutationTarget,
   TypeAnnotation, ScalarTypeName,
   CharacterAccessExpression, LastCharacterExpression,
   SubstringExpression,
@@ -1687,45 +1687,90 @@ export class Compiler {
     this.invalidateNarrowing(stmt.name);
   }
 
+  /**
+   * Prepares the collection operand of a mutation statement (the TARGET in
+   * `append V to TARGET`, `change item N of TARGET to V`, ...).
+   *
+   * - Bare identifier: resolves the binding (throwing `noBinding(name)` if it
+   *   doesn't exist) and honours flow-narrowing of optionals. Nothing is
+   *   emitted until `load()` is called.
+   * - Any other expression (`item 2 of grid`, `xs of p`, ...): evaluated
+   *   exactly once, right now, into a fresh temp; `load()` reloads the temp
+   *   and `cleanup()` deletes it. Because collections and mutable structs are
+   *   references, mutating the loaded value mutates the original in place.
+   *
+   * `label` is the quoted source text, for error messages.
+   */
+  private prepareMutationTarget(
+    t: MutationTarget,
+    bindings: Scope,
+    out: Instruction[],
+    noBinding: (label: string) => string,
+  ): { type: ChatterType | null; label: string; load: () => void; cleanup: () => void } {
+    const label = `'${t.targetText}'`;
+    if (t.target.type === 'IdentifierExpression') {
+      const name = t.target.name;
+      const resolved = this.lookupBindingWithOuter(name, bindings);
+      if (!resolved) throw new CompileError(noBinding(label), this.currentLoc);
+      const info = resolved.info;
+      const narrowedType = this.getNarrowedType(name);
+      return {
+        type: narrowedType ?? info.type ?? null,
+        label,
+        load: () => {
+          this.emit(out, { op: 'LOAD', name: info.mangled });
+          if (narrowedType) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
+        },
+        cleanup: () => {},
+      };
+    }
+    const type = this.staticType(t.target, bindings);
+    const tmp = this.freshName('mut_target');
+    this.compileExpr(t.target, out, bindings);
+    this.emit(out, { op: 'STORE', name: tmp });
+    return {
+      type,
+      label,
+      load: () => { this.emit(out, { op: 'LOAD', name: tmp }); },
+      cleanup: () => { this.emit(out, { op: 'DELETE', name: tmp }); },
+    };
+  }
+
   private compileChangeItem(
     stmt: ChangeItemStatement,
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const resolved = this.lookupBindingWithOuter(stmt.listName, bindings);
-    if (!resolved) {
+    const tgt = this.prepareMutationTarget(stmt, bindings, out,
+      (l) => `Cannot change item of ${l}: no such binding`);
+    const type = tgt.type;
+    if (type && type.kind === 'uniqueList') {
       throw new CompileError(
-        `Cannot change item of '${stmt.listName}': no such binding`,
+        `'change item N of NAME' is not a unique-list operation; unique lists do not support random access (name ${tgt.label})`,
       this.currentLoc);
     }
-    const info = resolved.info;
-    if (info.type && info.type.kind === 'uniqueList') {
-      throw new CompileError(
-        `'change item N of NAME' is not a unique-list operation; unique lists do not support random access (name '${stmt.listName}')`,
-      this.currentLoc);
-    }
-    if (!info.type || info.type.kind !== 'list') {
-      if (info.type) {
+    if (!type || type.kind !== 'list') {
+      if (type) {
         throw new CompileError(
-          `Cannot change item of '${stmt.listName}': not a list (type ${typeToString(info.type)})`,
+          `Cannot change item of ${tgt.label}: not a list (type ${typeToString(type)})`,
         this.currentLoc);
       }
     } else {
       const rhs = this.staticType(stmt.value, bindings);
       const rc = elementCode(rhs);
-      if (rc !== null && !typesEqual(rc, info.type.element)) {
+      if (rc !== null && !typesEqual(rc, type.element)) {
         throw new CompileError(
-          `Type mismatch: cannot assign ${elementHuman(rc)} to list of ${elementHuman(info.type.element)}`,
+          `Type mismatch: cannot assign ${elementHuman(rc)} to list of ${elementHuman(type.element)}`,
         this.currentLoc);
       }
     }
-    // Emit: LOAD list; <index>; <value>; LIST_SET
+    // Emit: <list>; <index>; <value>; LIST_SET
     // If `end` sentinel appears in the index, stash the list in a tmp first
     // so we can compute length once for the sentinel.
     if (containsEndSentinel(stmt.index)) {
       const listTmp = this.freshName('chgitem_list');
       const lenTmp = this.freshName('chgitem_len');
-      this.emit(out, { op: 'LOAD', name: info.mangled });
+      tgt.load();
       this.emit(out, { op: 'STORE', name: listTmp });
       this.emit(out, { op: 'LOAD', name: listTmp });
       this.emit(out, { op: 'LENGTH' });
@@ -1738,11 +1783,12 @@ export class Compiler {
       this.emit(out, { op: 'DELETE', name: listTmp });
       this.emit(out, { op: 'DELETE', name: lenTmp });
     } else {
-      this.emit(out, { op: 'LOAD', name: info.mangled });
+      tgt.load();
       this.compileExpr(stmt.index, out, bindings);
       this.compileExpr(stmt.value, out, bindings);
       this.emit(out, { op: 'LIST_SET' });
     }
+    tgt.cleanup();
   }
 
   private compileChangeField(
@@ -1750,13 +1796,9 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const resolved = this.lookupBindingWithOuter(stmt.targetName, bindings);
-    if (!resolved) {
-      throw new CompileError(`Cannot change field of '${stmt.targetName}': no such binding`, this.currentLoc);
-    }
-    const info = resolved.info;
-    const narrowedType = this.getNarrowedType(stmt.targetName);
-    const targetType = narrowedType ?? info.type;
+    const tgt = this.prepareMutationTarget(stmt, bindings, out,
+      (l) => `Cannot change field of ${l}: no such binding`);
+    const targetType = tgt.type;
     let fieldType: ChatterType | null = null;
     if (targetType) {
       if (targetType.kind === 'struct') {
@@ -1766,7 +1808,7 @@ export class Compiler {
         );
       }
       if (targetType.kind !== 'mutableStruct') {
-        throw new CompileError(`Cannot change field of '${stmt.targetName}': not a mutable struct (type ${typeToString(targetType)})`, this.currentLoc);
+        throw new CompileError(`Cannot change field of ${tgt.label}: not a mutable struct (type ${typeToString(targetType)})`, this.currentLoc);
       }
       const sinfo = this.structInfoForType(targetType);
       const decl = sinfo?.fields.find(d => d.name === stmt.fieldName);
@@ -1782,30 +1824,32 @@ export class Compiler {
         );
       }
     }
-    this.emit(out, { op: 'LOAD', name: info.mangled });
-    if (narrowedType) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
+    tgt.load();
     if (fieldType) this.compileExprWithExpected(stmt.value, fieldType, out, bindings);
     else this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'MUTABLE_STRUCT_SET', fieldName: stmt.fieldName });
+    tgt.cleanup();
   }
 
-  private compileListMutationTarget(listName: string, bindings: Scope, op: string): { type: ChatterType | null; mangled: string } {
-    const resolved = this.lookupBindingWithOuter(listName, bindings);
-    if (!resolved) {
-      throw new CompileError(`Cannot ${op} to '${listName}': no such binding`, this.currentLoc);
-    }
-    const info = resolved.info;
-    if (info.type && info.type.kind === 'uniqueList') {
+  private compileListMutationTarget(
+    t: MutationTarget,
+    bindings: Scope,
+    out: Instruction[],
+    op: string,
+  ): { type: ChatterType | null; load: () => void; cleanup: () => void } {
+    const tgt = this.prepareMutationTarget(t, bindings, out,
+      (l) => `Cannot ${op} to ${l}: no such binding`);
+    if (tgt.type && tgt.type.kind === 'uniqueList') {
       throw new CompileError(
-        `'${op}' is a list operation; unique lists use 'add' / 'remove EXPR from NAME' instead (name '${listName}')`,
+        `'${op}' is a list operation; unique lists use 'add' / 'remove EXPR from NAME' instead (name ${tgt.label})`,
       this.currentLoc);
     }
-    if (info.type && info.type.kind !== 'list') {
+    if (tgt.type && tgt.type.kind !== 'list') {
       throw new CompileError(
-        `Cannot ${op} to '${listName}': not a list (type ${typeToString(info.type)})`,
+        `Cannot ${op} to ${tgt.label}: not a list (type ${typeToString(tgt.type)})`,
       this.currentLoc);
     }
-    return { type: info.type ?? null, mangled: info.mangled };
+    return tgt;
   }
 
   private checkElementType(
@@ -1830,11 +1874,12 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'append');
+    const lt = this.compileListMutationTarget(stmt, bindings, out, 'append');
     this.checkElementType(lt.type, stmt.value, bindings, 'append');
-    this.emit(out, { op: 'LOAD', name: lt.mangled });
+    lt.load();
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'LIST_APPEND' });
+    lt.cleanup();
   }
 
   private compilePrepend(
@@ -1842,11 +1887,12 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'prepend');
+    const lt = this.compileListMutationTarget(stmt, bindings, out, 'prepend');
     this.checkElementType(lt.type, stmt.value, bindings, 'prepend');
-    this.emit(out, { op: 'LOAD', name: lt.mangled });
+    lt.load();
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'LIST_PREPEND' });
+    lt.cleanup();
   }
 
   private compileInsert(
@@ -1854,12 +1900,13 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'insert');
+    const lt = this.compileListMutationTarget(stmt, bindings, out, 'insert');
     this.checkElementType(lt.type, stmt.value, bindings, 'insert');
-    this.emit(out, { op: 'LOAD', name: lt.mangled });
+    lt.load();
     this.compileExpr(stmt.index, out, bindings);
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'LIST_INSERT' });
+    lt.cleanup();
   }
 
   private compileRemove(
@@ -1867,10 +1914,11 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const lt = this.compileListMutationTarget(stmt.listName, bindings, 'remove');
-    this.emit(out, { op: 'LOAD', name: lt.mangled });
+    const lt = this.compileListMutationTarget(stmt, bindings, out, 'remove');
+    lt.load();
     this.compileExpr(stmt.index, out, bindings);
     this.emit(out, { op: 'LIST_REMOVE' });
+    lt.cleanup();
   }
 
   private compileRemoveValue(
@@ -1878,49 +1926,47 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const resolved = this.lookupBindingWithOuter(stmt.listName, bindings);
-    if (!resolved) {
-      throw new CompileError(
-        `Cannot remove value from '${stmt.listName}': no such binding`,
-      this.currentLoc);
-    }
-    const info = resolved.info;
-    if (info.type) {
-      if (info.type.kind === 'list') {
+    const tgt = this.prepareMutationTarget(stmt, bindings, out,
+      (l) => `Cannot remove value from ${l}: no such binding`);
+    const type = tgt.type;
+    if (type) {
+      if (type.kind === 'list') {
         throw new CompileError(
-          `'remove EXPR from NAME' is not a list operation; use 'remove item N from NAME' (name '${stmt.listName}')`,
+          `'remove EXPR from NAME' is not a list operation; use 'remove item N from NAME' (name ${tgt.label})`,
         this.currentLoc);
       }
-      if (info.type.kind === 'dict') {
+      if (type.kind === 'dict') {
         const rhs = this.staticType(stmt.value, bindings);
         const rc = elementCode(rhs);
-        if (rc !== null && !typesEqual(rc, info.type.keyType)) {
+        if (rc !== null && !typesEqual(rc, type.keyType)) {
           throw new CompileError(
-            `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(rc)}`,
+            `Type mismatch: dictionary key has type ${elementHuman(type.keyType)}, got ${elementHuman(rc)}`,
           this.currentLoc);
         }
-        this.emit(out, { op: 'LOAD', name: info.mangled });
+        tgt.load();
         this.compileExpr(stmt.value, out, bindings);
         this.emit(out, { op: 'DICT_REMOVE' });
+        tgt.cleanup();
         return;
       }
-      if (info.type.kind !== 'uniqueList') {
+      if (type.kind !== 'uniqueList') {
         throw new CompileError(
-          `Cannot remove value from '${stmt.listName}': not a unique list or dictionary (type ${typeToString(info.type)})`,
+          `Cannot remove value from ${tgt.label}: not a unique list or dictionary (type ${typeToString(type)})`,
         this.currentLoc);
       }
       // Element-type check.
       const rhs = this.staticType(stmt.value, bindings);
       const rc = elementCode(rhs);
-      if (rc !== null && !typesEqual(rc, info.type.element)) {
+      if (rc !== null && !typesEqual(rc, type.element)) {
         throw new CompileError(
-          `Type mismatch: cannot remove ${elementHuman(rc)} from unique list of ${elementHuman(info.type.element)}`,
+          `Type mismatch: cannot remove ${elementHuman(rc)} from unique list of ${elementHuman(type.element)}`,
         this.currentLoc);
       }
     }
-    this.emit(out, { op: 'LOAD', name: info.mangled });
+    tgt.load();
     this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'UNIQUE_LIST_REMOVE' });
+    tgt.cleanup();
   }
 
   private compileCompoundAssign(
@@ -1929,6 +1975,10 @@ export class Compiler {
     bindings: Scope,
   ): void {
     const target = stmt.target;
+    if (target.kind !== 'name' && stmt.op === 'add'
+        && this.compileAddToCollectionSlot(stmt, target, out, bindings)) {
+      return;
+    }
     if (target.kind === 'listItem') {
       this.compileCompoundAssignListItem(stmt, target, out, bindings);
       return;
@@ -1995,6 +2045,73 @@ export class Compiler {
     this.emit(out, { op: 'STORE_VAR', name: info.mangled });
   }
 
+  /**
+   * `add EXPR to SLOT`, where SLOT is `item N of L`, `value of K in D`, or
+   * `FIELD of S`, is overloaded on the slot's type: arithmetic for a number,
+   * unique-list insert for a unique list. Returns true if it compiled a
+   * unique-list insert (or threw); false means "fall through to arithmetic".
+   * When the slot's type can't be determined at compile time the statement is
+   * ambiguous, so it's a compile error.
+   */
+  private compileAddToCollectionSlot(
+    stmt: CompoundAssignStatement,
+    target: Exclude<CompoundAssignStatement['target'], { kind: 'name' }>,
+    out: Instruction[],
+    bindings: Scope,
+  ): boolean {
+    let containerType: ChatterType | null;
+    if (target.target.type === 'IdentifierExpression') {
+      const resolved = this.lookupBindingWithOuter(target.target.name, bindings);
+      if (!resolved) return false; // let the specific path report "no such binding"
+      containerType = this.getNarrowedType(target.target.name) ?? resolved.info.type ?? null;
+    } else {
+      containerType = this.staticType(target.target, bindings);
+    }
+    let slotType: ChatterType | null = null;
+    let slotExpr: Expression;
+    if (target.kind === 'listItem') {
+      if (containerType && containerType.kind !== 'list') return false;
+      if (containerType) slotType = containerType.element;
+      slotExpr = { type: 'ItemAccessExpression', index: target.index, target: target.target } as Expression;
+    } else if (target.kind === 'dictValue') {
+      if (containerType && containerType.kind !== 'dict') return false;
+      if (containerType) slotType = containerType.valueType;
+      slotExpr = { type: 'DictGetExpression', key: target.key, dict: target.target } as Expression;
+    } else {
+      if (containerType && containerType.kind !== 'struct' && containerType.kind !== 'mutableStruct') return false;
+      if (containerType) {
+        const decl = this.structInfoForType(containerType)?.fields.find(d => d.name === target.fieldName);
+        if (!decl) return false;
+        slotType = decl.type;
+      }
+      slotExpr = { type: 'FieldAccessExpression', fieldName: target.fieldName, target: target.target } as Expression;
+    }
+    if (!slotType) {
+      throw new CompileError(
+        `cannot tell whether 'add' is arithmetic or a unique-list insert: the type of '${target.targetText}' is not known at compile time`,
+        this.currentLoc,
+      );
+    }
+    if (slotType.kind === 'list') {
+      throw new CompileError(
+        `'add' cannot insert into a list (use 'append', 'prepend', or 'insert at')`,
+        this.currentLoc,
+      );
+    }
+    if (slotType.kind !== 'uniqueList') return false;
+    const rc = elementCode(this.staticType(stmt.value, bindings));
+    if (rc !== null && !typesEqual(rc, slotType.element)) {
+      throw new CompileError(
+        `Type mismatch: cannot add ${elementHuman(rc)} to unique list of ${elementHuman(slotType.element)}`,
+        this.currentLoc,
+      );
+    }
+    this.compileExpr(slotExpr, out, bindings);
+    this.compileExpr(stmt.value, out, bindings);
+    this.emit(out, { op: 'UNIQUE_LIST_ADD' });
+    return true;
+  }
+
   private emitArithOp(op: 'add' | 'subtract' | 'multiply' | 'divide', out: Instruction[]): void {
     switch (op) {
       case 'add':      this.emit(out, { op: 'ADD' }); break;
@@ -2006,37 +2123,34 @@ export class Compiler {
 
   private compileCompoundAssignListItem(
     stmt: CompoundAssignStatement,
-    target: { kind: 'listItem'; listName: string; index: Expression },
+    target: Extract<CompoundAssignStatement['target'], { kind: 'listItem' }>,
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const resolved = this.lookupBindingWithOuter(target.listName, bindings);
-    if (!resolved) {
+    const tgt = this.prepareMutationTarget(target, bindings, out,
+      (l) => `Cannot ${stmt.op} item of ${l}: no such binding`);
+    const type = tgt.type;
+    if (type && type.kind === 'uniqueList') {
       throw new CompileError(
-        `Cannot ${stmt.op} item of '${target.listName}': no such binding`,
+        `'${stmt.op} ... item N of NAME' is not a unique-list operation; unique lists do not support random access (name ${tgt.label})`,
       this.currentLoc);
     }
-    const info = resolved.info;
-    if (info.type && info.type.kind === 'uniqueList') {
+    if (type && type.kind !== 'list') {
       throw new CompileError(
-        `'${stmt.op} ... item N of NAME' is not a unique-list operation; unique lists do not support random access (name '${target.listName}')`,
+        `Cannot ${stmt.op} item of ${tgt.label}: not a list (type ${typeToString(type)})`,
       this.currentLoc);
     }
-    if (info.type && info.type.kind !== 'list') {
+    if (type && type.kind === 'list' && !(type.element.kind === 'scalar' && type.element.name === 'number')) {
       throw new CompileError(
-        `Cannot ${stmt.op} item of '${target.listName}': not a list (type ${typeToString(info.type)})`,
-      this.currentLoc);
-    }
-    if (info.type && info.type.kind === 'list' && !(info.type.element.kind === 'scalar' && info.type.element.name === 'number')) {
-      throw new CompileError(
-        `Cannot ${stmt.op} item of '${target.listName}': its element type is ${elementHuman(info.type.element)}, not number`,
+        `Cannot ${stmt.op} item of ${tgt.label}: its element type is ${elementHuman(type.element)}, not number`,
       this.currentLoc);
     }
     const listTmp = this.freshName('cassign_list');
     const idxTmp = this.freshName('cassign_idx');
     // Stash list and index once so the read and write see identical values.
-    this.emit(out, { op: 'LOAD', name: info.mangled });
+    tgt.load();
     this.emit(out, { op: 'STORE', name: listTmp });
+    tgt.cleanup();
     if (containsEndSentinel(target.index)) {
       const lenTmp = this.freshName('cassign_len');
       this.emit(out, { op: 'LOAD', name: listTmp });
@@ -2066,40 +2180,37 @@ export class Compiler {
 
   private compileCompoundAssignDictValue(
     stmt: CompoundAssignStatement,
-    target: { kind: 'dictValue'; dictName: string; key: Expression },
+    target: Extract<CompoundAssignStatement['target'], { kind: 'dictValue' }>,
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const resolved = this.lookupBindingWithOuter(target.dictName, bindings);
-    if (!resolved) {
-      throw new CompileError(
-        `Cannot ${stmt.op} value in '${target.dictName}': no such binding`,
-      this.currentLoc);
-    }
-    const info = resolved.info;
-    if (info.type) {
-      if (info.type.kind !== 'dict') {
+    const tgt = this.prepareMutationTarget(target, bindings, out,
+      (l) => `Cannot ${stmt.op} value in ${l}: no such binding`);
+    const type = tgt.type;
+    if (type) {
+      if (type.kind !== 'dict') {
         throw new CompileError(
-          `Cannot ${stmt.op} value in '${target.dictName}': not a dictionary (type ${typeToString(info.type)})`,
+          `Cannot ${stmt.op} value in ${tgt.label}: not a dictionary (type ${typeToString(type)})`,
         this.currentLoc);
       }
-      if (!(info.type.valueType.kind === 'scalar' && info.type.valueType.name === 'number')) {
+      if (!(type.valueType.kind === 'scalar' && type.valueType.name === 'number')) {
         throw new CompileError(
-          `Cannot ${stmt.op} value in '${target.dictName}': its value type is ${elementHuman(info.type.valueType)}, not number`,
+          `Cannot ${stmt.op} value in ${tgt.label}: its value type is ${elementHuman(type.valueType)}, not number`,
         this.currentLoc);
       }
       const kt = this.staticType(target.key, bindings);
       const kc = elementCode(kt);
-      if (kc !== null && !typesEqual(kc, info.type.keyType)) {
+      if (kc !== null && !typesEqual(kc, type.keyType)) {
         throw new CompileError(
-          `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(kc)}`,
+          `Type mismatch: dictionary key has type ${elementHuman(type.keyType)}, got ${elementHuman(kc)}`,
         this.currentLoc);
       }
     }
     const dictTmp = this.freshName('cassign_dict');
     const keyTmp = this.freshName('cassign_key');
-    this.emit(out, { op: 'LOAD', name: info.mangled });
+    tgt.load();
     this.emit(out, { op: 'STORE', name: dictTmp });
+    tgt.cleanup();
     this.compileExpr(target.key, out, bindings);
     this.emit(out, { op: 'STORE', name: keyTmp });
     // Build DICT_SET stack: dict, key, newValue
@@ -2118,17 +2229,13 @@ export class Compiler {
 
   private compileCompoundAssignField(
     stmt: CompoundAssignStatement,
-    target: { kind: 'field'; targetName: string; fieldName: string },
+    target: Extract<CompoundAssignStatement['target'], { kind: 'field' }>,
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const resolved = this.lookupBindingWithOuter(target.targetName, bindings);
-    if (!resolved) {
-      throw new CompileError(`Cannot ${stmt.op} field of '${target.targetName}': no such binding`, this.currentLoc);
-    }
-    const info = resolved.info;
-    const narrowedType = this.getNarrowedType(target.targetName);
-    const targetType = narrowedType ?? info.type;
+    const tgt = this.prepareMutationTarget(target, bindings, out,
+      (l) => `Cannot ${stmt.op} field of ${l}: no such binding`);
+    const targetType = tgt.type;
     if (targetType) {
       if (targetType.kind === 'struct') {
         throw new CompileError(
@@ -2137,7 +2244,7 @@ export class Compiler {
         );
       }
       if (targetType.kind !== 'mutableStruct') {
-        throw new CompileError(`Cannot ${stmt.op} field of '${target.targetName}': not a mutable struct (type ${typeToString(targetType)})`, this.currentLoc);
+        throw new CompileError(`Cannot ${stmt.op} field of ${tgt.label}: not a mutable struct (type ${typeToString(targetType)})`, this.currentLoc);
       }
       const sinfo = this.structInfoForType(targetType);
       const decl = sinfo?.fields.find(d => d.name === target.fieldName);
@@ -2145,13 +2252,13 @@ export class Compiler {
         throw new CompileError(`struct '${unmangleTypeName(targetType.mangled)}' has no field '${target.fieldName}'`, this.currentLoc);
       }
       if (!(decl.type.kind === 'scalar' && decl.type.name === 'number')) {
-        throw new CompileError(`Cannot ${stmt.op} field '${target.fieldName}' of '${target.targetName}': its type is ${typeToString(decl.type)}, not number`, this.currentLoc);
+        throw new CompileError(`Cannot ${stmt.op} field '${target.fieldName}' of ${tgt.label}: its type is ${typeToString(decl.type)}, not number`, this.currentLoc);
       }
     }
     const targetTmp = this.freshName('cassign_struct');
-    this.emit(out, { op: 'LOAD', name: info.mangled });
-    if (narrowedType) this.emit(out, { op: 'UNWRAP_OPTIONAL' });
+    tgt.load();
     this.emit(out, { op: 'STORE', name: targetTmp });
+    tgt.cleanup();
     this.emit(out, { op: 'LOAD', name: targetTmp });
     this.emit(out, { op: 'LOAD', name: targetTmp });
     this.emit(out, { op: 'MUTABLE_STRUCT_GET', fieldName: target.fieldName });
@@ -4275,39 +4382,36 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    const resolved = this.lookupBindingWithOuter(stmt.dictName, bindings);
-    if (!resolved) {
-      throw new CompileError(
-        `Cannot change value in '${stmt.dictName}': no such binding`,
-      this.currentLoc);
-    }
-    const info = resolved.info;
-    if (info.type) {
-      if (info.type.kind !== 'dict') {
+    const tgt = this.prepareMutationTarget(stmt, bindings, out,
+      (l) => `Cannot change value in ${l}: no such binding`);
+    const type = tgt.type;
+    if (type) {
+      if (type.kind !== 'dict') {
         throw new CompileError(
-          `Cannot change value in '${stmt.dictName}': not a dictionary (type ${typeToString(info.type)})`,
+          `Cannot change value in ${tgt.label}: not a dictionary (type ${typeToString(type)})`,
         this.currentLoc);
       }
       const kt = this.staticType(stmt.key, bindings);
       const kc = elementCode(kt);
-      if (kc !== null && !typesEqual(kc, info.type.keyType)) {
+      if (kc !== null && !typesEqual(kc, type.keyType)) {
         throw new CompileError(
-          `Type mismatch: dictionary key has type ${elementHuman(info.type.keyType)}, got ${elementHuman(kc)}`,
+          `Type mismatch: dictionary key has type ${elementHuman(type.keyType)}, got ${elementHuman(kc)}`,
         this.currentLoc);
       }
       const vt = this.staticType(stmt.value, bindings);
-      if (!this.canAssignToExpected(info.type.valueType, vt, stmt.value)) {
+      if (!this.canAssignToExpected(type.valueType, vt, stmt.value)) {
         throw new CompileError(
-          `Type mismatch: dictionary value has type ${elementHuman(info.type.valueType)}, got ${vt ? elementHuman(vt) : 'unknown'}`,
+          `Type mismatch: dictionary value has type ${elementHuman(type.valueType)}, got ${vt ? elementHuman(vt) : 'unknown'}`,
         this.currentLoc);
       }
     }
-    this.emit(out, { op: 'LOAD', name: info.mangled });
-    if (info.type && info.type.kind === 'dict') this.compileExprWithExpected(stmt.key, info.type.keyType, out, bindings);
+    tgt.load();
+    if (type && type.kind === 'dict') this.compileExprWithExpected(stmt.key, type.keyType, out, bindings);
     else this.compileExpr(stmt.key, out, bindings);
-    if (info.type && info.type.kind === 'dict') this.compileExprWithExpected(stmt.value, info.type.valueType, out, bindings);
+    if (type && type.kind === 'dict') this.compileExprWithExpected(stmt.value, type.valueType, out, bindings);
     else this.compileExpr(stmt.value, out, bindings);
     this.emit(out, { op: 'DICT_SET' });
+    tgt.cleanup();
   }
 
   private compileUniqueListLiteral(

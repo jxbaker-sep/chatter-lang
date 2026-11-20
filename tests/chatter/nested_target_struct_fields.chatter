@@ -1,0 +1,22 @@
+# Collections inside an immutable struct can be mutated through it.
+struct Bag
+    list of number xs
+    unique list of string tags
+end struct
+constant b is make Bag with xs (list of 1), tags unique list of "a"
+append 2 to xs of b
+add "b" to tags of b
+change item 1 of xs of b to 9
+say b
+
+# Mutable struct fields reached through a list / dictionary.
+mutable struct Counter
+    number n
+end struct
+constant cs is list of (make Counter with n 0), (make Counter with n 10)
+change n of item 1 of cs to 5
+add 1 to n of item 2 of cs
+say cs
+constant d is dictionary "k" to (make Counter with n 1)
+add 41 to n of value of "k" in d
+say d

@@ -562,6 +562,40 @@ export function parse(tokens: Token[], source?: string): Program {
     return node;
   }
 
+  // Parses the collection operand of a mutation statement (`append V to TARGET`,
+  // `change item N of TARGET to V`, ...). TARGET is any primary expression —
+  // a bare name, `item N of L`, `FIELD of S`, `value of K in D`, a
+  // parenthesised expression, ... — evaluated to a reference at runtime.
+  // Also captures the target's source text for error messages.
+  function parseMutationTarget(): { target: Expression; targetText: string } {
+    const startTok = peek();
+    const target = parsePrimary();
+    const endTok = tokens[pos - 1];
+    let targetText: string;
+    if (sourceLines && startTok.line === endTok.line && startTok.line >= 1 && startTok.line <= sourceLines.length) {
+      targetText = sourceLines[startTok.line - 1].substring(startTok.col, tokenEndCol(endTok));
+    } else {
+      const parts: string[] = [];
+      for (let i = tokens.indexOf(startTok); i < pos; i++) {
+        const t = tokens[i];
+        if (t.type === 'NEWLINE' || t.type === 'INDENT' || t.type === 'DEDENT' || t.type === 'EOF') continue;
+        parts.push(t.type === 'STRING' ? `"${t.value}"` : t.value);
+      }
+      targetText = parts.join(' ');
+    }
+    return { target, targetText };
+  }
+
+  // Wraps an already-parsed expression as a mutation target (used when the
+  // parser had to consume the expression before knowing it was one).
+  function asMutationTarget(target: Expression, startTok: Token): { target: Expression; targetText: string } {
+    const endTok = tokens[pos - 1];
+    if (sourceLines && startTok.line === endTok.line && startTok.line >= 1 && startTok.line <= sourceLines.length) {
+      return { target, targetText: sourceLines[startTok.line - 1].substring(startTok.col, tokenEndCol(endTok)) };
+    }
+    return { target, targetText: target.type === 'IdentifierExpression' ? target.name : '<expression>' };
+  }
+
   function parseConstantStatement(): ConstantDeclaration {
     consume('KEYWORD', 'constant');
     const nameTok = consume('IDENT');
@@ -592,45 +626,51 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseChangeStatement(): ChangeStatement | ChangeItemStatement | ChangeFieldStatement | DictSetStatement {
     consume('KEYWORD', 'change');
-    // `change item EXPR of IDENT to EXPR` — list element assignment
+    // `change item EXPR of TARGET to EXPR` — list element assignment
     if (peek().type === 'KEYWORD' && peek().value === 'item') {
       advance(); // item
       indexSlotDepth++;
       let index: Expression;
       try { index = parseExpression(); } finally { indexSlotDepth--; }
       consume('KEYWORD', 'of');
-      const nameTok = consume('IDENT');
+      const t = parseMutationTarget();
       consume('KEYWORD', 'to');
       const value = parseExpression();
       consumeNewline();
-      return { type: 'ChangeItemStatement', listName: nameTok.value, index, value };
+      return { type: 'ChangeItemStatement', ...t, index, value };
     }
-    // `change FIELD of IDENT to EXPR` — mutable struct field assignment.
-    if ((peek().type === 'IDENT' || peek().type === 'KEYWORD')
-        && peek().value !== 'item'
-        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of'
-        && tokens[pos + 2]?.type === 'IDENT'
-        && tokens[pos + 3]?.type === 'KEYWORD' && tokens[pos + 3]?.value === 'to') {
-      const fieldTok = advance();
-      advance(); // of
-      const targetTok = consume('IDENT');
-      consume('KEYWORD', 'to');
-      const value = parseExpression();
-      consumeNewline();
-      return { type: 'ChangeFieldStatement', targetName: targetTok.value, fieldName: fieldTok.value, value };
-    }
-    // `change value of EXPR in IDENT to EXPR` — dictionary insert/overwrite.
+    // `change value of EXPR in TARGET to EXPR` — dictionary insert/overwrite.
+    // `change value of TARGET to EXPR` — mutable struct field named `value`.
     if (peek().type === 'IDENT' && peek().value === 'value'
         && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
       advance(); // value
       advance(); // of
+      const keyStart = peek();
       const key = parsePrimary();
-      consume('KEYWORD', 'in');
-      const nameTok = consume('IDENT');
+      if (peek().type === 'KEYWORD' && peek().value === 'in') {
+        advance(); // in
+        const t = parseMutationTarget();
+        consume('KEYWORD', 'to');
+        const value = parseExpression();
+        consumeNewline();
+        return { type: 'DictSetStatement', ...t, key, value };
+      }
+      const t = asMutationTarget(key, keyStart);
       consume('KEYWORD', 'to');
       const value = parseExpression();
       consumeNewline();
-      return { type: 'DictSetStatement', dictName: nameTok.value, key, value };
+      return { type: 'ChangeFieldStatement', ...t, fieldName: 'value', value };
+    }
+    // `change FIELD of TARGET to EXPR` — mutable struct field assignment.
+    if ((peek().type === 'IDENT' || peek().type === 'KEYWORD')
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
+      const fieldTok = advance();
+      advance(); // of
+      const t = parseMutationTarget();
+      consume('KEYWORD', 'to');
+      const value = parseExpression();
+      consumeNewline();
+      return { type: 'ChangeFieldStatement', ...t, fieldName: fieldTok.value, value };
     }
     const nameTok = consume('IDENT');
     consume('KEYWORD', 'to');
@@ -653,27 +693,26 @@ export function parse(tokens: Token[], source?: string): Program {
       let index: Expression;
       try { index = parseExpression(); } finally { indexSlotDepth--; }
       consume('KEYWORD', 'of');
-      const nameTok = consume('IDENT');
-      return { kind: 'listItem', listName: nameTok.value, index };
+      return { kind: 'listItem', ...parseMutationTarget(), index };
     }
     if (peek().type === 'IDENT' && peek().value === 'value'
-        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of'
-        && !(tokens[pos + 2]?.type === 'IDENT' && !(tokens[pos + 3]?.type === 'KEYWORD' && tokens[pos + 3]?.value === 'in'))) {
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
       advance(); // value
       advance(); // of
+      const keyStart = peek();
       const key = parsePrimary();
-      consume('KEYWORD', 'in');
-      const nameTok = consume('IDENT');
-      return { kind: 'dictValue', dictName: nameTok.value, key };
+      if (peek().type === 'KEYWORD' && peek().value === 'in') {
+        advance(); // in
+        return { kind: 'dictValue', ...parseMutationTarget(), key };
+      }
+      return { kind: 'field', ...asMutationTarget(key, keyStart), fieldName: 'value' };
     }
     if ((peek().type === 'IDENT' || peek().type === 'KEYWORD')
         && peek().value !== 'item'
-        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of'
-        && tokens[pos + 2]?.type === 'IDENT') {
+        && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'of') {
       const fieldTok = advance();
-      advance();
-      const targetTok = consume('IDENT');
-      return { kind: 'field', targetName: targetTok.value, fieldName: fieldTok.value };
+      advance(); // of
+      return { kind: 'field', ...parseMutationTarget(), fieldName: fieldTok.value };
     }
     const nameTok = consume('IDENT');
     return { kind: 'name', name: nameTok.value };
@@ -1362,18 +1401,18 @@ export function parse(tokens: Token[], source?: string): Program {
     consume('KEYWORD', 'append');
     const value = parseExpression();
     consume('KEYWORD', 'to');
-    const nameTok = consume('IDENT');
+    const t = parseMutationTarget();
     consumeNewline();
-    return { type: 'AppendStatement', listName: nameTok.value, value };
+    return { type: 'AppendStatement', ...t, value };
   }
 
   function parsePrependStatement(): PrependStatement {
     consume('KEYWORD', 'prepend');
     const value = parseExpression();
     consume('KEYWORD', 'to');
-    const nameTok = consume('IDENT');
+    const t = parseMutationTarget();
     consumeNewline();
-    return { type: 'PrependStatement', listName: nameTok.value, value };
+    return { type: 'PrependStatement', ...t, value };
   }
 
   function parseInsertStatement(): InsertStatement {
@@ -1382,9 +1421,9 @@ export function parse(tokens: Token[], source?: string): Program {
     consume('KEYWORD', 'at');
     const index = parseExpression();
     consume('KEYWORD', 'in');
-    const nameTok = consume('IDENT');
+    const t = parseMutationTarget();
     consumeNewline();
-    return { type: 'InsertStatement', listName: nameTok.value, index, value };
+    return { type: 'InsertStatement', ...t, index, value };
   }
 
   function parseRemoveStatement(): RemoveItemStatement | RemoveValueStatement {
@@ -1395,15 +1434,15 @@ export function parse(tokens: Token[], source?: string): Program {
       advance();
       const index = parseExpression();
       consume('KEYWORD', 'from');
-      const nameTok = consume('IDENT');
+      const t = parseMutationTarget();
       consumeNewline();
-      return { type: 'RemoveItemStatement', listName: nameTok.value, index };
+      return { type: 'RemoveItemStatement', ...t, index };
     }
     const value = parseExpression();
     consume('KEYWORD', 'from');
-    const nameTok = consume('IDENT');
+    const t = parseMutationTarget();
     consumeNewline();
-    return { type: 'RemoveValueStatement', listName: nameTok.value, value };
+    return { type: 'RemoveValueStatement', ...t, value };
   }
 
   // `read file EXPR` — sugar for reading a text file. Assigns the

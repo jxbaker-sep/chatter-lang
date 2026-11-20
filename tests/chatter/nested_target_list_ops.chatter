@@ -1,0 +1,12 @@
+# Mutation statements accept nested targets like `item N of L`.
+constant grid is list of (list of 1, 2, 3), (list of 4, 5, 6)
+change item 2 of item 1 of grid to 20
+append 7 to item 2 of grid
+prepend 0 to item 1 of grid
+insert 99 at 2 in item 2 of grid
+remove item 1 from item 2 of grid
+say grid
+# The row is a reference: an alias sees the changes.
+constant row is item 1 of grid
+append 100 to item 1 of grid
+say row

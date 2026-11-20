@@ -151,25 +151,34 @@ export interface ChangeStatement {
   precall?: CallStatement | null;
 }
 
-export interface ChangeItemStatement {
+/**
+ * The collection being mutated by a mutation statement. Any expression that
+ * evaluates to a list / unique list / dictionary / mutable struct reference
+ * (most commonly a bare IdentifierExpression, but also e.g. `item 2 of grid`).
+ * `targetText` is the target's source text, used in error messages.
+ */
+export interface MutationTarget {
+  target: Expression;
+  targetText: string;
+}
+
+export interface ChangeItemStatement extends MutationTarget {
   type: 'ChangeItemStatement';
-  listName: string;
   index: Expression;
   value: Expression;
 }
 
-export interface ChangeFieldStatement {
+export interface ChangeFieldStatement extends MutationTarget {
   type: 'ChangeFieldStatement';
-  targetName: string;
   fieldName: string;
   value: Expression;
 }
 
 export type CompoundAssignTarget =
   | { kind: 'name'; name: string }
-  | { kind: 'listItem'; listName: string; index: Expression }
-  | { kind: 'dictValue'; dictName: string; key: Expression }
-  | { kind: 'field'; targetName: string; fieldName: string };
+  | ({ kind: 'listItem'; index: Expression } & MutationTarget)
+  | ({ kind: 'dictValue'; key: Expression } & MutationTarget)
+  | ({ kind: 'field'; fieldName: string } & MutationTarget);
 
 export interface CompoundAssignStatement {
   type: 'CompoundAssignStatement';
@@ -394,34 +403,29 @@ export interface FailStatement {
   messages: Expression[];
 }
 
-export interface AppendStatement {
+export interface AppendStatement extends MutationTarget {
   type: 'AppendStatement';
-  listName: string;
   value: Expression;
 }
 
-export interface PrependStatement {
+export interface PrependStatement extends MutationTarget {
   type: 'PrependStatement';
-  listName: string;
   value: Expression;
 }
 
-export interface InsertStatement {
+export interface InsertStatement extends MutationTarget {
   type: 'InsertStatement';
-  listName: string;
   index: Expression;
   value: Expression;
 }
 
-export interface RemoveItemStatement {
+export interface RemoveItemStatement extends MutationTarget {
   type: 'RemoveItemStatement';
-  listName: string;
   index: Expression;
 }
 
-export interface RemoveValueStatement {
+export interface RemoveValueStatement extends MutationTarget {
   type: 'RemoveValueStatement';
-  listName: string;
   value: Expression;
 }
 
@@ -448,9 +452,8 @@ export interface DictGetExpression {
   dict: Expression;
 }
 
-export interface DictSetStatement {
+export interface DictSetStatement extends MutationTarget {
   type: 'DictSetStatement';
-  dictName: string;
   key: Expression;
   value: Expression;
 }

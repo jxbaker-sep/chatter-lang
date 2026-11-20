@@ -1,0 +1,12 @@
+constant grid is list of (list of 1, 2), (list of 3, 4)
+add 10 to item 1 of item 2 of grid
+subtract 1 from item 2 of item 1 of grid
+multiply item 1 of item 1 of grid by 7
+divide item 2 of item 2 of grid by 2
+say grid
+repeat with r from 1 to length of grid
+    repeat with c from 1 to length of item r of grid
+        add r * c to item c of item r of grid
+    end repeat
+end repeat
+say grid

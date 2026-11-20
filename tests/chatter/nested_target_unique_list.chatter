@@ -1,0 +1,7 @@
+# `add` / `remove` on a unique list reached through a nested target.
+constant sets is list of (unique list of 1, 2), (unique list of 3)
+add 4 to item 2 of sets
+add 3 to item 2 of sets
+remove 1 from item 1 of sets
+remove 42 from item 1 of sets
+say sets

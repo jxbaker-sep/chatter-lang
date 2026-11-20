@@ -1,0 +1,7 @@
+# Outer `end` = length of the inner row; inner `end` = length of grid.
+constant grid is list of (list of 1, 2), (list of 3, 4, 5)
+change item end of item end of grid to 50
+change item end - 1 of item 1 of grid to 10
+add 1 to item end of item end of grid
+multiply item end of item 1 of grid by 3
+say grid

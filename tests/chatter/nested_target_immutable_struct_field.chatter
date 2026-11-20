@@ -1,0 +1,5 @@
+struct P
+    number x
+end struct
+constant ps is list of (make P with x 1)
+change x of item 1 of ps to 5

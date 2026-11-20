@@ -623,11 +623,11 @@ describe('Parser', () => {
 
     test('parses list mutation statements', () => {
       const ast = parseSource('append 1 to xs\nprepend 2 to xs\ninsert 3 at 1 in xs\nremove item 2 from xs\nchange item 1 of xs to 9');
-      expect(ast.body[0]).toMatchObject({ type: 'AppendStatement', listName: 'xs' });
-      expect(ast.body[1]).toMatchObject({ type: 'PrependStatement', listName: 'xs' });
-      expect(ast.body[2]).toMatchObject({ type: 'InsertStatement', listName: 'xs' });
-      expect(ast.body[3]).toMatchObject({ type: 'RemoveItemStatement', listName: 'xs' });
-      expect(ast.body[4]).toMatchObject({ type: 'ChangeItemStatement', listName: 'xs' });
+      expect(ast.body[0]).toMatchObject({ type: 'AppendStatement', target: { type: 'IdentifierExpression', name: 'xs' }, targetText: 'xs' });
+      expect(ast.body[1]).toMatchObject({ type: 'PrependStatement', target: { type: 'IdentifierExpression', name: 'xs' }, targetText: 'xs' });
+      expect(ast.body[2]).toMatchObject({ type: 'InsertStatement', target: { type: 'IdentifierExpression', name: 'xs' }, targetText: 'xs' });
+      expect(ast.body[3]).toMatchObject({ type: 'RemoveItemStatement', target: { type: 'IdentifierExpression', name: 'xs' }, targetText: 'xs' });
+      expect(ast.body[4]).toMatchObject({ type: 'ChangeItemStatement', target: { type: 'IdentifierExpression', name: 'xs' }, targetText: 'xs' });
     });
 
     test('parses repeat with x in L', () => {

@@ -1,0 +1,9 @@
+struct Holder
+    dictionary from string to number counts
+end struct
+constant h is make Holder with counts empty dictionary from string to number
+change value of "a" in counts of h to 1
+add 4 to value of "a" in counts of h
+change value of "b" in counts of h to 2
+remove "b" from counts of h
+say h

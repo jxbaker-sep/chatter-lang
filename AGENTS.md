@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1245 tests passing.
+1258 tests passing.
 
 ## Language spec (current)
 
@@ -122,6 +122,25 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - **Hybrid paren rule** for `and`/`or`: same-operator chains fine; mixing `and` with `or` at same level = compile error ("parentheses required"). `(a and b) or c` is OK. Parens reset context.
 - `it` — meta-syntactic var holding last statement's result. **Per-frame/function-scoped**. `say` does not touch it.
 - Parenthesised expressions allowed everywhere.
+
+### Mutation targets
+Every statement that mutates a collection or mutable struct in place accepts an arbitrary **primary expression** as its target, not just a bare name. This covers:
+- `change item N of TARGET to V`, `change FIELD of TARGET to V`, `change value of K in TARGET to V`
+- `append V to TARGET`, `prepend V to TARGET`, `insert V at N in TARGET`, `remove item N from TARGET`, `remove V from TARGET`
+- arithmetic sugar on a slot: `add/subtract/multiply/divide` with `item N of TARGET`, `value of K in TARGET`, `FIELD of TARGET`
+- `add V to SLOT` (unique-list insert) where SLOT is `item N of TARGET` / `value of K in TARGET` / `FIELD of TARGET`
+
+Examples: `change item 2 of item 1 of grid to "#"`, `append 7 to item 2 of grid`, `add 1 to n of item 2 of counters`, `append 2 to xs of bag`, `add "b" to tags of bag`.
+
+Rules:
+- TARGET is evaluated **exactly once**, before the index/key/value expressions (compiler emits a `_rep_*_mut_target_N` temp). Since lists, unique lists, dictionaries, and mutable structs are references, mutating the evaluated value mutates the original in place. No VM changes.
+- Bare-name rebinding (`change NAME to V`, `add V to NAME` on a number variable) stays name-only.
+- **Immutable structs are immutable only at their own level**: `change x of item 1 of points to 5` on an immutable struct is still a compile error, but a collection stored in an immutable struct's field may be mutated through it (`append 1 to xs of p`) — consistent with aliasing (`constant l is xs of p` / `append 1 to l`).
+- **`add` disambiguation**: `add V to SLOT` is arithmetic when SLOT's static type is `number`, a unique-list insert when it's a `unique list`, and a compile error (`'add' cannot insert into a list`) when it's a `list`. If SLOT's type can't be determined at compile time (e.g. its container's type is unknown) → compile error `cannot tell whether 'add' is arithmetic or a unique-list insert: the type of 'X' is not known at compile time`. This also applies when the container is a bare name of unknown type (previously deferred to runtime arithmetic).
+- `end` in index slots binds to the nearest index slot's target: in `change item end of item end of grid to v`, the outer `end` is the inner row's length and the inner `end` is `grid`'s length.
+- Error messages quote the target's source text (`Cannot append to 'item 1 of xs': not a list (type number)`).
+- Flow-narrowed optional names now work as mutation targets for every statement (previously only field mutation honoured narrowing).
+- AST: target-bearing statements extend `MutationTarget { target: Expression; targetText: string }` (replacing the old `listName` / `dictName` / `targetName` string fields). Compiler helper: `prepareMutationTarget`.
 
 ### Scoping
 - `constant` bindings are immutable; `variable` bindings are mutable but type-locked.
@@ -245,11 +264,12 @@ Errors: `end` outside an index slot → parse error (reserved keyword, unchanged
 - **Read ops (expressions)**:
   - `item N of L` — 1-indexed access; OOB / non-list / non-number index → runtime error. `N` may use the `end` index sentinel (see below).
   - `last item of L` — sugar for `item (length) of L`; empty → runtime error. (No `first item of L` sugar — use `item 1 of L`.)
+  - `items A to B of L` — inclusive slice; returns a fresh **copy** (a new list — mutating it does not affect `L`). `A > B` → empty list. Both bounds may use the `end` index sentinel (`items 3 to end - 3 of L`). Optional leading `the`. Parallel to `characters A to B of S`.
   - `length of L` — returns number.
   - `L is empty` / `L is not empty` — polymorphic with string; same semantics (and same compile/runtime checks) as the string form.
   - `L contains V` — binary predicate at equality precedence (same level as `is`); left-associative.
   - `of` on the right-hand side binds tight — `item 3 of L + 1` means `(item 3 of L) + 1`.
-- **Mutation statements** (emit compile error for non-list / non-existent bindings):
+- **Mutation statements** (emit compile error for non-list / non-existent bindings). `NAME` in these forms may be any **mutation target** — see "Mutation targets" below:
   - `append EXPR to NAME`
   - `prepend EXPR to NAME`
   - `insert EXPR at EXPR in NAME` (position 1..length+1; length+1 == append)
@@ -420,7 +440,7 @@ An **optional** wraps any type T as `optional T` — a value that is either pres
 A **dictionary** is a hash-backed key→value map spelled `dictionary from K to V`. Like lists and unique lists, dictionaries are mutable references; assignment, parameter passing, and returning all alias the same underlying storage. Iteration yields entries in insertion order (first-set-wins; overwriting a key keeps its original position).
 
 - **Type spelling**: `dictionary from K to V`.
-  - K: scalar (`number` / `string` / `boolean`) or immutable struct type — mutable structs are rejected as keys.
+  - K: scalar (`number` / `string` / `boolean`) or immutable struct type — mutable structs are rejected as keys. (**Undocumented-until-now quirk:** the compiler currently also accepts `list of T` keys, and immutable structs with list fields; keys are hashed structurally by content at insertion time. Mutating such a key's list after insertion leaves a stale hash — undefined behaviour. Open question whether to reject list keys at compile time.)
   - V: scalar, immutable struct, or mutable struct. **No nested collections** in v1 — `dictionary from string to list of T`, `dictionary from string to dictionary from …`, `list of dictionary …`, etc. all → parse error (mirrors the no-nested-lists rule).
 - **Literals**:
   - `empty dictionary from K to V` — empty literal; both types required.
