@@ -49,3 +49,9 @@ export function enlist over T takes unique list of T input returns list of T is
   end repeat
   return output
 end function
+
+export function add_range over T takes list of T origin to list of T destination is
+  repeat with n in origin
+    append n to destination
+  end repeat
+end function

@@ -1,0 +1,6 @@
+# The destination is mutated in place, so aliases see the new items.
+use add_range from "std:list"
+constant destination is list of 1
+constant alias is destination
+add_range (list of 2) to destination
+say alias

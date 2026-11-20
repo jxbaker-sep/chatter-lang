@@ -1,0 +1,7 @@
+use add_range from "std:list"
+struct P
+    number x
+end struct
+constant destination is list of (make P with x 1)
+add_range (list of (make P with x 2)) to destination
+say destination

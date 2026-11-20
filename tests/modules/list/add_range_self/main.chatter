@@ -1,0 +1,6 @@
+# Appending a list to itself copies its original contents once (the loop
+# bound is computed before any appends happen).
+use add_range from "std:list"
+constant xs is list of 1, 2
+add_range xs to xs
+say xs

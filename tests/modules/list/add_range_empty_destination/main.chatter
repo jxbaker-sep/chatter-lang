@@ -1,0 +1,4 @@
+use add_range from "std:list"
+constant destination is empty list of number
+add_range (list of 5, 6) to destination
+say destination

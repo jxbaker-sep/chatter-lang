@@ -1,0 +1,6 @@
+use add_range from "std:list"
+constant destination is list of 1, 2
+constant origin is list of 3, 4
+add_range origin to destination
+say destination
+say origin
