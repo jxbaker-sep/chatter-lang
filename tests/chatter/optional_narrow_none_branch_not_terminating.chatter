@@ -1,0 +1,9 @@
+# `if x is none` whose body falls through must NOT narrow x afterwards.
+function f takes optional number x is
+    if x is none
+        say "missing"
+    end if
+    say x + 1
+end function
+
+f 5

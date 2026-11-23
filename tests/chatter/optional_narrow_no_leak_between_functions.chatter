@@ -1,0 +1,20 @@
+# An early-exit guard in one function must not narrow a same-named
+# parameter in a later function.
+function use_guard takes optional number x is
+    if x is none
+        return
+    end if
+    say x
+end function
+
+function other takes optional number x is
+    if x is not none
+        say x
+    else
+        say "none"
+    end if
+end function
+
+use_guard 6
+other 5
+other none

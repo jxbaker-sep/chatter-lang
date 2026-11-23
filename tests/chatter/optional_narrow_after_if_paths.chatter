@@ -1,0 +1,35 @@
+# Narrowing after an `if` holds when every path reaching the next line
+# proves x present.
+function guard_with_else_if takes optional number x with boolean loud is
+    if x is none
+        return
+    else if loud
+        say "loud"
+    end if
+    say x + 1
+end function
+
+function guard_with_else takes optional number x is
+    if x is none
+        fail "missing"
+    else
+        say "present"
+    end if
+    say x + 2
+end function
+
+function expect_in_both_arms takes optional number x with boolean flag is
+    if flag
+        expect x is not none
+    else
+        expect x is not none, "x missing"
+    end if
+    say x + 3
+end function
+
+guard_with_else_if 1 with true
+guard_with_else_if 1 with false
+guard_with_else_if none with true
+guard_with_else 1
+expect_in_both_arms 1 with true
+expect_in_both_arms 1 with false

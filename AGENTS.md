@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1275 tests passing.
+1279 tests passing.
 
 ## Language spec (current)
 
@@ -421,6 +421,7 @@ An **optional** wraps any type T as `optional T` — a value that is either pres
 - `expect x is not none` — x narrowed for rest of block.
 - `it` can also be narrowed via the same patterns using the `__it__` key.
 - Narrowing is invalidated by `change x to ...` on the same variable.
+- **Soundness rules**: narrowing after an `if` is kept only when it holds on *every* path that reaches the next statement (each arm that does not end in `return`/`fail`/etc., plus the no-match fallthrough when there is no `else`). So `if x is none` + a body that falls through does NOT narrow `x` afterwards. Each function body starts with an empty narrowing stack — narrowings never leak between functions or from module top level into a function.
 
 **Equality semantics**:
 - `opt is none` / `opt is not none` — tests presence; emits `IS_NONE` / `IS_NONE NOT`.

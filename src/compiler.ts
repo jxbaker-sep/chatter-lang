@@ -2312,9 +2312,13 @@ export class Compiler {
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
     const prevItType = this.currentItType;
+    const prevNarrowingStack = this.narrowingStack;
     this.currentFuncReturnType = stmt.returnType === null ? null : this.fromAnnotation(stmt.returnType);
     this.currentFuncName = stmt.name;
     this.currentItType = null;  // `it` is per-frame; unknown at function entry
+    // Each function body starts with no narrowings: facts proven in another
+    // function (or at module top level) say nothing about this frame's values.
+    this.narrowingStack = [new Map()];
     try {
       for (const bodyStmt of stmt.body) {
         this.compileStatement(bodyStmt, instructions, funcBindings);
@@ -2323,6 +2327,7 @@ export class Compiler {
       this.currentFuncReturnType = prevReturnType;
       this.currentFuncName = prevFuncName;
       this.currentItType = prevItType;
+      this.narrowingStack = prevNarrowingStack;
     }
     if (stmt.returnType === null) {
       // Void: implicit `return 0` so the call site has a value to DROP.
@@ -2756,6 +2761,10 @@ export class Compiler {
     const itTypeBefore = this.currentItType;
     const branchEndItTypes: (ChatterType | null)[] = [];
     const fallthroughNarrowings = new Map<string, ChatterType>();
+    // Narrowings in force at the end of every arm that can fall out of the
+    // `if` (i.e. does not end in return/fail/etc). Code after the `if` may
+    // only assume what holds on *all* paths that reach it.
+    const exitNarrowings: Map<string, ChatterType>[] = [];
 
     for (const branch of stmt.branches) {
       const ct = this.staticType(branch.condition, bindings);
@@ -2783,6 +2792,7 @@ export class Compiler {
         this.compileStatement(s, out, branchScope);
         }
         branchEndItTypes.push(this.currentItType);
+        if (!bodyTerminates) exitNarrowings.push(new Map(this.currentNarrowings()));
       } finally {
         this.popNarrowingScope();
       }
@@ -2808,14 +2818,15 @@ export class Compiler {
         this.compileStatement(s, out, elseScope);
         }
         branchEndItTypes.push(this.currentItType);
+        if (!blockTerminates(stmt.elseBody)) exitNarrowings.push(new Map(this.currentNarrowings()));
       } finally {
         this.popNarrowingScope();
       }
-      // Clear fallthrough narrowings since both paths are covered
-      fallthroughNarrowings.clear();
     } else {
-      // No else: fall-through carries the pre-statement `it` type.
+      // No else: fall-through carries the pre-statement `it` type, and the
+      // "no condition matched" path reaches the code after the `if`.
       branchEndItTypes.push(itTypeBefore);
+      exitNarrowings.push(new Map([...this.currentNarrowings(), ...fallthroughNarrowings]));
     }
 
     const endIdx = out.length;
@@ -2825,9 +2836,17 @@ export class Compiler {
 
     this.currentItType = this.mergeItTypes(branchEndItTypes);
     
-    // Persist narrowings from fallthrough into the parent scope (when if-body terminated and no else)
-    for (const [name, type] of fallthroughNarrowings) {
-      this.currentNarrowings().set(name, type);
+    // Persist into the enclosing scope only the narrowings that hold on every
+    // path reaching the code after the `if`. (If no path reaches it, the
+    // following code is unreachable and nothing needs to be added.)
+    if (exitNarrowings.length > 0) {
+      const [first, ...rest] = exitNarrowings;
+      for (const [name, type] of first) {
+        const typeStr = typeToString(type);
+        if (rest.every(m => { const t = m.get(name); return t !== undefined && typeToString(t) === typeStr; })) {
+          this.currentNarrowings().set(name, type);
+        }
+      }
     }
   }
 

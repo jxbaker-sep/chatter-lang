@@ -1,0 +1,12 @@
+# A non-terminating later arm that reassigns x breaks the narrowing.
+function f takes optional number start with boolean reset is
+    variable x is start
+    if x is none
+        return
+    else if reset
+        change x to start
+    end if
+    say x + 1
+end function
+
+f 5 with false
