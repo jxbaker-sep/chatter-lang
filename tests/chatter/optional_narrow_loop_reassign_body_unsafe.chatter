@@ -1,0 +1,14 @@
+# Inside a loop that reassigns `cur`, the pre-loop narrowing is gone,
+# so using it unchecked in the body is a compile error.
+function f takes optional number start is
+    variable cur is start
+    if cur is none
+        return
+    end if
+    repeat 2 times
+        say cur + 1
+        change cur to start
+    end repeat
+end function
+
+f 1

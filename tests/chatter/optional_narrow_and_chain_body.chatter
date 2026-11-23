@@ -1,0 +1,14 @@
+# `x is not none` anywhere in an `and` chain narrows x in the if / while body.
+function f takes optional number x with number limit is
+    if limit is greater than 0 and x is not none
+        say x + 1
+    end if
+    variable n is x
+    repeat while n is not none and n is less than limit
+        say n
+        change n to n + 1
+    end repeat
+end function
+
+f 1 with 3
+f none with 3

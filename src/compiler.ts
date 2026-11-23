@@ -236,6 +236,24 @@ export interface CompiledModule {
   warnings: CompileWarning[];
 }
 
+/**
+ * Names reassigned by `change NAME to ...` anywhere inside `stmts`, including
+ * nested if/repeat bodies. Used to drop optional narrowings that a loop body
+ * could invalidate on a later iteration.
+ */
+function collectChangedNames(stmts: readonly unknown[]): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) { for (const n of node) visit(n); return; }
+    if (node === null || typeof node !== 'object') return;
+    const rec = node as Record<string, unknown>;
+    if (rec.type === 'ChangeStatement' && typeof rec.name === 'string') names.add(rec.name);
+    for (const v of Object.values(rec)) visit(v);
+  };
+  visit(stmts);
+  return names;
+}
+
 export class Compiler {
   private functions = new Map<string, FunctionDef>();
   // Per-function set of locally-bound mangled names (params + block-scope
@@ -1579,6 +1597,26 @@ export class Compiler {
     return this.staticType(expr, bindings);
   }
 
+  /**
+   * Optionals proven present whenever `cond` evaluates to true: a bare
+   * `x is not none`, or any such check among the operands of an `and` chain
+   * (`x is not none and P`, `P and x is not none and Q`, ...).
+   */
+  private narrowingsWhenTrue(cond: Expression, bindings: Scope): Map<string, ChatterType> {
+    const result = new Map<string, ChatterType>();
+    const visit = (e: Expression): void => {
+      if (e.type === 'BinaryExpression' && e.operator === 'and') {
+        visit(e.left);
+        visit(e.right);
+        return;
+      }
+      const d = this.detectOptionalNoneCheck(e, bindings);
+      if (d && !d.isNoneCheck) result.set(d.name, d.innerType);
+    };
+    visit(cond);
+    return result;
+  }
+
   private detectOptionalNoneCheck(cond: Expression, bindings: Scope): { name: string; isNoneCheck: boolean; innerType: ChatterType } | null {
     if (cond.type !== 'BinaryExpression') return null;
     if (cond.operator !== '==' && cond.operator !== '!=') return null;
@@ -2780,8 +2818,8 @@ export class Compiler {
 
       this.currentItType = itTypeBefore;
       const branchNarrowings = new Map(fallthroughNarrowings);
-      // For `x is not none`, narrow x in the if-body
-      if (detected && !detected.isNoneCheck) branchNarrowings.set(detected.name, detected.innerType);
+      // For `x is not none` (alone or anywhere in an `and` chain), narrow x in the if-body
+      for (const [n, t] of this.narrowingsWhenTrue(branch.condition, bindings)) branchNarrowings.set(n, t);
       // For `x is none`, narrow x in the else/fallthrough (inverse logic)
       // But if the body terminates, this narrowing applies to what comes after the if
       this.pushNarrowingScope(branchNarrowings);
@@ -2855,6 +2893,10 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
+    // A variable reassigned anywhere in the loop body may hold a different
+    // value on the next iteration (or after the loop), so a narrowing proven
+    // before the loop cannot be trusted in the condition, the body, or after.
+    for (const name of collectChangedNames(stmt.body)) this.invalidateNarrowing(name);
     if (stmt.kind === 'times') {
       // Static type check on count.
       const countT = this.staticType(stmt.count, bindings);
@@ -3175,16 +3217,15 @@ export class Compiler {
     const frame = { continueJumps: [] as number[], exitJumps: [] as number[] };
     this.loopStack.push(frame);
     const bodyScope = new Scope(bindings);
-    const detected = this.detectOptionalNoneCheck(stmt.condition, bindings);
-    if (detected && !detected.isNoneCheck) {
-      this.pushNarrowingScope(new Map([[detected.name, detected.innerType]]));
-    }
+    // Optionals proven present by the condition (alone or in an `and` chain)
+    // are narrowed in the body.
+    this.pushNarrowingScope(this.narrowingsWhenTrue(stmt.condition, bindings));
     try {
       for (const s of stmt.body) {
         this.compileStatement(s, out, bodyScope);
       }
     } finally {
-      if (detected && !detected.isNoneCheck) this.popNarrowingScope();
+      this.popNarrowingScope();
     }
     this.loopStack.pop();
     const continueIdx = out.length;

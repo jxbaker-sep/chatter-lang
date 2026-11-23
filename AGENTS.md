@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1279 tests passing.
+1282 tests passing.
 
 ## Language spec (current)
 
@@ -417,10 +417,11 @@ An **optional** wraps any type T as `optional T` — a value that is either pres
 - `if x is none ... else BODY` — x narrowed to T in else body.
 - `if x is none; return; end if; ...` — after the if (none-branch terminates), x narrowed for rest of block.
 - `if x is not none and PREDICATE` — x narrowed inside PREDICATE RHS.
+- `x is not none` appearing **anywhere in an `and` chain** that forms an `if` / `else if` / `repeat while` condition narrows x in that body (e.g. `repeat while cur is not none and value of cur is less than n`).
 - `repeat while x is not none ... end repeat` — x narrowed to T in the loop body.
 - `expect x is not none` — x narrowed for rest of block.
 - `it` can also be narrowed via the same patterns using the `__it__` key.
-- Narrowing is invalidated by `change x to ...` on the same variable.
+- Narrowing is invalidated by `change x to ...` on the same variable. A `change x` **anywhere inside a `repeat` body** (including nested blocks) drops x's narrowing before the loop's condition and body are compiled, and it stays dropped after the loop.
 - **Soundness rules**: narrowing after an `if` is kept only when it holds on *every* path that reaches the next statement (each arm that does not end in `return`/`fail`/etc., plus the no-match fallthrough when there is no `else`). So `if x is none` + a body that falls through does NOT narrow `x` afterwards. Each function body starts with an empty narrowing stack — narrowings never leak between functions or from module top level into a function.
 
 **Equality semantics**:
