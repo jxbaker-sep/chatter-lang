@@ -64,11 +64,11 @@
       "patterns": [
         {
           "name": "keyword.control.chatter",
-          "match": "\\b(if|else|repeat|times|while|end|return|expect|exit\\s+repeat|next\\s+repeat)\\b"
+          "match": "\\b(if|else|repeat|times|while|forever|end|return|expect|fail|exit\\s+repeat|next\\s+repeat)\\b"
         },
         {
           "name": "keyword.control.loop.chatter",
-          "match": "\\b(with|from|to|in|by|of)\\b"
+          "match": "\\b(with|from|down|to|in|by|of)\\b"
         },
         {
           "name": "keyword.control.hof.chatter",
