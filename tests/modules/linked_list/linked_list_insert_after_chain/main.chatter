@@ -1,0 +1,12 @@
+use make_linked_list_with, insert_after, head, to_list from "std:linked_list"
+constant ll is the result of make_linked_list_with 1
+constant h is the result of head ll
+if h is not none
+    variable cursor is h
+    repeat with i from 2 to 5
+        change cursor to the result of insert_after ll after cursor with i
+    end repeat
+end if
+constant values is the result of to_list ll
+say values
+say length of ll

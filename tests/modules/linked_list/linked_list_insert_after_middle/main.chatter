@@ -1,0 +1,12 @@
+use make_linked_list_with, append, insert_after, head, size_of, to_list from "std:linked_list"
+constant ll is the result of make_linked_list_with 10
+append ll with 30
+constant h is the result of head ll
+if h is not none
+    constant n is the result of insert_after ll after h with 20
+    say value of n
+end if
+constant size is the result of size_of ll
+say size
+constant values is the result of to_list ll
+say values

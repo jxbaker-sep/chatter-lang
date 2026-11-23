@@ -1,0 +1,16 @@
+use make_linked_list_with, append, insert_after, head, size_of, to_list, remove_last from "std:linked_list"
+constant ll is the result of make_linked_list_with "a"
+constant h is the result of head ll
+if h is not none
+    constant n is the result of insert_after ll after h with "b"
+    say tail of ll is n
+end if
+append ll with "c"
+constant before is the result of to_list ll
+say before
+remove_last ll
+remove_last ll
+constant after_removal is the result of to_list ll
+say after_removal
+constant size is the result of size_of ll
+say size

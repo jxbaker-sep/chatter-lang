@@ -56,6 +56,19 @@ export function append over T takes LinkedList of T linked with T value is
     add 1 to length of linked
 end function
 
+# insert_after: insert value immediately after node in place and return the
+# new node. O(1). The caller must ensure node belongs to linked; this is not
+# checked (doing so would be O(n)). Inserting after the tail updates tail.
+export function insert_after over T takes LinkedList of T linked after Node of T node with T value returns Node of T is
+    constant new_node is make Node with value value, next next of node
+    change next of node to new_node
+    if next of new_node is none
+        change tail of linked to new_node
+    end if
+    add 1 to length of linked
+    return new_node
+end function
+
 # size_of: return the cached number of elements.
 # O(1).
 export function size_of over T takes LinkedList of T linked returns number is
