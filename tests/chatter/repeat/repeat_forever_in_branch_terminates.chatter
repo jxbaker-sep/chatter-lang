@@ -1,0 +1,18 @@
+# A forever loop as the last statement of an if/else arm terminates that arm.
+function f takes number n returns number is
+    if n is less than 0
+        return -1
+    else
+        variable i is 0
+        repeat forever
+            add 1 to i
+            if i is n
+                return i
+            end if
+        end repeat
+    end if
+end function
+constant a is the result of f -5
+say a
+constant b is the result of f 7
+say b

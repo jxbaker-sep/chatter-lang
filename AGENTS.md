@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1266 tests passing.
+1272 tests passing.
 
 ## Language spec (current)
 
@@ -65,8 +65,10 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 
   **Path-termination analyzer** (`statementTerminates` / `blockTerminates` in `compiler.ts`):
   - `return` terminates.
+  - `fail` terminates.
   - `if` with else terminates iff every branch (all `else if` + `else`) terminates; missing else never terminates.
-  - `repeat` bodies never contribute termination (loop body may run zero times).
+  - `repeat forever` terminates iff its body contains no `exit repeat` targeting it (searched through `if` / `else if` / `else` arms, but not into nested `repeat` bodies, whose `exit repeat` only leaves the inner loop). So a typed function may end in a `repeat forever` whose only ways out are `return` / `fail`.
+  - All other `repeat` forms never contribute termination (loop body may run zero times).
   - All other statements: not terminating.
 - `return expr` / `return` — `return expr` in typed fns, bare `return` in void fns only. Multiple returns allowed.
 - **`the result of CALL` sugar** — appears ONLY at the top of the RHS of these four host statements (not as an expression, never nested, never inside an arg position):
@@ -80,6 +82,8 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `NAME firstArg LABEL1 val1 LABEL2 val2` — function call: first arg positional, rest selected by the declared separator labels.
 - `if cond ... [else if cond ... ]* [else ...] end if` — the closing `end if` qualifier is **required** (bare `end` is a parse error).
 - `repeat N times ... end [repeat]` — run body N times. N must be a number; N=0 = 0 iterations; N<0 = runtime error.
+- `repeat forever ... end repeat` — unconditional loop; leave it with `exit repeat`, `return`, or `fail`. `next repeat` jumps back to the top. `forever` is a reserved keyword. See the path-termination analyzer for how it interacts with missing-return checks.
+- `repeat with i from A down to B ... end repeat` — inclusive descending range loop (`i` = A, A−1, …, B). If A < B, zero iterations. `by STEP` is **not** supported with `down to` in v1 (compile error `does not support 'by' in v1`). Same scoping rules as the ascending form. `down` is a reserved keyword.
 - `repeat with i from A to B ... end [repeat]` — inclusive range loop. `i` is block-scoped (mutable across iterations, invisible after loop). `i` cannot shadow outer bindings (compile error). `constant i is ...` inside body also a compile error (duplicate binding). If A > B, zero iterations.
 - `repeat while cond ... end [repeat]` — pre-test while loop. `cond` must be a boolean (runtime error otherwise). Note: without mutable state, rarely useful for now.
 - All three variants require `end repeat` as the closer (bare `end` is a parse error).
@@ -156,7 +160,7 @@ Rules:
 Note: `by` is reserved (it has special meaning in `multiply X by Y`, `divide X by Y`, `sort NAME by KEY`, and `repeat with i from A to B by STEP`) but is **not** a stop keyword — it may be used as a function parameter / call-site separator label (e.g. `function multiply_complex takes ComplexNumber lhs by ComplexNumber rhs ...`). The four constructs above each begin with their own reserved keyword (`multiply` / `divide` / `sort` / `repeat`), so dere is no parse-time ambiguity.
 
 ### Keywords reserved for loop control
-`exit`, `next` (each only meaningful in the two-word sequences `exit repeat` / `next repeat`; bare `exit` / `next` is a parse error).
+`exit`, `next` (each only meaningful in the two-word sequences `exit repeat` / `next repeat`; bare `exit` / `next` is a parse error). `forever` (in `repeat forever`) and `down` (in `repeat with i from A down to B`) are also reserved.
 
 ### Keywords reserved for lists
 `list`, `of`, `empty`, `unique`, `item`, `last`, `length`, `contains`, `append`, `prepend`, `insert`, `in`, `remove`
@@ -689,7 +693,7 @@ Existing golden cases:
 ### Explicitly queued
 - **Path C**: static type checker. Would catch `5 is "hello"` at compile time, validate param types, etc. Currently Path A (runtime checks). Deferred.
 - **Fractional numbers**: planned. `number` is currently integer-only (safe range ±(2^53 − 1)).
-- **Loop extensions (deferred)**: reverse direction (`down to`), `repeat until cond`. Base `repeat` loops (times / range / while / with-in) and the `by STEP` clause on range-form are implemented; early exit (`exit repeat` / `next repeat`) is implemented.
+- **Loop extensions (deferred)**: `repeat until cond`, `by STEP` on `down to` ranges. Base `repeat` loops (times / range / while / with-in / forever), descending ranges (`down to`), the `by STEP` clause on ascending ranges, and early exit (`exit repeat` / `next repeat`) are implemented.
 - **Chatter-native test framework**: write tests in Chatter (`assert x is 10`) once assertions exist.
 - **Maps**: delivered as `dictionary from K to V` (see "Dictionaries (v1)" above). Keys can be scalar or struct; values can be scalar or struct (no nested collections in v1). Reference-equality only; structural equality is future work.
 - **Sets**: delivered as `unique list of T` (see "Unique lists (v1)" above).

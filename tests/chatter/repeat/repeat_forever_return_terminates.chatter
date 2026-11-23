@@ -1,0 +1,13 @@
+# A `repeat forever` with no `exit repeat` never falls through, so a typed
+# function needs no return after it.
+function first_big takes list of number xs returns number is
+    variable i is 1
+    repeat forever
+        if item i of xs is greater than 10
+            return item i of xs
+        end if
+        add 1 to i
+    end repeat
+end function
+constant r is the result of first_big list of 1, 50, 3
+say r

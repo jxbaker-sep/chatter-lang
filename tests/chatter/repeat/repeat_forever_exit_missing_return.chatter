@@ -1,0 +1,10 @@
+# `exit repeat` can leave the loop, so the function can fall off the end.
+function f takes number n returns number is
+    repeat forever
+        if n is 0
+            exit repeat
+        end if
+        return n
+    end repeat
+end function
+constant r is the result of f 1

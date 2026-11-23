@@ -1,0 +1,16 @@
+# The inner `exit repeat` only leaves the inner loop; the outer forever loop
+# still never falls through.
+function f takes number n returns number is
+    variable count is 0
+    repeat forever
+        repeat forever
+            add 1 to count
+            exit repeat
+        end repeat
+        if count is n
+            return count
+        end if
+    end repeat
+end function
+constant r is the result of f 3
+say r

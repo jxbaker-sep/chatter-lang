@@ -1,0 +1,14 @@
+function first_big takes list of number xs returns number is
+    variable i is 1
+    repeat forever
+        if i is greater than length of xs
+            fail "nothing big"
+        end if
+        if item i of xs is greater than 10
+            return item i of xs
+        end if
+        add 1 to i
+    end repeat
+end function
+constant r is the result of first_big list of 1, 2
+say r

@@ -4930,6 +4930,29 @@ export function statementTerminates(stmt: Statement): boolean {
     if (!blockTerminates(stmt.elseBody)) return false;
     return true;
   }
+  // `repeat forever` never falls through unless an `exit repeat` breaks out
+  // of this particular loop.
+  if (stmt.type === 'RepeatStatement' && stmt.kind === 'forever') {
+    return !containsExitForEnclosingLoop(stmt.body);
+  }
+  return false;
+}
+
+/**
+ * True if `stmts` contains an `exit repeat` that targets the loop whose body
+ * this is. `if` / `else` arms are searched; nested `repeat` bodies are not,
+ * because an `exit repeat` there only leaves the inner loop.
+ */
+function containsExitForEnclosingLoop(stmts: Statement[]): boolean {
+  for (const s of stmts) {
+    if (s.type === 'ExitRepeatStatement') return true;
+    if (s.type === 'IfStatement') {
+      for (const b of s.branches) {
+        if (containsExitForEnclosingLoop(b.body)) return true;
+      }
+      if (s.elseBody && containsExitForEnclosingLoop(s.elseBody)) return true;
+    }
+  }
   return false;
 }
 

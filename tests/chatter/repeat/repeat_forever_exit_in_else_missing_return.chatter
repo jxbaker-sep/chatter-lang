@@ -1,0 +1,10 @@
+function f takes number n returns number is
+    repeat forever
+        if n is 0
+            return 0
+        else
+            exit repeat
+        end if
+    end repeat
+end function
+constant r is the result of f 1
