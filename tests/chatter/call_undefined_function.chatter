@@ -1,0 +1,6 @@
+# Calling an unknown function is a compile error, even when the call is
+# never reached at runtime.
+say "never printed"
+if false
+    no_such_function 5 from 6
+end if

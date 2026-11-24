@@ -1,0 +1,6 @@
+export function helper is
+    say "helper"
+end function
+export function other is
+    say "other"
+end function

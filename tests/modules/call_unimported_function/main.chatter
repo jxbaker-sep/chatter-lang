@@ -1,0 +1,5 @@
+# A function the module exports but that was not listed in the use is
+# undefined here (compile error with an import hint).
+use helper from "lib"
+helper
+other

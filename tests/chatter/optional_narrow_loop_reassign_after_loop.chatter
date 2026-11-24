@@ -1,0 +1,18 @@
+# A loop that reassigns x cancels a pre-loop narrowing of x for code after
+# the loop too, so checking x against none afterwards is legal (and needed).
+function f takes optional number start is
+    variable x is start
+    if x is none
+        return
+    end if
+    repeat while x is not none and x is less than 3
+        change x to x + 1
+    end repeat
+    if x is none
+        say "none"
+    else
+        say x
+    end if
+end function
+
+f 1

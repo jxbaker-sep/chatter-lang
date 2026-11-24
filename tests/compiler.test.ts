@@ -127,13 +127,15 @@ describe('Compiler', () => {
 
   test('function body uses LOAD_IT for `it`', () => {
     const src = [
+      'function double takes number n returns number is',
+      '    return n * 2',
+      'end function',
       'function quadruple takes number a returns number is',
       '    double a',
       '    double it',
       '    return it',
       'end function',
     ].join('\n');
-    // quadruple calls an unknown function 'double', but compiler still emits LOAD_IT
     const bc = compileSource(src);
     const fn = bc.functions.get('quadruple')!;
     expect(fn.instructions.filter(i => i.op === 'LOAD_IT').length).toBeGreaterThanOrEqual(2);

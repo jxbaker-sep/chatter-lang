@@ -1355,6 +1355,12 @@ export class Compiler {
         // Loop body may run zero times → merge the pre-loop `it` type with
         // whatever the body ends with.
         const itTypeBefore = this.currentItType;
+        // A variable reassigned anywhere in the loop body may hold a
+        // different value on the next iteration or after the loop, so a
+        // narrowing proven before the loop can't be trusted in the condition,
+        // the body, or after it. Invalidate in the *enclosing* map, before
+        // pushing the loop's own scope, so the effect survives the loop.
+        for (const name of collectChangedNames(stmt.body)) this.invalidateNarrowing(name);
         // The loop body may run zero times, so narrowings it establishes
         // must not outlive it.
         this.pushNarrowingScope(new Map());
@@ -2863,10 +2869,13 @@ export class Compiler {
 
       this.emit(out, { op: 'CALL', name: stmt.name, argCount: sig.length });
     } else {
-      for (const arg of stmt.args) {
-        this.compileExpr(arg.value, out, bindings);
-      }
-      this.emit(out, { op: 'CALL', name: stmt.name, argCount: stmt.args.length });
+      // Every callable name (local function, import, generic) is known at
+      // compile time, so an unknown name is a compile error rather than a
+      // runtime failure when the call is first reached.
+      throw new CompileError(
+        `Undefined function: '${stmt.name}' (is it missing from a 'use ... from' import?)`,
+        this.currentLoc,
+      );
     }
     this.calledFunctions.add(stmt.name);
   }
@@ -2978,10 +2987,6 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
-    // A variable reassigned anywhere in the loop body may hold a different
-    // value on the next iteration (or after the loop), so a narrowing proven
-    // before the loop cannot be trusted in the condition, the body, or after.
-    for (const name of collectChangedNames(stmt.body)) this.invalidateNarrowing(name);
     if (stmt.kind === 'times') {
       // Static type check on count.
       const countT = this.staticType(stmt.count, bindings);
