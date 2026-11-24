@@ -1,0 +1,30 @@
+# The optional cosmetic `the` works in front of statement targets too.
+mutable struct Ghost
+    number Direction
+    number Collisions
+end struct
+
+constant g is make Ghost with Direction 1, Collisions 10
+change the Direction of g to 3
+add 5 to the Collisions of g
+subtract 1 from the Collisions of g
+multiply the Direction of g by 2
+divide the Collisions of g by 2
+say g
+
+constant xs is list of 1, 2, 3
+change the item 1 of xs to 10
+add 1 to the item 2 of xs
+remove the item 3 from xs
+say xs
+
+constant d is dictionary "a" to 1
+change the value of "a" in d to 5
+add 2 to the value of "a" in d
+say d
+
+# `the` as a plain variable name still works.
+variable the is 1
+change the to 2
+add 3 to the
+say the

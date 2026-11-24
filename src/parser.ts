@@ -450,6 +450,23 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'BinaryExpression', operator: op, left, right } as BinaryExpression;
   }
 
+  // Cosmetic `the` at the start of a statement's slot target:
+  // `change the X of p to …`, `change the item 2 of xs to …`,
+  // `add 1 to the X of p`, `remove the item 1 from xs`, … Only skipped when
+  // what follows is `item …` or `WORD of …`, so a variable literally named
+  // `the` (`change the to 5`) still works.
+  function consumeOptionalTheBeforeTarget(): void {
+    const t0 = tokens[pos];
+    if (!(t0?.type === 'IDENT' && t0.value === 'the')) return;
+    const t1 = tokens[pos + 1];
+    const t2 = tokens[pos + 2];
+    if (t1?.type === 'KEYWORD' && t1.value === 'item') { advance(); return; }
+    if ((t1?.type === 'IDENT' || t1?.type === 'KEYWORD')
+        && t2?.type === 'KEYWORD' && t2.value === 'of') {
+      advance();
+    }
+  }
+
   function consumeOptionalTheBeforeNoun(): void {
     // Cosmetic article `the` accepted in front of any noun-phrase form
     // (length/item/last/character/characters/lines of …, code of …,
@@ -634,6 +651,7 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseChangeStatement(): ChangeStatement | ChangeItemStatement | ChangeFieldStatement | DictSetStatement {
     consume('KEYWORD', 'change');
+    consumeOptionalTheBeforeTarget();
     // `change item EXPR of TARGET to EXPR` — list element assignment
     if (peek().type === 'KEYWORD' && peek().value === 'item') {
       advance(); // item
@@ -695,6 +713,7 @@ export function parse(tokens: Token[], source?: string): Program {
   // Parses a compound-assign target: bare IDENT, `item EXPR of IDENT`, or `value of EXPR in IDENT`.
   // Caller has already consumed any leading word (e.g. `to` / `from`) preceding this target slot.
   function parseCompoundAssignTarget(): import('./ast').CompoundAssignTarget {
+    consumeOptionalTheBeforeTarget();
     if (peek().type === 'KEYWORD' && peek().value === 'item') {
       advance(); // item
       indexSlotDepth++;
@@ -1451,6 +1470,7 @@ export function parse(tokens: Token[], source?: string): Program {
 
   function parseRemoveStatement(): RemoveItemStatement | RemoveValueStatement {
     consume('KEYWORD', 'remove');
+    consumeOptionalTheBeforeTarget();
     // `remove item N from NAME` — list element-by-index removal (existing).
     // `remove EXPR from NAME` — unique-list value removal (new).
     if (peek().type === 'KEYWORD' && peek().value === 'item') {
