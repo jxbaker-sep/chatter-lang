@@ -1,1 +1,1 @@
-ERROR: 'empty N' requires a list, unique list, or dictionary type, but 'N' is number
+ERROR: 'empty N' requires a list, unique list, dictionary, or optional type, but 'N' is number

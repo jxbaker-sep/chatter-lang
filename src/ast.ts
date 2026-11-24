@@ -273,6 +273,12 @@ export interface BooleanLiteral {
 
 export interface NoneLiteral {
   type: 'NoneLiteral';
+  /**
+   * Set for the explicitly-typed form `empty optional T` (the whole
+   * `optional T` annotation). Absent for bare `none`, whose type must come
+   * from the surrounding slot.
+   */
+  optionalType?: TypeAnnotation;
 }
 
 export interface UnaryExpression {

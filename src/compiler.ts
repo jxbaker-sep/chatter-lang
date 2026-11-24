@@ -645,9 +645,9 @@ export class Compiler {
   // EmptyAliasLiteral.
   private resolveEmptyAlias(name: string, loc?: SourceLocation): ChatterType {
     const t = this.fromAnnotation({ kind: 'struct', name } as TypeAnnotation, loc);
-    if (t.kind !== 'list' && t.kind !== 'uniqueList' && t.kind !== 'dict') {
+    if (t.kind !== 'list' && t.kind !== 'uniqueList' && t.kind !== 'dict' && t.kind !== 'optional') {
       throw new CompileError(
-        `'empty ${name}' requires a list, unique list, or dictionary type, but '${name}' is ${typeToString(t)}`,
+        `'empty ${name}' requires a list, unique list, dictionary, or optional type, but '${name}' is ${typeToString(t)}`,
         loc ?? this.currentLoc,
       );
     }
@@ -1541,8 +1541,17 @@ export class Compiler {
     }
   }
 
+  /** The `optional T` type of an explicit `empty optional T`; null for bare `none`. */
+  private explicitNoneType(expr: Expression): ChatterType | null {
+    if (expr.type !== 'NoneLiteral' || !expr.optionalType) return null;
+    return this.fromAnnotation(expr.optionalType, (expr as any).loc);
+  }
+
   private canAssignToExpected(expected: ChatterType, actual: ChatterType | null, expr: Expression): boolean {
-    if (expr.type === 'NoneLiteral') return expected.kind === 'optional';
+    if (expr.type === 'NoneLiteral') {
+      const explicit = this.explicitNoneType(expr);
+      return explicit ? typesEqual(expected, explicit) : expected.kind === 'optional';
+    }
     if (actual === null) return true;
     return typesEqual(expected, actual) || (expected.kind === 'optional' && typesEqual(expected.element, actual));
   }
@@ -1554,7 +1563,7 @@ export class Compiler {
     }
     if (expr.type === 'NoneLiteral') {
       if (expected.kind !== 'optional') {
-        throw new CompileError('cannot infer type of none', this.currentLoc);
+        throw new CompileError("cannot infer type of none — give it a type with 'empty optional T' (e.g. 'empty optional number')", this.currentLoc);
       }
       this.emit(out, { op: 'PUSH_NONE', element: expected.element });
       return;
@@ -3459,8 +3468,14 @@ export class Compiler {
       case 'BooleanLiteral':
         this.emit(out, { op: 'PUSH_BOOL', value: expr.value });
         break;
-      case 'NoneLiteral':
-        throw new CompileError('cannot infer type of none', this.currentLoc);
+      case 'NoneLiteral': {
+        const explicit = this.explicitNoneType(expr);
+        if (explicit && explicit.kind === 'optional') {
+          this.emit(out, { op: 'PUSH_NONE', element: explicit.element });
+          break;
+        }
+        throw new CompileError("cannot infer type of none — give it a type with 'empty optional T' (e.g. 'empty optional number')", this.currentLoc);
+      }
       case 'IdentifierExpression':
         if (expr.name === 'accumulator') {
           if (this.hofAccStack.length === 0) {
@@ -3557,6 +3572,8 @@ export class Compiler {
           this.emit(out, { op: 'MAKE_EMPTY_LIST', elementType: t.element });
         } else if (t.kind === 'uniqueList') {
           this.emit(out, { op: 'MAKE_EMPTY_UNIQUE_LIST', elementType: t.element });
+        } else if (t.kind === 'optional') {
+          this.emit(out, { op: 'PUSH_NONE', element: t.element });
         } else {
           this.emit(out, { op: 'MAKE_EMPTY_DICT', keyType: (t as any).keyType, valueType: (t as any).valueType });
         }
@@ -3832,7 +3849,8 @@ export class Compiler {
             && tt.kind !== 'uniqueList'
             && tt.kind !== 'dict') {
           throw new CompileError(
-            `'is empty' requires a string, list, or dictionary, got ${typeToString(tt)}`,
+            `'is empty' requires a string, list, or dictionary, got ${typeToString(tt)}`
+              + (tt.kind === 'optional' ? ` — use 'is none' to test whether an optional is absent` : ''),
           this.currentLoc);
         }
         this.compileExpr(expr.target, out, bindings);
@@ -4613,6 +4631,10 @@ export class Compiler {
         if (subjectType && subjectType.kind !== 'optional') {
           throw new CompileError(`Type mismatch: cannot compare ${typeToString(subjectType)} and none`, this.currentLoc);
         }
+        const explicitNone = this.explicitNoneType(leftIsNone ? expr.left : expr.right);
+        if (subjectType && explicitNone && !typesEqual(subjectType, explicitNone)) {
+          throw new CompileError(`Type mismatch: cannot compare ${typeToString(subjectType)} and ${typeToString(explicitNone)}`, this.currentLoc);
+        }
         this.compileExpr(subject, out, bindings);
         this.emit(out, { op: 'IS_NONE' });
         if (expr.operator === '!=') this.emit(out, { op: 'NOT' });
@@ -4750,7 +4772,7 @@ export class Compiler {
       case 'NumberLiteral': return { kind: 'scalar', name: 'number' };
       case 'StringLiteral': return { kind: 'scalar', name: 'string' };
       case 'BooleanLiteral': return { kind: 'scalar', name: 'boolean' };
-      case 'NoneLiteral': return null;
+      case 'NoneLiteral': return this.explicitNoneType(expr);
       case 'UnaryExpression':
         return expr.operator === '-'
           ? { kind: 'scalar', name: 'number' }

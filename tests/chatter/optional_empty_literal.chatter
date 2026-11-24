@@ -1,0 +1,50 @@
+# 'empty optional T' creates an absent optional with an explicit type.
+struct Point
+    number x
+    number y
+end struct
+type MaybeN is optional number
+
+function show takes optional number n is
+    if n is none
+        say "absent"
+    else
+        say "present", n
+    end if
+end function
+
+function give returns optional number is
+    return empty optional number
+end function
+
+constant no_number is empty optional number
+say no_number
+say no_number is none
+show no_number
+show empty optional number
+
+variable x is empty optional number
+change x to 5
+say x
+change x to none
+say x is none
+change x to 7
+if x is not none
+    say x + 1
+end if
+
+constant alias_none is empty MaybeN
+say alias_none is none
+constant p is empty optional Point
+say p
+constant pl is empty optional list of number
+say pl is none
+constant xs is list of empty optional number, 3
+say xs
+constant g is the result of give
+say g
+say no_number is empty optional number
+say x is not empty optional number
+expect no_number to be empty optional number
+expect x to not be empty optional number
+say "ok"

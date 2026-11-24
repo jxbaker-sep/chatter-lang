@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1282 tests passing.
+1288 tests passing.
 
 ## Language spec (current)
 
@@ -405,6 +405,9 @@ An **optional** wraps any type T as `optional T` — a value that is either pres
 **Type annotation**: `optional T` in any type position (param, return, struct field, list element type, dict value type). Nesting `optional optional T` → parse error `redundant optional`. Dictionary keys may not be optional (`dictionary keys cannot be optional`).
 
 **Literal**: `none` — the absent value. Has no standalone type; legal only when the surrounding slot provides `optional T` context (function return, argument, struct field, list element, dict value). `constant x is none` / `variable y is none` / standalone use → compile error `cannot infer type of none`.
+
+**Typed absent literal**: `empty optional T` — an absent optional whose type is spelled out, so it works anywhere an expression does (no surrounding `optional T` slot needed): `constant no_number is empty optional number`, `variable x is empty optional Point` (then `change x to 5` / `change x to none` as usual), `show empty optional number`. Parsed in the `empty` primary branch as a `NoneLiteral` carrying `optionalType` (the whole `optional T` annotation), so every existing `none` code path (equality, `is none`, narrowing, auto-wrap) applies; compiles to `PUSH_NONE`. Its static type is `optional T`, checked like any other value (passing `empty optional number` to an `optional string` param → type mismatch; `empty optional optional T` → `redundant optional`). `empty ALIAS` also accepts an alias of an optional type (`type MaybeN is optional number` / `empty MaybeN`).
+- **Disambiguation with `is empty`**: `x is empty optional T` / `x is not empty optional T` / `expect x to be empty optional T` / `to not be …` parse as **equality with the typed none** (same as `is none` / `is not none`, plus a static check that the optional types match), not as the emptiness predicate — the parser peeks for `optional` after `empty`. Bare `x is empty` on an optional stays a compile error, with the hint `use 'is none' to test whether an optional is absent`. The bare-`none` error now reads `cannot infer type of none — give it a type with 'empty optional T' (e.g. 'empty optional number')`.
 
 **Type system**:
 - `optional T` is distinct from `T`. Known optional operands to arithmetic/comparison/logical/if/while/length/contains/is empty → compile error unless narrowed.

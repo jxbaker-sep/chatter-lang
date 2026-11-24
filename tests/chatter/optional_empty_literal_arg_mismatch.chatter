@@ -1,0 +1,4 @@
+function f takes optional string s is
+    say s
+end function
+f empty optional number

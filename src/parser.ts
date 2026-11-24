@@ -201,6 +201,14 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'Program', body };
   }
 
+  // True when the token `offset` places ahead of the current one is the
+  // `optional` keyword — used to tell `is empty` (predicate) apart from
+  // `is empty optional T` (comparison with a typed none).
+  function nextIsOptional(offset: number): boolean {
+    const t = tokens[pos + offset];
+    return t?.type === 'KEYWORD' && t.value === 'optional';
+  }
+
   function withLoc<T extends object>(node: T, tok: Token): T {
     (node as any).line = tok.line;
     (node as any).col = tok.col;
@@ -308,7 +316,7 @@ export function parse(tokens: Token[], source?: string): Program {
         advance(); // consume `not`
         advance(); // consume `be`
         // `to not be empty` → `not (left is empty)`
-        if (peek().type === 'KEYWORD' && peek().value === 'empty') {
+        if (peek().type === 'KEYWORD' && peek().value === 'empty' && !nextIsOptional(1)) {
           advance();
           const empty = { type: 'IsEmptyExpression', target: expression } as any;
           expression = { type: 'UnaryExpression', operator: 'not', operand: empty } as UnaryExpression;
@@ -390,7 +398,7 @@ export function parse(tokens: Token[], source?: string): Program {
     // `to be empty` — emptiness predicate (polymorphic over strings and lists).
     {
       const n0 = peek();
-      if (n0.type === 'KEYWORD' && n0.value === 'empty') {
+      if (n0.type === 'KEYWORD' && n0.value === 'empty' && !nextIsOptional(1)) {
         advance();
         return { type: 'IsEmptyExpression', target: left } as any;
       }
@@ -1642,14 +1650,16 @@ export function parse(tokens: Token[], source?: string): Program {
       // emptiness predicate, not a list literal.
       {
         const n0 = peek();
-        if (n0.type === 'KEYWORD' && n0.value === 'empty') {
+        // `is empty optional T` is a comparison with a typed none, not the
+        // emptiness predicate — fall through to ordinary equality parsing.
+        if (n0.type === 'KEYWORD' && n0.value === 'empty' && !nextIsOptional(1)) {
           advance();
           left = { type: 'IsEmptyExpression', target: left } as any;
           continue;
         }
         if (n0.type === 'KEYWORD' && n0.value === 'not') {
           const n1 = tokens[pos + 1];
-          if (n1?.type === 'KEYWORD' && n1.value === 'empty') {
+          if (n1?.type === 'KEYWORD' && n1.value === 'empty' && !nextIsOptional(2)) {
             advance(); advance();
             const empty = { type: 'IsEmptyExpression', target: left } as any;
             left = { type: 'UnaryExpression', operator: 'not', operand: empty } as UnaryExpression;
@@ -1852,6 +1862,14 @@ export function parse(tokens: Token[], source?: string): Program {
             valueType: vAnno,
             entries: [],
           } as DictionaryLiteral;
+        }
+        // `empty optional T` — an absent optional with an explicit type.
+        // parseTypeAnnotation consumes `optional T` (and rejects
+        // `optional optional T` as redundant).
+        if (peek().type === 'KEYWORD' && peek().value === 'optional') {
+          const optionalType = parseTypeAnnotation();
+          const node: import('./ast').NoneLiteral = { type: 'NoneLiteral', optionalType };
+          return withLoc(node, tok);
         }
         // `empty unique list of T`
         if (peek().type === 'KEYWORD' && peek().value === 'unique') {
