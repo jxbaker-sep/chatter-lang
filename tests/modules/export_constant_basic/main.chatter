@@ -1,0 +1,19 @@
+# Exported constants: scalars, structs, aggregates (shared + mutable through
+# the reference), the result of, optionals; readable inside the importer's
+# functions; dependency init runs first.
+use answer, greeting, origin, table, counts, doubled, nothing, origin_x, Point from "data"
+say "main start"
+say answer, greeting, origin, doubled, nothing
+say x of origin
+function show_table is
+    say table, answer + 1
+    append 4 to table
+end function
+show_table
+say table
+change value of "b" in counts to 2
+say counts
+constant ox is the result of origin_x
+say ox
+constant p is make Point with x 5, y 6
+say p is origin

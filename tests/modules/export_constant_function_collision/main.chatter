@@ -1,0 +1,4 @@
+use answer from "data"
+function answer returns number is
+    return 1
+end function

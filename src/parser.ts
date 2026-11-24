@@ -960,8 +960,23 @@ export function parse(tokens: Token[], source?: string): Program {
     return { type: 'FunctionDeclaration', name: nameTok.value, typeVars, params, returnType, body, exported };
   }
 
-  function parseExportStatement(): FunctionDeclaration | StructDeclaration | TypeAliasDeclaration {
+  function parseExportStatement(): FunctionDeclaration | StructDeclaration | TypeAliasDeclaration | ConstantDeclaration {
     const exportTok = consume('KEYWORD', 'export');
+    if (peek().type === 'KEYWORD' && peek().value === 'variable') {
+      throw new ParseError(
+        `cannot export a variable — only constants can be exported (use 'export constant')`,
+        peek(),
+      );
+    }
+    if (peek().type === 'KEYWORD' && peek().value === 'constant') {
+      const cd = parseConstantStatement();
+      cd.exported = true;
+      (cd as any).line = exportTok.line;
+      (cd as any).col = exportTok.col;
+      (cd as any).length = Math.max(1, exportTok.value.length);
+      (cd as any).file = exportTok.file;
+      return cd;
+    }
     if (peek().type === 'KEYWORD' && peek().value === 'mutable'
         && tokens[pos + 1]?.type === 'KEYWORD' && tokens[pos + 1]?.value === 'struct') {
       const sd = parseStructDeclaration(true, true);
@@ -989,7 +1004,7 @@ export function parse(tokens: Token[], source?: string): Program {
     }
     if (peek().type !== 'KEYWORD' || peek().value !== 'function') {
       throw new ParseError(
-        `'export' must be followed by 'function', 'struct', 'mutable struct', or 'type'`,
+        `'export' must be followed by 'function', 'constant', 'struct', 'mutable struct', or 'type'`,
         peek(),
       );
     }

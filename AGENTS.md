@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1288 tests passing.
+1299 tests passing.
 
 ## Language spec (current)
 
@@ -195,7 +195,18 @@ One file = one module. The file path (normalized absolute) identifies the module
 - Path matching is case-sensitive.
 - Missing file → compile error `cannot find module "PATH"` (uses the exact string the user wrote).
 
-**Export**: `export` is an optional modifier on `function` declarations only (v1 does not export `constant`/`variable`/expressions). A non-exported function is private: usable within its own module, invisible to importers.
+**Export**: `export` is an optional modifier on `function`, `constant`, `struct` / `mutable struct`, and `type` declarations. Anything not exported is private: usable within its own module, invisible to importers. `export` followed by anything else → parse error `'export' must be followed by 'function', 'constant', 'struct', 'mutable struct', or 'type'`.
+
+**Exported constants** — `export constant NAME is EXPR` (including `export constant NAME is the result of CALL`):
+- **Direct module top level only.** Inside a function body or any block (`if`, `repeat`, …) → compile error `'export constant' may only appear at module top level`.
+- **Variables cannot be exported**: `export variable …` → parse error `cannot export a variable — only constants can be exported (use 'export constant')`.
+- **Type must be statically known** — otherwise compile error `exported constant 'X' must have a type known at compile time` (e.g. `export constant c is it` where `it`'s type is unknown). Importers therefore always get full compile-time type checking. `the result of CALL` always has a known type.
+- **Imported with the ordinary `use NAME from "PATH"`**; the imported name behaves exactly like a local module-top-level `constant` — readable at the importer's top level *and* inside its function bodies; `change NAME to …` is a compile error; shares the unified namespace (collision with a local constant / variable / function / struct / alias or another import → `name 'X' is already defined`). Unused → `unused import 'X'` warning.
+- **Aggregates are shared and mutable**: `constant` freezes the *binding*, not the aggregate. An exported list / unique list / dictionary / mutable struct is one object; mutations by any importer (`append 4 to table`) are visible to the exporting module and every other importer.
+- **Initialisation**: the exporter's top level runs before the importer's (existing dependency post-order), so the value is always initialised before any importer code reads it.
+- Importing a constant (like importing a function) implicitly brings the exporter's exported structs along so struct-typed constants' fields resolve.
+- **Internals**: `CompiledModule.constantExports: Map<name, ImportedConstant { mangled: '<moduleId>::<name>', type }>`; the loader passes `constantImports` to the importer's compiler, which binds the local name in the top-level scope and has the `rewriteInstrs` post-pass redirect `LOAD`s of that name to the exporter's mangled global. No VM changes.
+- **Implicit struct imports never collide** (applies to functions too): structs pulled in implicitly alongside an imported function/constant don't count as user-listed names, so `use mk, Point from "geom"` (function before its struct) works; a later explicit import of the same struct is a no-op, and an explicit import of a different thing with that name replaces the implicit struct.
 
 **Binding rules**:
 - Imported names live in the importing module's top-level scope alongside local functions.
@@ -223,7 +234,7 @@ One file = one module. The file path (normalized absolute) identifies the module
 - Stdlib modules participate in the same module graph (cycle detection, export checks, mangling). Relative `use` from inside a stdlib module resolves against the stdlib file's own directory. Stdlib modules are keyed in the loader's registry by the synthetic string `std:<NAME>` rather than their absolute filesystem path; because `std:` cannot appear in an absolute path, collisions with a coincidentally-named user file are impossible.
 - Placeholder module lives at `stdlib/placeholder.chatter` as proof-of-life. Real stdlib modules: `stdlib/string.chatter` (e.g. `parse`, `trim`, `split`, ...), `stdlib/math.chatter` (`min`, `max`, `abs`, `sum`, `product`, `sign`, `isqrt` — `isqrt` is floor integer square root via Newton's method; runtime error on negative input; safe up to 2^53 − 1), `stdlib/list.chatter` (`wrap`, `range`, `uniquify`, `clone_unique_list`, `enlist`, `add_range` — `add_range ORIGIN to DESTINATION` appends every element of ORIGIN to DESTINATION in place; ORIGIN is unchanged; `add_range xs to xs` duplicates xs's original contents once), `stdlib/dictionary.chatter` (`value_or`), `stdlib/set.chatter` (`union`, `intersection`, `difference` — generic set-theoretic ops on `unique list of T`; all return fresh unique lists, inputs never mutated; union preserves left order then novel right elements, intersection and difference both preserve left order; `difference A with B` is asymmetric A − B), `stdlib/linked_list.chatter` (`Node`, `LinkedList`, `make_linked_list_with`, `prepend`, `append`, `insert_after`, `size_of`, `is_empty`, `head`, `tail`, `contains_in`, `to_list`, `remove_first`, `remove_last`, `clear` — generic mutable singly-linked lists with cached O(1) tail append; `insert_after LIST after NODE with V` inserts in O(1), returns the new node, updates tail when NODE is the tail, and trusts the caller that NODE belongs to LIST), `stdlib/queue.chatter` (`Queue`, `make_queue_with`, `enqueue`, `dequeue`, `peek`, `size_of`, `is_empty`, `clear` — generic mutable FIFO queues backed by linked lists; enqueue/dequeue/peek/size/is_empty/clear are O(1)).
 
-**Not in v1 (deferred)**: `use X as Y` renaming, exporting `constant`/`variable`, package-style paths (no `./` or `../`), re-exports, dynamic imports, circular imports with partial-module semantics.
+**Not in v1 (deferred)**: `use X as Y` renaming, exporting `variable`s (deliberately unsupported), package-style paths (no `./` or `../`), re-exports, dynamic imports, circular imports with partial-module semantics.
 
 ### File I/O (read-only, v1)
 - **`lines of file EXPR`** — expression form. `EXPR` must be `string` (compile error otherwise). Returns a fresh **mutable** `list of string`. Line-splitting: any `\n` or `\r\n` is a separator; exactly one trailing newline is stripped (so `"a\nb\n"` → `["a", "b"]`). Empty file → empty list. Leading/internal blank lines are preserved as empty strings.

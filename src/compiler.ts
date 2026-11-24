@@ -216,9 +216,15 @@ export interface ImportedAlias {
   resolved: ChatterType;
 }
 
+export interface ImportedConstant {
+  mangled: string;          // <sourceModuleId>::<name> — the exporter's global
+  type: ChatterType;        // always statically known (enforced at export)
+}
+
 export interface CompileOptions {
   moduleId?: string;
   imports?: Map<string, ImportedFunction>;
+  constantImports?: Map<string, ImportedConstant>;
   structImports?: Map<string, ImportedStruct>;
   aliasImports?: Map<string, ImportedAlias>;
 }
@@ -229,6 +235,7 @@ export interface CompiledModule {
   exports: Map<string, ImportedFunction>;   // local name -> info (for loader)
   structExports: Map<string, ImportedStruct>;
   aliasExports: Map<string, ImportedAlias>;
+  constantExports: Map<string, ImportedConstant>;
   // Map from mangled struct type name -> mangled formatter function name.
   // Populated for every struct (local or imported re-export) that has a
   // `format is EXPR` clause in its home module.
@@ -287,6 +294,8 @@ export class Compiler {
   private locStack: (SourceLocation | undefined)[] = [];
   private moduleId: string | null = null;
   private imports: Map<string, ImportedFunction> = new Map();
+  // Constants imported via `use NAME from "..."`, keyed by local name.
+  private constantImports: Map<string, ImportedConstant> = new Map();
   private localFunctions = new Map<string, FunctionDeclaration>();
   private endLenTmpStack: string[] = [];
   // Struct registry: local name -> info (mangled, fields). Includes both
@@ -733,6 +742,7 @@ export class Compiler {
   compileModule(program: Program, opts: CompileOptions): CompiledModule {
     this.moduleId = opts.moduleId ?? null;
     this.imports = opts.imports ?? new Map();
+    this.constantImports = opts.constantImports ?? new Map();
     this.warnings = [];
     this.moduleUsedNames = new Set();
     this.calledFunctions = new Set();
@@ -777,7 +787,8 @@ export class Compiler {
     // Helper for collision checks across the unified namespace
     // (struct, alias, function, import).
     const checkCollision = (name: string, loc?: SourceLocation) => {
-      if (this.structs.has(name) || this.aliases.has(name) || this.imports.has(name)) {
+      if (this.structs.has(name) || this.aliases.has(name) || this.imports.has(name)
+          || this.constantImports.has(name)) {
         throw new CompileError(
           `name '${name}' is already defined`,
           loc,
@@ -941,7 +952,8 @@ export class Compiler {
     // First pass: collect local function signatures, return types, outer bindings
     for (const stmt of program.body) {
       if (stmt.type === 'FunctionDeclaration') {
-        if (this.imports.has(stmt.name) || this.structs.has(stmt.name) || this.aliases.has(stmt.name)) {
+        if (this.imports.has(stmt.name) || this.structs.has(stmt.name) || this.aliases.has(stmt.name)
+            || this.constantImports.has(stmt.name)) {
           throw new CompileError(
             `name '${stmt.name}' is already defined`,
             locOf(stmt),
@@ -979,10 +991,16 @@ export class Compiler {
         }
       }
       if (stmt.type === 'ConstantDeclaration' || stmt.type === 'VarDeclaration') {
+        if (this.constantImports.has(stmt.name)) {
+          throw new CompileError(`name '${stmt.name}' is already defined`, locOf(stmt as any));
+        }
         this.outerBindings.add(stmt.name);
         this.topLevelMangled.add(stmt.name);
       }
     }
+    // Imported constants are visible module-wide (top level and inside
+    // function bodies) exactly like local top-level constants.
+    for (const name of this.constantImports.keys()) this.outerBindings.add(name);
 
     for (const decl of this.localFunctions.values()) {
       if (decl.typeVars && decl.typeVars.length > 0) {
@@ -997,6 +1015,12 @@ export class Compiler {
     // identically-named block-scoped bindings in other modules.
     const bindings: Scope = new Scope(null, this.topLevelMangled);
     this.topLevelBindings = bindings;
+    // Bind imported constants under their local name. The post-processor
+    // (`rewriteInstrs`) redirects that name to the exporter's global.
+    for (const [name, info] of this.constantImports) {
+      bindings.vars.set(name, { kind: 'constant', type: info.type, mangled: name });
+      bindings.allMangledInFunction.add(name);
+    }
 
     // Pass 1d: compile format thunks for every local struct with a
     // `format is EXPR` clause. Each thunk is a synthetic single-param
@@ -1022,6 +1046,8 @@ export class Compiler {
       for (const i of instrs) {
         if (i.op === 'LOAD' || i.op === 'STORE' || i.op === 'STORE_VAR' || i.op === 'DELETE') {
           if (skip && skip.has(i.name)) continue;
+          const importedConst = this.constantImports.get(i.name);
+          if (importedConst) { i.name = importedConst.mangled; continue; }
           i.name = this.mangleBinding(i.name);
         } else if (i.op === 'CALL') {
           i.name = this.mangleFunction(i.name);
@@ -1123,6 +1149,24 @@ export class Compiler {
       });
     }
 
+    // Exported constants: direct module-top-level `export constant`s. Their
+    // static type must be known so importers get full compile-time checking.
+    const constantExports = new Map<string, ImportedConstant>();
+    for (const stmt of program.body) {
+      if (stmt.type !== 'ConstantDeclaration' || !stmt.exported) continue;
+      const info = bindings.lookup(stmt.name);
+      if (!info || !info.type) {
+        throw new CompileError(
+          `exported constant '${stmt.name}' must have a type known at compile time`,
+          locOf(stmt as any),
+        );
+      }
+      constantExports.set(stmt.name, {
+        mangled: this.moduleId ? `${this.moduleId}::${info.mangled}` : info.mangled,
+        type: info.type,
+      });
+    }
+
     // Build the per-module structFormatters map. Includes both local structs
     // (whose formatters were just compiled into `this.functions`) and
     // imported structs that carry a formatterName from their home module.
@@ -1152,10 +1196,20 @@ export class Compiler {
       }
     }
 
+    // Module-level warnings: unused imported constants
+    for (const [localName] of this.constantImports) {
+      if (!localName.startsWith('_') && !this.moduleUsedNames.has(localName)) {
+        this.warnings.push(new CompileWarning(
+          `unused import '${localName}'`,
+          this.importLocs.get(localName),
+        ));
+      }
+    }
+
     // Sort warnings by line number for deterministic output
     this.warnings.sort((a, b) => (a.location?.line ?? 0) - (b.location?.line ?? 0));
 
-    return { functions: this.functions, topLevel, exports, structExports, aliasExports, structFormatters, warnings: this.warnings };
+    return { functions: this.functions, topLevel, exports, structExports, aliasExports, constantExports, structFormatters, warnings: this.warnings };
   }
 
   // Compile a `format is EXPR` clause as a synthetic FunctionDef. `it` is the
@@ -1648,6 +1702,9 @@ export class Compiler {
     out: Instruction[],
     bindings: Scope,
   ): void {
+    if (stmt.exported && bindings !== this.topLevelBindings) {
+      throw new CompileError(`'export constant' may only appear at module top level`, this.currentLoc);
+    }
     // Determine type first, then declare (declare may throw shadow/dup error).
     if (stmt.precall) {
       const rt = this.compilePrecall(stmt.precall, out, bindings);

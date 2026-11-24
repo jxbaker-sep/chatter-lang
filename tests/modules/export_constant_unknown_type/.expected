@@ -1,0 +1,1 @@
+ERROR: exported constant 'c' must have a type known at compile time

@@ -1,0 +1,2 @@
+use answer, greeting from "data"
+say answer

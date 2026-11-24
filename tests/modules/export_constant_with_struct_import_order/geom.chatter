@@ -1,0 +1,7 @@
+export struct Point
+    number x
+end struct
+export function mk returns Point is
+    return make Point with x 1
+end function
+export constant unit is make Point with x 9

@@ -1,0 +1,1 @@
+ERROR: module "data" does not export 'private_thing'

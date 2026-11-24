@@ -1,0 +1,22 @@
+export struct Point
+    number x
+    number y
+end struct
+
+export function origin_x returns number is
+    return x of origin
+end function
+
+function double takes number n returns number is
+    return n * 2
+end function
+
+export constant answer is 42
+export constant greeting is "hi"
+export constant origin is make Point with x 1, y 2
+export constant table is list of 1, 2, 3
+export constant counts is dictionary "a" to 1
+export constant doubled is the result of double 21
+export constant nothing is empty optional number
+constant private_thing is 5
+say "data init", private_thing

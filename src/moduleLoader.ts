@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { lex } from './lexer';
 import { parse } from './parser';
-import { Compiler, CompileError, CompiledModule, ImportedFunction, ImportedStruct, ImportedAlias } from './compiler';
+import { Compiler, CompileError, CompiledModule, ImportedFunction, ImportedStruct, ImportedAlias, ImportedConstant } from './compiler';
 import { Instruction, FunctionDef, BytecodeProgram } from './bytecode';
 import { Program, UseStatement } from './ast';
 import { SourceLocation, CompileWarning } from './errors';
@@ -122,6 +122,7 @@ function buildStdCliModule(moduleId: string, registryKey: string, absPath: strin
     functions,
     topLevel: [],
     exports: exportsMap,
+    constantExports: new Map(),
     structExports: new Map(),
     aliasExports: new Map(),
     structFormatters: new Map(),
@@ -243,37 +244,61 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
     const imports = new Map<string, ImportedFunction>();
     const structImports = new Map<string, ImportedStruct>();
     const aliasImports = new Map<string, ImportedAlias>();
+    const constantImports = new Map<string, ImportedConstant>();
+    // Names the user listed in a `use`. Structs pulled in implicitly
+    // alongside an imported function / constant (so its signature or type
+    // resolves) are NOT in here and never cause a collision: a later
+    // explicit import of the same struct just confirms it, and a different
+    // name from another module replaces it.
+    const explicitNames = new Set<string>();
+    const pullStructsAlong = (depStructExports: Map<string, ImportedStruct>) => {
+      for (const [structName, structInfo] of depStructExports) {
+        if (!imports.has(structName) && !structImports.has(structName)
+            && !aliasImports.has(structName) && !constantImports.has(structName)) {
+          structImports.set(structName, structInfo);
+        }
+      }
+    };
     for (const stmt of ast.body) {
       if (stmt.type !== 'UseStatement') continue;
       const depInfo = depModules.get(stmt.path)!;
       const depExports = depInfo.compiled!.exports;
       const depStructExports = depInfo.compiled!.structExports;
       const depAliasExports = depInfo.compiled!.aliasExports;
+      const depConstantExports = depInfo.compiled!.constantExports;
       for (let i = 0; i < stmt.names.length; i++) {
         const n = stmt.names[i];
         const nameLoc = nameLocation(stmt, i);
         const isFunc = depExports.has(n);
         const isStruct = depStructExports.has(n);
         const isAlias = depAliasExports.has(n);
-        if (!isFunc && !isStruct && !isAlias) {
+        const isConstant = depConstantExports.has(n);
+        if (!isFunc && !isStruct && !isAlias && !isConstant) {
           throw new CompileError(
             `module "${stmt.path}" does not export '${n}'`,
             nameLoc,
           );
         }
-        if (imports.has(n) || structImports.has(n) || aliasImports.has(n)) {
+        if (explicitNames.has(n)) {
           throw new CompileError(
             `name '${n}' is already defined`,
             nameLoc,
           );
         }
+        explicitNames.add(n);
+        // An implicitly pulled-in struct of the same name yields to the
+        // explicit import (same struct → no-op; different thing → replaced).
+        if (!isStruct || structImports.get(n)?.mangled !== depStructExports.get(n)!.mangled) {
+          structImports.delete(n);
+        }
         if (isFunc) {
           imports.set(n, depExports.get(n)!);
-          for (const [structName, structInfo] of depStructExports) {
-            if (!imports.has(structName) && !structImports.has(structName) && !aliasImports.has(structName)) {
-              structImports.set(structName, structInfo);
-            }
-          }
+          pullStructsAlong(depStructExports);
+        } else if (isConstant) {
+          constantImports.set(n, depConstantExports.get(n)!);
+          // Bring the exporter's structs along so a struct-typed constant's
+          // fields resolve in the importer.
+          pullStructsAlong(depStructExports);
         } else if (isStruct) {
           structImports.set(n, depStructExports.get(n)!);
         } else {
@@ -283,7 +308,7 @@ export function loadProgram(entryFilePath: string, opts: LoadProgramOptions = {}
     }
 
     const compiler = new Compiler();
-    const compiled = compiler.compileModule(ast, { moduleId, imports, structImports, aliasImports });
+    const compiled = compiler.compileModule(ast, { moduleId, imports, structImports, aliasImports, constantImports });
     info.compiled = compiled;
 
     loading.delete(registryKey);

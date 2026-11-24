@@ -1,0 +1,6 @@
+# Importing a function or constant before the struct it uses must not make
+# the explicit struct import collide with the implicitly imported one.
+use mk, unit, Point from "geom"
+constant p is the result of mk
+constant q is make Point with x 2
+say p, q, unit

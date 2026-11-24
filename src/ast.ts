@@ -202,6 +202,8 @@ export interface ConstantDeclaration {
   name: string;
   value: Expression;
   precall?: CallStatement | null;
+  /** `export constant NAME is ...` (module top level only). */
+  exported?: boolean;
 }
 
 export interface FunctionParam {
