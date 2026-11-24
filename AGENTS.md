@@ -24,7 +24,7 @@ CLI: `npx ts-node src/index.ts <file.chatter>` runs the full pipeline.
 - `examples/hello_world.chatter` — user-authored example
 
 ## Test status
-1304 tests passing.
+1306 tests passing.
 
 ## Language spec (current)
 
@@ -436,7 +436,7 @@ An **optional** wraps any type T as `optional T` — a value that is either pres
 - `expect x is not none` — x narrowed for rest of block.
 - `it` can also be narrowed via the same patterns using the `__it__` key.
 - Narrowing is invalidated by `change x to ...` on the same variable. A `change x` **anywhere inside a `repeat` body** (including nested blocks) drops x's narrowing before the loop's condition and body are compiled, and it stays dropped after the loop.
-- **Soundness rules**: narrowing after an `if` is kept only when it holds on *every* path that reaches the next statement (each arm that does not end in `return`/`fail`/etc., plus the no-match fallthrough when there is no `else`). So `if x is none` + a body that falls through does NOT narrow `x` afterwards. Each function body starts with an empty narrowing stack — narrowings never leak between functions or from module top level into a function This includes generic function bodies, both at validation and at each per-instantiation compile (which happens mid-way through compiling the caller).
+- **Soundness rules**: narrowing after an `if` is exactly what holds on *every* path that reaches the next statement (each arm that does not end in `return` / `fail` / `exit repeat` / `next repeat` / etc., plus the no-match fallthrough when there is no `else`). A `change x` inside an arm only affects that arm, so `if … / change x to y / next repeat / end if` leaves x narrowed after the `if`. Every `repeat` body has its own narrowing scope (it may run zero times), so narrowings established inside a loop body never outlive the loop. So `if x is none` + a body that falls through does NOT narrow `x` afterwards. Each function body starts with an empty narrowing stack — narrowings never leak between functions or from module top level into a function This includes generic function bodies, both at validation and at each per-instantiation compile (which happens mid-way through compiling the caller).
 
 **Equality semantics**:
 - `opt is none` / `opt is not none` — tests presence; emits `IS_NONE` / `IS_NONE NOT`.

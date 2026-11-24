@@ -1,0 +1,10 @@
+# A narrowing established inside a loop body must not outlive the loop:
+# the body may run zero times.
+function f takes optional number x with number n is
+    repeat n times
+        expect x is not none
+    end repeat
+    say x + 1
+end function
+
+f none with 0

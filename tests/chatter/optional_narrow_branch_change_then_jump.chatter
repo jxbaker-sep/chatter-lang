@@ -1,0 +1,30 @@
+# A `change` inside an arm that ends in `next repeat` / `exit repeat` /
+# `return` doesn't affect what is known after the `if`, because that arm
+# never reaches it.
+mutable struct Cell
+    number value
+    optional Cell next
+end struct
+
+function walk takes optional Cell start is
+    variable cursor is start
+    repeat while cursor is not none
+        if value of cursor is 2
+            constant skip_to is next of cursor
+            change cursor to skip_to
+            next repeat
+        end if
+        if value of cursor is 99
+            change cursor to start
+            exit repeat
+        end if
+        say value of cursor
+        change cursor to next of cursor
+    end repeat
+end function
+
+constant c4 is make Cell with value 4, next none
+constant c3 is make Cell with value 3, next c4
+constant c2 is make Cell with value 2, next c3
+constant c1 is make Cell with value 1, next c2
+walk c1

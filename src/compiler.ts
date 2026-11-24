@@ -357,12 +357,13 @@ export class Compiler {
     return this.narrowingStack[this.narrowingStack.length - 1];
   }
 
+  // The top map is always a complete view (pushNarrowingScope copies the
+  // enclosing map), so lookups and invalidation only touch it. Blocks that
+  // end (if arms, loop bodies) reconcile their effect on the enclosing map
+  // explicitly: compileIf intersects the exit paths, compileRepeat
+  // pre-invalidates everything the body reassigns.
   private getNarrowedType(name: string): ChatterType | undefined {
-    for (let i = this.narrowingStack.length - 1; i >= 0; i--) {
-      const t = this.narrowingStack[i].get(name);
-      if (t !== undefined) return t;
-    }
-    return undefined;
+    return this.currentNarrowings().get(name);
   }
 
   private trackDeclaration(name: string, mangled: string, kind: BindingKind, loc?: SourceLocation): void {
@@ -394,7 +395,7 @@ export class Compiler {
   }
 
   private invalidateNarrowing(name: string): void {
-    for (const m of this.narrowingStack) m.delete(name);
+    this.currentNarrowings().delete(name);
   }
 
   private mergeItTypes(types: (ChatterType | null)[]): ChatterType | null {
@@ -1354,7 +1355,14 @@ export class Compiler {
         // Loop body may run zero times → merge the pre-loop `it` type with
         // whatever the body ends with.
         const itTypeBefore = this.currentItType;
-        this.compileRepeat(stmt, out, bindings);
+        // The loop body may run zero times, so narrowings it establishes
+        // must not outlive it.
+        this.pushNarrowingScope(new Map());
+        try {
+          this.compileRepeat(stmt, out, bindings);
+        } finally {
+          this.popNarrowingScope();
+        }
         this.currentItType = this.mergeItTypes([itTypeBefore, this.currentItType]);
         break;
       }
@@ -2897,14 +2905,13 @@ export class Compiler {
       // For `x is none`, narrow x in the else/fallthrough (inverse logic)
       // But if the body terminates, this narrowing applies to what comes after the if
       this.pushNarrowingScope(branchNarrowings);
-      const bodyTerminates = blockTerminates(branch.body);
       try {
         const branchScope = new Scope(bindings);
         for (const s of branch.body) {
         this.compileStatement(s, out, branchScope);
         }
         branchEndItTypes.push(this.currentItType);
-        if (!bodyTerminates) exitNarrowings.push(new Map(this.currentNarrowings()));
+        if (!blockLeavesFlow(branch.body)) exitNarrowings.push(new Map(this.currentNarrowings()));
       } finally {
         this.popNarrowingScope();
       }
@@ -2930,7 +2937,7 @@ export class Compiler {
         this.compileStatement(s, out, elseScope);
         }
         branchEndItTypes.push(this.currentItType);
-        if (!blockTerminates(stmt.elseBody)) exitNarrowings.push(new Map(this.currentNarrowings()));
+        if (!blockLeavesFlow(stmt.elseBody)) exitNarrowings.push(new Map(this.currentNarrowings()));
       } finally {
         this.popNarrowingScope();
       }
@@ -2948,15 +2955,19 @@ export class Compiler {
 
     this.currentItType = this.mergeItTypes(branchEndItTypes);
     
-    // Persist into the enclosing scope only the narrowings that hold on every
-    // path reaching the code after the `if`. (If no path reaches it, the
-    // following code is unreachable and nothing needs to be added.)
+    // After the `if`, the enclosing scope knows exactly what holds on every
+    // path that reaches the next statement (each arm that falls through, plus
+    // the no-match path when there is no else). Arms ending in return / fail /
+    // exit repeat / next repeat don't reach it. If no path reaches it, the
+    // following code is unreachable and the map is left alone.
     if (exitNarrowings.length > 0) {
       const [first, ...rest] = exitNarrowings;
+      const current = this.currentNarrowings();
+      current.clear();
       for (const [name, type] of first) {
         const typeStr = typeToString(type);
         if (rest.every(m => { const t = m.get(name); return t !== undefined && typeToString(t) === typeStr; })) {
-          this.currentNarrowings().set(name, type);
+          current.set(name, type);
         }
       }
     }
@@ -5101,6 +5112,25 @@ function containsExitForEnclosingLoop(stmts: Statement[]): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Like blockTerminates, but also counts `exit repeat` / `next repeat` as
+ * leaving: control never falls out of the block into the code after it.
+ * Used for flow narrowing only (not for missing-return analysis, where
+ * falling out of the loop still matters).
+ */
+function statementLeavesFlow(stmt: Statement): boolean {
+  if (statementTerminates(stmt)) return true;
+  if (stmt.type === 'ExitRepeatStatement' || stmt.type === 'NextRepeatStatement') return true;
+  if (stmt.type === 'IfStatement' && stmt.elseBody !== null) {
+    return stmt.branches.every(b => blockLeavesFlow(b.body)) && blockLeavesFlow(stmt.elseBody);
+  }
+  return false;
+}
+
+function blockLeavesFlow(stmts: Statement[]): boolean {
+  return stmts.some(statementLeavesFlow);
 }
 
 export function blockTerminates(stmts: Statement[]): boolean {
