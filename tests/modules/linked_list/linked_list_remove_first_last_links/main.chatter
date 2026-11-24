@@ -1,0 +1,31 @@
+use make_linked_list_with, append, prepend, to_list, remove_first, remove_last, head from "std:linked_list"
+# remove_first / remove_last keep previous pointers consistent (checked by
+# walking backwards) and clear the removed node's links.
+constant ll is the result of make_linked_list_with 2
+prepend ll with 1
+append ll with 3
+append ll with 4
+constant removed_head is the result of head ll
+remove_first ll
+if removed_head is not none
+    say next of removed_head is none
+end if
+constant new_head is head of ll
+if new_head is not none
+    say previous of new_head is none, value of new_head
+end if
+constant removed_tail is tail of ll
+remove_last ll
+if removed_tail is not none
+    say previous of removed_tail is none
+end if
+constant new_tail is tail of ll
+if new_tail is not none
+    say next of new_tail is none, value of new_tail
+    constant p is previous of new_tail
+    if p is not none
+        say value of p
+    end if
+end if
+constant values is the result of to_list ll
+say values

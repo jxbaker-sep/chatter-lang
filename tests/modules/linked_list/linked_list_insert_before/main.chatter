@@ -1,0 +1,37 @@
+use make_linked_list_with, append, head, to_list, size_of, insert_before, remove_last, LinkedList from "std:linked_list"
+
+function backwards takes LinkedList of string list_ref returns list of string is
+    constant out is empty list of string
+    variable cursor is tail of list_ref
+    repeat while cursor is not none
+        append value of cursor to out
+        change cursor to previous of cursor
+    end repeat
+    return out
+end function
+
+function show takes LinkedList of string list_ref is
+    constant fwd is the result of to_list list_ref
+    constant bwd is the result of backwards list_ref
+    constant n is the result of size_of list_ref
+    say fwd, bwd, n
+end function
+
+constant ll is the result of make_linked_list_with "c"
+constant h is the result of head ll
+if h is not none
+    constant b is the result of insert_before ll before h with "b"
+    say head of ll is b
+    constant a is the result of insert_before ll before b with "a"
+    say value of a
+end if
+append ll with "e"
+constant t is tail of ll
+if t is not none
+    constant d is the result of insert_before ll before t with "d"
+    say value of d
+end if
+show ll
+remove_last ll
+remove_last ll
+show ll

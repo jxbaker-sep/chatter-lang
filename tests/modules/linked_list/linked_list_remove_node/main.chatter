@@ -1,0 +1,60 @@
+use make_linked_list_with, append, head, to_list, size_of, remove_node, LinkedList from "std:linked_list"
+
+# Walk backwards from the tail via previous pointers.
+function backwards takes LinkedList of number list_ref returns list of number is
+    constant out is empty list of number
+    variable cursor is tail of list_ref
+    repeat while cursor is not none
+        append value of cursor to out
+        change cursor to previous of cursor
+    end repeat
+    return out
+end function
+
+function show takes LinkedList of number list_ref is
+    constant fwd is the result of to_list list_ref
+    constant bwd is the result of backwards list_ref
+    constant n is the result of size_of list_ref
+    say fwd, bwd, n
+end function
+
+constant ll is the result of make_linked_list_with 1
+append ll with 2
+append ll with 3
+append ll with 4
+show ll
+
+# middle
+constant h is the result of head ll
+if h is not none
+    constant second is next of h
+    if second is not none
+        remove_node second from ll
+        say next of second is none, previous of second is none
+    end if
+end if
+show ll
+
+# head
+constant h2 is the result of head ll
+if h2 is not none
+    remove_node h2 from ll
+end if
+show ll
+
+# tail
+constant t is tail of ll
+if t is not none
+    remove_node t from ll
+end if
+show ll
+
+# only node
+constant last_one is tail of ll
+if last_one is not none
+    remove_node last_one from ll
+end if
+say head of ll is none, tail of ll is none
+show ll
+append ll with 9
+show ll

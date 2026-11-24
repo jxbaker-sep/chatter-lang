@@ -1,16 +1,24 @@
 # Chatter standard library: linked_list
 #
-# Mutable singly-linked lists built from generic mutable structs.
+# Mutable doubly-linked lists built from generic mutable structs.
 #
 # Invariants:
 # - Empty list: head is none, tail is none, length is 0.
 # - Non-empty list: head points at the first node, tail points at the last
-#   node, tail's next is none, and length equals the number of nodes.
+#   node, head's previous is none, tail's next is none, and length equals
+#   the number of nodes.
+# - For every node n with a next node m: previous of m is n.
 # - Single-element list: head and tail point at the same Node instance.
+#
+# Functions that take a Node (insert_after, insert_before, remove_node)
+# trust the caller that the node currently belongs to the given list; this
+# is not checked (doing so would be O(n)). Passing a node from another list,
+# or one that was already removed, corrupts the list.
 
 export mutable struct Node over T
     T value
     optional Node of T next
+    optional Node of T previous
 end struct
 
 export mutable struct LinkedList over T
@@ -22,51 +30,87 @@ end struct
 # make_linked_list_with: return a fresh singleton list containing first.
 # O(1). Empty construction is intentionally left to typed contexts in v1.
 export function make_linked_list_with over T takes T first returns LinkedList of T is
-    constant node is make Node with value first, next none
+    constant node is make Node with value first, next none, previous none
     return make LinkedList with head node, tail node, length 1
 end function
 
 # prepend: insert value at the front of the list in place.
 # O(1).
 export function prepend over T takes LinkedList of T linked with T value is
-    constant node is make Node with value value, next head of linked
-    change head of linked to node
-    if tail of linked is none
+    constant old_head is head of linked
+    constant node is make Node with value value, next old_head, previous none
+    if old_head is not none
+        change previous of old_head to node
+    else
         change tail of linked to node
     end if
+    change head of linked to node
     add 1 to length of linked
 end function
 
 # append: insert value at the end of the list in place.
 # O(1) thanks to the cached tail pointer.
 export function append over T takes LinkedList of T linked with T value is
-    constant node is make Node with value value, next none
-    if tail of linked is none
-        change head of linked to node
-        change tail of linked to node
+    constant old_tail is tail of linked
+    constant node is make Node with value value, next none, previous old_tail
+    if old_tail is not none
+        change next of old_tail to node
     else
-        variable old_tail is tail of linked
-        if old_tail is not none
-            change next of old_tail to node
-            change tail of linked to node
-        else
-            fail "linked list invariant broken"
-        end if
+        change head of linked to node
     end if
+    change tail of linked to node
     add 1 to length of linked
 end function
 
 # insert_after: insert value immediately after node in place and return the
-# new node. O(1). The caller must ensure node belongs to linked; this is not
-# checked (doing so would be O(n)). Inserting after the tail updates tail.
+# new node. O(1). Inserting after the tail updates tail.
 export function insert_after over T takes LinkedList of T linked after Node of T node with T value returns Node of T is
-    constant new_node is make Node with value value, next next of node
+    constant following is next of node
+    constant new_node is make Node with value value, next following, previous node
     change next of node to new_node
-    if next of new_node is none
+    if following is not none
+        change previous of following to new_node
+    else
         change tail of linked to new_node
     end if
     add 1 to length of linked
     return new_node
+end function
+
+# insert_before: insert value immediately before node in place and return
+# the new node. O(1). Inserting before the head updates head.
+export function insert_before over T takes LinkedList of T linked before Node of T node with T value returns Node of T is
+    constant preceding is previous of node
+    constant new_node is make Node with value value, next node, previous preceding
+    change previous of node to new_node
+    if preceding is not none
+        change next of preceding to new_node
+    else
+        change head of linked to new_node
+    end if
+    add 1 to length of linked
+    return new_node
+end function
+
+# remove_node: unlink node from the list in place. O(1). Updates head / tail
+# when node is at either end. The removed node's next and previous are reset
+# to none so it no longer reaches into the list.
+export function remove_node over T takes Node of T node from LinkedList of T linked is
+    constant preceding is previous of node
+    constant following is next of node
+    if preceding is not none
+        change next of preceding to following
+    else
+        change head of linked to following
+    end if
+    if following is not none
+        change previous of following to preceding
+    else
+        change tail of linked to preceding
+    end if
+    change next of node to none
+    change previous of node to none
+    subtract 1 from length of linked
 end function
 
 # size_of: return the cached number of elements.
@@ -124,44 +168,39 @@ end function
 
 # remove_first: remove the front node in place.
 # O(1). Runtime error if list is empty.
+# (Unlinking is inlined: v1 generic functions cannot call remove_node.)
 export function remove_first over T takes LinkedList of T linked is
-    expect length of linked is greater than 0, "cannot remove from empty linked list"
-    variable old_head is head of linked
-    if old_head is not none
-        constant next_node is next of old_head
-        change head of linked to next_node
-        if next_node is none
-            change tail of linked to none
-        end if
-        subtract 1 from length of linked
-    else
-        fail "linked list invariant broken"
+    constant first is head of linked
+    if first is none
+        fail "cannot remove from empty linked list"
     end if
+    constant following is next of first
+    change head of linked to following
+    if following is not none
+        change previous of following to none
+    else
+        change tail of linked to none
+    end if
+    change next of first to none
+    subtract 1 from length of linked
 end function
 
 # remove_last: remove the final node in place.
-# O(n). Runtime error if list is empty.
+# O(1) via the previous pointer. Runtime error if list is empty.
 export function remove_last over T takes LinkedList of T linked is
-    expect length of linked is greater than 0, "cannot remove from empty linked list"
-    if length of linked is 1
-        change head of linked to none
-        change tail of linked to none
-        change length of linked to 0
-        return
+    constant last_node is tail of linked
+    if last_node is none
+        fail "cannot remove from empty linked list"
     end if
-
-    variable cursor is head of linked
-    repeat while cursor is not none
-        constant next_node is next of cursor
-        if next_node is tail of linked
-            change next of cursor to none
-            change tail of linked to cursor
-            subtract 1 from length of linked
-            return
-        end if
-        change cursor to next_node
-    end repeat
-    fail "linked list invariant broken"
+    constant preceding is previous of last_node
+    change tail of linked to preceding
+    if preceding is not none
+        change next of preceding to none
+    else
+        change head of linked to none
+    end if
+    change previous of last_node to none
+    subtract 1 from length of linked
 end function
 
 # clear: reset list to the empty state.

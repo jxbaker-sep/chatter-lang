@@ -2471,6 +2471,7 @@ export class Compiler {
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
     const prevItType = this.currentItType;
+    const prevNarrowingStack = this.narrowingStack;
 
     this.currentTypeVarSet = new Set(typeVars);
     this.currentTypeVarBindings = new Map();
@@ -2507,10 +2508,12 @@ export class Compiler {
       this.currentFuncReturnType = rt;
       this.currentFuncName = decl.name;
       this.currentItType = null;
+      this.narrowingStack = [new Map()];  // fresh frame: no narrowings carry in
       for (const bodyStmt of decl.body) {
         this.compileStatement(bodyStmt, dummyOut, funcBindings);
       }
     } finally {
+      this.narrowingStack = prevNarrowingStack;
       this.locStack.pop();
       this.currentTypeVarSet = prevTypeVarSet;
       this.currentTypeVarBindings = prevTypeVarBindings;
@@ -2693,6 +2696,7 @@ export class Compiler {
     const prevReturnType = this.currentFuncReturnType;
     const prevFuncName = this.currentFuncName;
     const prevItType = this.currentItType;
+    const prevNarrowingStack = this.narrowingStack;
 
     this.currentTypeVarSet = new Set(genInfo.typeVars);
     this.currentTypeVarBindings = typeBindings;
@@ -2713,6 +2717,9 @@ export class Compiler {
       this.currentFuncReturnType = concreteReturnType;
       this.currentFuncName = genInfo.localName;
       this.currentItType = null;
+      // Instantiation happens mid-way through compiling a call site; the
+      // caller's narrowings must not leak into the generic body.
+      this.narrowingStack = [new Map()];
       for (const bodyStmt of genInfo.body) {
         this.compileStatement(bodyStmt, instructions, funcBindings);
       }
@@ -2730,6 +2737,7 @@ export class Compiler {
       this.currentFuncReturnType = prevReturnType;
       this.currentFuncName = prevFuncName;
       this.currentItType = prevItType;
+      this.narrowingStack = prevNarrowingStack;
     }
 
     this.functionLocals.set(instanceName, new Set(funcBindings.allMangledInFunction));

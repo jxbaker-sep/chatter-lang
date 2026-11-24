@@ -1,0 +1,25 @@
+# Narrowings must not leak into or between generic function bodies, which
+# are compiled separately (validation) and per instantiation (at the call
+# site, mid-way through compiling the caller).
+function guard over T takes optional T x returns T is
+    if x is none
+        fail "missing"
+    end if
+    return x
+end function
+
+function check over T takes optional T x returns boolean is
+    return x is not none
+end function
+
+function caller takes optional number x is
+    if x is none
+        return
+    end if
+    constant ok is the result of check x
+    say ok
+end function
+
+constant g is the result of guard 5
+say g
+caller 7
